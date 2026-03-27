@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: Linux
+          - os: windows-latest
+            name: Windows
+          - os: macos-latest
+            name: macOS
+
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.name }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -B build -S .
+          -DCMAKE_BUILD_TYPE=Release
+          -DVEDX64_STRINGS=ON
+          -DVEDX64_CODEGEN=ON
+          -DVEDX64_SEMANTICS=ON
+          -DVEDX64_EMU=ON
+          -DVEDX64_HOOK=ON
+          -DVEDX64_TESTS=ON
+          -DVEDX64_EXAMPLES=ON
+          -DVEDX64_ASSEMBLER=ON
+          -DVEDX64_IR=ON
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure

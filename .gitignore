@@ -1,0 +1,10 @@
+build/
+*.exe
+*.obj
+*.lib
+*.pdb
+*.pyd
+*.bin
+corpus.*
+comparison.txt
+CMakeUserPresets.json

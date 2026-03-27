@@ -1,0 +1,317 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Kevin Szkudlapski
+// Auto-generated — do not edit
+
+#ifdef VEDX64_ASSEMBLER
+#include "vedx64/assembler.hpp"
+#include "vedx64/core.hpp"
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+
+static int g_pass = 0, g_fail = 0;
+
+#define CHECK(cond, msg) do { if (!(cond)) { printf("FAIL: %s\n", msg); g_fail++; } else g_pass++; } while(0)
+
+static bool asm_ok(const char* text) {
+    auto bytes = vedx64::assemble(text);
+    if (!bytes || bytes->empty()) return false;
+    vedx64::DecodedInstr di;
+    auto len = vedx64::decode(bytes->data(), bytes->size(), di);
+    return len > 0 && di.length > 0;
+}
+
+static bool asm_byte(const char* text, uint8_t expected, size_t expected_len = 0) {
+    auto bytes = vedx64::assemble(text);
+    if (!bytes || bytes->empty()) return false;
+    if (expected_len > 0 && bytes->size() != expected_len) return false;
+    return (*bytes)[0] == expected;
+}
+
+int main() {
+    printf("=== Assembler Tests ===\n");
+
+    printf("  Zero-operand...\n");
+    CHECK(asm_byte("nop", 0x90, 1), "nop");
+    CHECK(asm_byte("ret", 0xC3, 1), "ret");
+    CHECK(asm_byte("int3", 0xCC, 1), "int3");
+    CHECK(asm_ok("hlt"), "hlt");
+    CHECK(asm_ok("clc"), "clc");
+    CHECK(asm_ok("stc"), "stc");
+    CHECK(asm_ok("cmc"), "cmc");
+    CHECK(asm_ok("cld"), "cld");
+    CHECK(asm_ok("std"), "std_");
+    CHECK(asm_ok("syscall"), "syscall");
+    CHECK(asm_ok("cdq"), "cdq");
+    CHECK(asm_ok("cbw"), "cbw");
+    CHECK(asm_ok("cwde"), "cwde");
+    CHECK(asm_ok("lahf"), "lahf");
+    CHECK(asm_ok("sahf"), "sahf");
+    CHECK(asm_ok("cpuid"), "cpuid");
+    CHECK(asm_ok("rdtsc"), "rdtsc");
+
+    printf("  Single register...\n");
+    CHECK(asm_byte("push rbp", 0x55, 1), "push rbp");
+    CHECK(asm_byte("push rax", 0x50, 1), "push rax");
+    CHECK(asm_ok("push r12"), "push r12");
+    CHECK(asm_ok("pop rbp"), "pop rbp");
+    CHECK(asm_ok("pop r15"), "pop r15");
+    CHECK(asm_ok("inc rax"), "inc rax");
+    CHECK(asm_ok("inc ecx"), "inc ecx");
+    CHECK(asm_ok("dec rdx"), "dec rdx");
+    CHECK(asm_ok("neg rax"), "neg rax");
+    CHECK(asm_ok("not rax"), "not rax");
+    CHECK(asm_ok("bswap eax"), "bswap eax");
+    CHECK(asm_ok("bswap rcx"), "bswap rcx");
+
+    printf("  Register-register...\n");
+    CHECK(asm_ok("mov rax, rcx"), "mov rr 64");
+    CHECK(asm_ok("mov eax, ecx"), "mov rr 32");
+    CHECK(asm_ok("mov ax, cx"), "mov rr 16");
+    CHECK(asm_ok("mov al, cl"), "mov rr 8");
+    CHECK(asm_ok("mov r8, r15"), "mov rr ext");
+    CHECK(asm_ok("add rax, rcx"), "add rr");
+    CHECK(asm_ok("sub rax, rcx"), "sub rr");
+    CHECK(asm_ok("xor eax, eax"), "xor rr");
+    CHECK(asm_ok("and rax, rdx"), "and rr");
+    CHECK(asm_ok("or rax, rdx"), "or rr");
+    CHECK(asm_ok("cmp rax, rcx"), "cmp rr");
+    CHECK(asm_ok("test rax, rcx"), "test rr");
+    CHECK(asm_ok("xchg rax, rcx"), "xchg rr");
+    CHECK(asm_ok("adc rax, rcx"), "adc rr");
+    CHECK(asm_ok("sbb rax, rcx"), "sbb rr");
+    CHECK(asm_ok("bt eax, ecx"), "bt rr");
+    CHECK(asm_ok("bts eax, ecx"), "bts rr");
+    CHECK(asm_ok("btr eax, ecx"), "btr rr");
+    CHECK(asm_ok("bsf eax, ecx"), "bsf rr");
+    CHECK(asm_ok("bsr eax, ecx"), "bsr rr");
+    CHECK(asm_ok("movzx eax, cl"), "movzx rr");
+    CHECK(asm_ok("movsx rax, ecx"), "movsx rr");
+    CHECK(asm_ok("cmovb eax, ecx"), "cmovb rr");
+    CHECK(asm_ok("cmovl eax, ecx"), "cmovl rr");
+
+    printf("  Register-immediate...\n");
+    CHECK(asm_ok("mov rax, 0x1234567890"), "mov ri 64");
+    CHECK(asm_ok("mov eax, 42"), "mov ri 32");
+    CHECK(asm_ok("mov ax, 0x1234"), "mov ri 16");
+    CHECK(asm_ok("mov al, 0xFF"), "mov ri 8");
+    CHECK(asm_ok("add rax, 42"), "add ri");
+    CHECK(asm_ok("sub rsp, 0x20"), "sub ri");
+    CHECK(asm_ok("xor eax, 0xFF"), "xor ri");
+    CHECK(asm_ok("and eax, 0x0F"), "and ri");
+    CHECK(asm_ok("or eax, 0x80"), "or ri");
+    CHECK(asm_ok("cmp rax, 0"), "cmp ri");
+    CHECK(asm_ok("test eax, 0xFF"), "test ri");
+    CHECK(asm_ok("shl eax, 4"), "shl ri");
+    CHECK(asm_ok("shr rax, 1"), "shr ri");
+    CHECK(asm_ok("sar rax, 8"), "sar ri");
+    CHECK(asm_ok("rol eax, 3"), "rol ri");
+    CHECK(asm_ok("ror eax, 5"), "ror ri");
+
+    printf("  Memory operands...\n");
+    CHECK(asm_ok("mov rax, [rbx]"), "mov rm base");
+    CHECK(asm_ok("mov rax, [rbx+8]"), "mov rm base+disp");
+    CHECK(asm_ok("mov rax, [rbx-8]"), "mov rm base-disp");
+    CHECK(asm_ok("mov rax, [rbx+rcx*4]"), "mov rm sib");
+    CHECK(asm_ok("mov rax, [rbx+rcx*4+16]"), "mov rm sib+disp");
+    CHECK(asm_ok("mov rax, [rbx+rcx*8]"), "mov rm scale8");
+    CHECK(asm_ok("mov rax, [rbx+rcx*2+0x100]"), "mov rm scale2+bigdisp");
+    CHECK(asm_ok("mov eax, [rsp]"), "mov rm rsp");
+    CHECK(asm_ok("mov eax, [rsp+4]"), "mov rm rsp+disp");
+    CHECK(asm_ok("mov rax, [rbp+0]"), "mov rm rbp+0");
+    CHECK(asm_ok("add rax, [rbx]"), "add rm");
+    CHECK(asm_ok("sub rax, [rcx+8]"), "sub rm");
+    CHECK(asm_ok("cmp rax, [rdx]"), "cmp rm");
+    CHECK(asm_ok("xor eax, [rsi]"), "xor rm");
+    CHECK(asm_ok("and rax, [rdi+rcx*2]"), "and rm sib");
+    CHECK(asm_ok("or eax, [rbx+16]"), "or rm disp");
+    CHECK(asm_ok("lea rax, [rbx+rcx*4+8]"), "lea rm sib+disp");
+    CHECK(asm_ok("lea rax, [rsp+0x20]"), "lea rm rsp+disp");
+    CHECK(asm_ok("mov [rax], rcx"), "mov mr base");
+    CHECK(asm_ok("mov [rax+8], rcx"), "mov mr base+disp");
+    CHECK(asm_ok("mov [rax+rcx*4], rdx"), "mov mr sib");
+    CHECK(asm_ok("mov [rsp], rax"), "mov mr rsp");
+    CHECK(asm_ok("mov [rsp+8], rbp"), "mov mr rsp+disp");
+    CHECK(asm_ok("add [rbx], rax"), "add mr");
+    CHECK(asm_ok("sub [rcx+16], rdx"), "sub mr");
+    CHECK(asm_ok("xor [rdi], rsi"), "xor mr");
+    CHECK(asm_ok("add dword [rax], 42"), "add mi dword");
+    CHECK(asm_ok("sub qword [rbx], 1"), "sub mi qword");
+    CHECK(asm_ok("cmp dword [rsp+8], 0"), "cmp mi rsp+disp");
+    CHECK(asm_ok("and dword [rax], 0xFF"), "and mi");
+    CHECK(asm_ok("or dword [rcx+4], 0x80"), "or mi");
+    CHECK(asm_ok("mov dword [rax], 100"), "mov mi dword");
+    CHECK(asm_ok("mov qword [rbx+8], 0"), "mov mi qword");
+    CHECK(asm_ok("mov byte [rax], 0x41"), "mov mi byte");
+    CHECK(asm_ok("mov word [rax], 0x1234"), "mov mi word");
+    CHECK(asm_ok("add byte [rax], 1"), "add mi byte");
+    CHECK(asm_ok("add word [rbx], 100"), "add mi word");
+    CHECK(asm_ok("cmp byte [rcx], 0"), "cmp mi byte");
+
+    printf("  XMM register-register...\n");
+    CHECK(asm_ok("movaps xmm0, xmm1"), "movaps xx");
+    CHECK(asm_ok("movups xmm2, xmm3"), "movups xx");
+    CHECK(asm_ok("addps xmm0, xmm1"), "addps xx");
+    CHECK(asm_ok("subps xmm0, xmm1"), "subps xx");
+    CHECK(asm_ok("mulps xmm0, xmm1"), "mulps xx");
+    CHECK(asm_ok("divps xmm0, xmm1"), "divps xx");
+    CHECK(asm_ok("addpd xmm0, xmm1"), "addpd xx");
+    CHECK(asm_ok("subpd xmm0, xmm1"), "subpd xx");
+    CHECK(asm_ok("mulpd xmm0, xmm1"), "mulpd xx");
+    CHECK(asm_ok("divpd xmm0, xmm1"), "divpd xx");
+    CHECK(asm_ok("addss xmm0, xmm1"), "addss xx");
+    CHECK(asm_ok("subss xmm0, xmm1"), "subss xx");
+    CHECK(asm_ok("mulss xmm0, xmm1"), "mulss xx");
+    CHECK(asm_ok("divss xmm0, xmm1"), "divss xx");
+    CHECK(asm_ok("addsd xmm0, xmm1"), "addsd xx");
+    CHECK(asm_ok("subsd xmm0, xmm1"), "subsd xx");
+    CHECK(asm_ok("xorps xmm0, xmm1"), "xorps xx");
+    CHECK(asm_ok("xorpd xmm0, xmm1"), "xorpd xx");
+    CHECK(asm_ok("andps xmm0, xmm1"), "andps xx");
+    CHECK(asm_ok("andpd xmm0, xmm1"), "andpd xx");
+    CHECK(asm_ok("orps xmm0, xmm1"), "orps xx");
+    CHECK(asm_ok("orpd xmm0, xmm1"), "orpd xx");
+    CHECK(asm_ok("movapd xmm4, xmm5"), "movapd xx");
+    CHECK(asm_ok("movdqa xmm6, xmm7"), "movdqa xx");
+    CHECK(asm_ok("movdqu xmm8, xmm9"), "movdqu xx");
+    CHECK(asm_ok("paddb xmm0, xmm1"), "paddb xx");
+    CHECK(asm_ok("paddw xmm0, xmm1"), "paddw xx");
+    CHECK(asm_ok("paddd xmm0, xmm1"), "paddd xx");
+    CHECK(asm_ok("paddq xmm0, xmm1"), "paddq xx");
+    CHECK(asm_ok("psubb xmm0, xmm1"), "psubb xx");
+    CHECK(asm_ok("psubw xmm0, xmm1"), "psubw xx");
+    CHECK(asm_ok("psubd xmm0, xmm1"), "psubd xx");
+    CHECK(asm_ok("pxor xmm0, xmm1"), "pxor xx");
+    CHECK(asm_ok("pand xmm0, xmm1"), "pand xx");
+    CHECK(asm_ok("por xmm0, xmm1"), "por xx");
+    CHECK(asm_ok("pcmpeqb xmm0, xmm1"), "pcmpeqb xx");
+    CHECK(asm_ok("pcmpeqd xmm0, xmm1"), "pcmpeqd xx");
+    CHECK(asm_ok("pmullw xmm0, xmm1"), "pmullw xx");
+    CHECK(asm_ok("sqrtps xmm0, xmm1"), "sqrtps xx");
+    CHECK(asm_ok("sqrtpd xmm0, xmm1"), "sqrtpd xx");
+    CHECK(asm_ok("sqrtss xmm0, xmm1"), "sqrtss xx");
+    CHECK(asm_ok("sqrtsd xmm0, xmm1"), "sqrtsd xx");
+    CHECK(asm_ok("minps xmm0, xmm1"), "minps xx");
+    CHECK(asm_ok("maxps xmm0, xmm1"), "maxps xx");
+    CHECK(asm_ok("minpd xmm0, xmm1"), "minpd xx");
+    CHECK(asm_ok("maxpd xmm0, xmm1"), "maxpd xx");
+
+    printf("  XMM with memory...\n");
+    CHECK(asm_ok("movaps xmm0, [rax]"), "movaps xm");
+    CHECK(asm_ok("movups xmm0, [rbx+16]"), "movups xm");
+    CHECK(asm_ok("addps xmm0, [rcx]"), "addps xm");
+    CHECK(asm_ok("subpd xmm1, [rdx+8]"), "subpd xm");
+    CHECK(asm_ok("mulss xmm0, [rax]"), "mulss xm");
+    CHECK(asm_ok("divsd xmm0, [rbx]"), "divsd xm");
+    CHECK(asm_ok("movdqa xmm0, [rsp]"), "movdqa xm");
+    CHECK(asm_ok("movdqu xmm0, [rsp+0x10]"), "movdqu xm");
+    CHECK(asm_ok("movaps [rax], xmm0"), "movaps mx");
+    CHECK(asm_ok("movups [rbx+16], xmm1"), "movups mx");
+    CHECK(asm_ok("movdqa [rsp], xmm0"), "movdqa mx");
+    CHECK(asm_ok("movdqu [rcx+8], xmm2"), "movdqu mx");
+
+    printf("  XMM 3-operand...\n");
+    CHECK(asm_ok("shufps xmm0, xmm1, 0"), "shufps xxi");
+    CHECK(asm_ok("cmpps xmm0, xmm1, 0"), "cmpps xxi");
+    CHECK(asm_ok("pslld xmm0, 4"), "pslld xi");
+    CHECK(asm_ok("psrld xmm0, 4"), "psrld xi");
+    CHECK(asm_ok("psllq xmm0, 1"), "psllq xi");
+
+    printf("  3-operand GPR...\n");
+    CHECK(asm_ok("imul eax, ecx, 42"), "imul rri");
+    CHECK(asm_ok("imul rax, rcx, 100"), "imul rri 64");
+    CHECK(asm_ok("shld eax, ecx, 4"), "shld rri");
+    CHECK(asm_ok("shrd eax, ecx, 4"), "shrd rri");
+
+    printf("  Register sizes...\n");
+    CHECK(asm_ok("add al, 1"), "add ri 8");
+    CHECK(asm_ok("add ax, 1"), "add ri 16");
+    CHECK(asm_ok("add eax, 1"), "add ri 32");
+    CHECK(asm_ok("add rax, 1"), "add ri 64");
+    CHECK(asm_ok("mov r8, r9"), "mov rr ext64");
+    CHECK(asm_ok("mov r8d, r9d"), "mov rr ext32");
+    CHECK(asm_ok("mov r8w, r9w"), "mov rr ext16");
+    CHECK(asm_ok("mov r8b, r9b"), "mov rr ext8");
+    CHECK(asm_ok("xor r12d, r12d"), "xor r12d");
+    CHECK(asm_ok("add r13, 0x100"), "add r13 imm");
+
+    printf("  Cross-type GPR/XMM...\n");
+    CHECK(asm_ok("movd xmm0, eax"), "movd xr");
+    CHECK(asm_ok("cvtsi2ss xmm0, eax"), "cvtsi2ss xr");
+    CHECK(asm_ok("cvtsi2sd xmm0, eax"), "cvtsi2sd xr");
+    CHECK(asm_ok("cvttss2si eax, xmm0"), "cvttss2si rx");
+    CHECK(asm_ok("cvttsd2si eax, xmm0"), "cvttsd2si rx");
+
+    printf("  Miscellaneous...\n");
+    CHECK(asm_ok("xchg eax, ecx"), "xchg");
+    CHECK(asm_ok("cmpxchg [rax], rcx"), "cmpxchg mr");
+    CHECK(asm_ok("xadd [rax], rcx"), "xadd mr");
+    CHECK(asm_ok("movnti [rax], ecx"), "movnti mr");
+    CHECK(asm_ok("lfence"), "lfence");
+    CHECK(asm_ok("sfence"), "sfence");
+    CHECK(asm_ok("mfence"), "mfence");
+    CHECK(asm_ok("pause"), "pause");
+    CHECK(asm_ok("rdmsr"), "rdmsr");
+    CHECK(asm_ok("wrmsr"), "wrmsr");
+
+    printf("  Error cases...\n");
+    CHECK(!vedx64::assemble("foobar").has_value(), "invalid mnem");
+    CHECK(!vedx64::assemble("").has_value(), "empty string");
+    CHECK(!vedx64::assemble("mov").has_value(), "mov no operands");
+    CHECK(!vedx64::assemble("mov rax").has_value(), "mov one operand");
+
+    printf("  Block assembly...\n");
+    auto block = vedx64::assemble_block("push rbp\nmov rbp, rsp\nsub rsp, 0x20\nnop\nadd rsp, 0x20\npop rbp\nret");
+    CHECK(block.has_value(), "block assembles");
+    CHECK(block->size() >= 7, "block has enough bytes");
+
+    auto block2 = vedx64::assemble_block("push rbp; mov rbp, rsp # setup\nnop\nret");
+    CHECK(block2.has_value(), "block with semicolons+comments");
+
+    auto bad_block = vedx64::assemble_block("push rbp\nfoobar\nret");
+    CHECK(!bad_block.has_value(), "block with invalid fails");
+
+    printf("  Mass roundtrip...\n");
+    const char* roundtrip_tests[] = {
+        // Zero-operand
+        "nop", "ret", "int3", "hlt", "clc", "stc", "cld",
+        // Single register
+        "push rbp", "push rax", "push r12", "pop rbp", "pop r15",
+        "inc rax", "inc ecx", "dec rdx", "neg rax", "not rax",
+        // Register-register
+        "mov rax, rcx", "mov eax, ecx", "mov r8, r15",
+        "add rax, rcx", "sub rax, rcx", "xor eax, eax",
+        "and rax, rdx", "or rax, rdx", "cmp rax, rcx",
+        "test rax, rcx", "xchg rax, rcx",
+        // Register-immediate
+        "mov eax, 42", "add rax, 42", "sub rsp, 0x20",
+        "xor eax, 0xFF", "and eax, 0x0F", "cmp rax, 0",
+        // Memory
+        "mov rax, [rbx]", "mov [rax], rcx", "mov rax, [rbx+8]",
+        "mov rax, [rbx+rcx*4]", "mov rax, [rbx+rcx*4+16]",
+        "mov rax, [rbp-8]", "add rax, [rbx]", "cmp rax, [rdx]",
+        "lea rax, [rbx+rcx*4+8]",
+        // XMM
+        "movaps xmm0, xmm1", "addps xmm0, xmm1", "xorps xmm0, xmm0",
+        "movaps xmm0, [rax]", "movaps [rax], xmm0",
+        // Cross-type
+        "movd xmm0, eax",
+    };
+    int rt_pass = 0, rt_total = 0;
+    for (auto text : roundtrip_tests) {
+        rt_total++;
+        if (asm_ok(text)) rt_pass++;
+        else printf("    roundtrip FAIL: %s\n", text);
+    }
+    printf("    Roundtrip: %d/%d\n", rt_pass, rt_total);
+    CHECK(rt_pass == rt_total, "all roundtrips pass");
+
+    printf("\n  Results: %d passed, %d failed\n", g_pass, g_fail);
+    if (g_fail > 0) { printf("ASSEMBLER TESTS FAILED\n"); return 1; }
+    printf("All assembler tests passed!\n");
+    return 0;
+}
+#else
+#include <cstdio>
+int main() { printf("VEDX64_ASSEMBLER not enabled, skipping.\n"); return 0; }
+#endif

@@ -1,0 +1,16 @@
+[package]
+name = "vedx64"
+version = "0.1.0"
+edition = "2021"
+description = "Rust bindings for the vedx64 x86-64 instruction library"
+license = "MIT"
+
+[lib]
+name = "vedx64"
+path = "src/lib.rs"
+
+[dependencies]
+cxx = "1"
+
+[build-dependencies]
+cxx-build = "1"
