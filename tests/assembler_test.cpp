@@ -254,6 +254,40 @@ int main() {
     CHECK(asm_ok("rdmsr"), "rdmsr");
     CHECK(asm_ok("wrmsr"), "wrmsr");
 
+    printf("  Aliases...\n");
+    CHECK(asm_ok("cmova eax, ecx"), "cmova");
+    CHECK(asm_ok("cmovae eax, ecx"), "cmovae");
+    CHECK(asm_ok("cmove eax, ecx"), "cmove");
+    CHECK(asm_ok("cmovne eax, ecx"), "cmovne");
+    CHECK(asm_ok("cmovg eax, ecx"), "cmovg");
+    CHECK(asm_ok("cmovge eax, ecx"), "cmovge");
+    CHECK(asm_ok("cmovc eax, ecx"), "cmovc");
+    CHECK(asm_ok("cmovnc eax, ecx"), "cmovnc");
+    CHECK(asm_ok("cqo"), "cqo alias");
+    CHECK(asm_ok("cdqe"), "cdqe alias");
+
+    printf("  Relative jumps/calls...\n");
+    CHECK(asm_ok("jmp 0x10"), "jmp rel");
+    CHECK(asm_ok("call 0x100"), "call rel");
+    CHECK(asm_ok("je 0x20"), "je rel");
+    CHECK(asm_ok("jne 0x30"), "jne rel");
+    CHECK(asm_ok("jz 0x10"), "jz rel");
+    CHECK(asm_ok("jnz 0x10"), "jnz rel");
+    CHECK(asm_ok("jb 0x10"), "jb rel");
+    CHECK(asm_ok("jnb 0x10"), "jnb rel");
+    CHECK(asm_ok("jl 0x10"), "jl rel");
+    CHECK(asm_ok("jle 0x10"), "jle rel");
+    CHECK(asm_ok("ja 0x10"), "ja rel");
+    CHECK(asm_ok("jg 0x10"), "jg rel");
+    CHECK(asm_ok("jo 0x10"), "jo rel");
+    CHECK(asm_ok("jno 0x10"), "jno rel");
+    CHECK(asm_ok("js 0x10"), "js rel");
+    CHECK(asm_ok("jns 0x10"), "jns rel");
+    CHECK(asm_ok("call [rax]"), "call mem");
+    CHECK(asm_ok("call [rax+8]"), "call mem+disp");
+    CHECK(asm_ok("jmp [rax]"), "jmp mem");
+    CHECK(asm_ok("jmp [rbx+rcx*8]"), "jmp mem sib");
+
     printf("  Error cases...\n");
     CHECK(!vedx64::assemble("foobar").has_value(), "invalid mnem");
     CHECK(!vedx64::assemble("").has_value(), "empty string");
@@ -296,6 +330,11 @@ int main() {
         "movaps xmm0, [rax]", "movaps [rax], xmm0",
         // Cross-type
         "movd xmm0, eax",
+        // Aliases
+        "cmova eax, ecx", "cmove eax, ecx", "cmovne eax, ecx",
+        // Jumps/calls
+        "jmp 0x10", "call 0x100", "je 0x20", "jne 0x30",
+        "call [rax]", "jmp [rax]",
     };
     int rt_pass = 0, rt_total = 0;
     for (auto text : roundtrip_tests) {

@@ -2646,10 +2646,87 @@ std::optional<std::vector<uint8_t>> assemble(const std::string& text) {
 
     CodeGen gen;
 
-    // Aliases
-    if (mnem == "ret" && n == 0) { gen.ret(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
-    if (mnem == "int3" && n == 0) { gen.int3(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
-    if (mnem == "nop" && n == 0) { gen.nop(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+    // Aliases (zero-operand)
+    if (n == 0) {
+        if (mnem == "ret") { gen.ret(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "int3") { gen.int3(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "nop") { gen.nop(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "cqo") { gen.cqo(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "cdqe") { gen.cdqe(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "pushfq") { gen.pushfq(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "popfq") { gen.popfq(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+    }
+
+    // Mnemonic aliases
+    std::string resolved = mnem;
+    if (mnem == "cmova") resolved = "cmovnbe";
+    if (mnem == "cmovae") resolved = "cmovnb";
+    if (mnem == "cmove") resolved = "cmovz";
+    if (mnem == "cmovne") resolved = "cmovnz";
+    if (mnem == "cmovg") resolved = "cmovnle";
+    if (mnem == "cmovge") resolved = "cmovnl";
+    if (mnem == "cmovna") resolved = "cmovbe";
+    if (mnem == "cmovnae") resolved = "cmovb";
+    if (mnem == "cmovng") resolved = "cmovle";
+    if (mnem == "cmovnge") resolved = "cmovl";
+    if (mnem == "cmovc") resolved = "cmovb";
+    if (mnem == "cmovnc") resolved = "cmovnb";
+    if (mnem == "ja") resolved = "jnbe";
+    if (mnem == "jae") resolved = "jnb";
+    if (mnem == "je") resolved = "jz";
+    if (mnem == "jne") resolved = "jnz";
+    if (mnem == "jg") resolved = "jnle";
+    if (mnem == "jge") resolved = "jnl";
+    if (mnem == "jna") resolved = "jbe";
+    if (mnem == "jnae") resolved = "jb";
+    if (mnem == "jng") resolved = "jle";
+    if (mnem == "jnge") resolved = "jl";
+    if (mnem == "jc") resolved = "jb";
+    if (mnem == "jnc") resolved = "jnb";
+    if (mnem == "seta") resolved = "setnbe";
+    if (mnem == "setae") resolved = "setnb";
+    if (mnem == "sete") resolved = "setz";
+    if (mnem == "setne") resolved = "setnz";
+    if (mnem == "setg") resolved = "setnle";
+    if (mnem == "setge") resolved = "setnl";
+    if (mnem == "setna") resolved = "setbe";
+    if (mnem == "setnae") resolved = "setb";
+    if (mnem == "setng") resolved = "setle";
+    if (mnem == "setnge") resolved = "setl";
+    if (mnem == "setc") resolved = "setb";
+    if (mnem == "setnc") resolved = "setnb";
+    if (mnem == "retn") resolved = "retn";
+    if (mnem == "retf") resolved = "retf";
+    mnem = resolved;
+
+    // Relative jumps with immediate offset
+    if (n == 1 && ops[0].kind == OpKind::Imm) {
+        int32_t rel = (int32_t)ops[0].imm;
+        if (mnem == "jmp") { gen.db(0xE9); gen.dd((uint32_t)rel); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "call") { gen.db(0xE8); gen.dd((uint32_t)rel); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "jo") { gen.db(0x0F); gen.db(0x80); gen.dd((uint32_t)rel); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "jno") { gen.db(0x0F); gen.db(0x81); gen.dd((uint32_t)rel); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "jb") { gen.db(0x0F); gen.db(0x82); gen.dd((uint32_t)rel); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "jnb") { gen.db(0x0F); gen.db(0x83); gen.dd((uint32_t)rel); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "jz") { gen.db(0x0F); gen.db(0x84); gen.dd((uint32_t)rel); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "jnz") { gen.db(0x0F); gen.db(0x85); gen.dd((uint32_t)rel); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "jbe") { gen.db(0x0F); gen.db(0x86); gen.dd((uint32_t)rel); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "jnbe") { gen.db(0x0F); gen.db(0x87); gen.dd((uint32_t)rel); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "js") { gen.db(0x0F); gen.db(0x88); gen.dd((uint32_t)rel); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "jns") { gen.db(0x0F); gen.db(0x89); gen.dd((uint32_t)rel); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "jp") { gen.db(0x0F); gen.db(0x8A); gen.dd((uint32_t)rel); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "jnp") { gen.db(0x0F); gen.db(0x8B); gen.dd((uint32_t)rel); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "jl") { gen.db(0x0F); gen.db(0x8C); gen.dd((uint32_t)rel); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "jnl") { gen.db(0x0F); gen.db(0x8D); gen.dd((uint32_t)rel); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "jle") { gen.db(0x0F); gen.db(0x8E); gen.dd((uint32_t)rel); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "jnle") { gen.db(0x0F); gen.db(0x8F); gen.dd((uint32_t)rel); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+    }
+
+    // call/jmp with memory
+    if (n == 1 && ops[0].kind == OpKind::Mem) {
+        if (mnem == "call") { gen.call(ops[0].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "jmp") { gen.jmp(ops[0].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+    }
 
     if (mnem.empty()) return std::nullopt;
     std::optional<std::vector<uint8_t>> result;
