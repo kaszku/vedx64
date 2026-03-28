@@ -213,7 +213,7 @@ bool parse_mem(const std::string& s, Mem& out) {
             Reg idx;
             if (!parse_gpr(rname, idx)) return false;
             int64_t sc; if (!parse_imm(sstr, sc)) return false;
-            out.index = idx; out.scale = (uint8_t)sc; has_index = true;
+            out.index = idx; out.has_index = true; out.scale = (uint8_t)sc; has_index = true;
             continue;
         }
         // Check for rip
@@ -227,9 +227,9 @@ bool parse_mem(const std::string& s, Mem& out) {
         if (!clean.empty() && clean[0] == '-') clean = clean.substr(1);
         if (parse_gpr(clean, r)) {
             if (!has_base) {
-                out.base = r; has_base = true;
+                out.base = r; out.has_base = true; has_base = true;
             } else if (!has_index) {
-                out.index = r; out.scale = 1; has_index = true;
+                out.index = r; out.has_index = true; out.scale = 1; has_index = true;
             } else return false;
             continue;
         }

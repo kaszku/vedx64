@@ -14,15 +14,21 @@ add_library(vedx64_core STATIC
     ../lib/core/encode.cpp
     ../lib/core/disasm.cpp
     ../lib/semantics/semantics.cpp
+    ../lib/assembler/assembler.cpp
 )
 target_include_directories(vedx64_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../include)
-target_compile_definitions(vedx64_core PUBLIC VEDX64_STRINGS)
+target_compile_definitions(vedx64_core PUBLIC VEDX64_STRINGS VEDX64_CODEGEN VEDX64_ASSEMBLER)
 
 add_executable(vedx64_instrgen instrgen.cpp)
 target_link_libraries(vedx64_instrgen PRIVATE vedx64_core)
 
 add_executable(vedx64_disasm disasm.cpp)
 target_link_libraries(vedx64_disasm PRIVATE vedx64_core)
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/asm.cpp)
+    add_executable(vedx64_asm asm.cpp)
+    target_link_libraries(vedx64_asm PRIVATE vedx64_core)
+endif()
 
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/bench.cpp)
     add_executable(vedx64_bench bench.cpp)
