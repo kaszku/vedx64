@@ -21,7 +21,7 @@ and language bindings for Python and Rust.
 | **Emulator** | Execute instructions on a virtual `CpuState` with GPRs, RFLAGS, XMM/YMM/ZMM, x87 FPU, and byte-addressable memory. 638 mnemonic handlers |
 | **IR Lifter** | Lift instructions to a flat SSA-style intermediate representation with 47 IR opcodes. 831 mnemonic handlers covering ALU, SSE/AVX, BMI, AES-NI, SHA, x87, and system instructions |
 | **Assembler DSL** | Chainable `CodeGen` class: `e.mov(rax, 42).add(rax, rcx).ret();` with label support |
-| **Text Assembler** | Assemble Intel-syntax text to machine code bytes |
+| **Text Assembler** | Assemble Intel-syntax text to machine code: 585 mnemonics, memory operands, labels, prefixes, segment overrides, data directives |
 | **Semantics** | Per-instruction classification: flag reads/writes, operand access, flow type, category, privilege level |
 | **Inline Hooking** | Handle-based API to install, enable, disable, and remove function hooks with trampoline generation (Windows + Linux) |
 | **Relocation** | Relocate RIP-relative, branch, and call instructions to new addresses. Stolen-byte calculation for hook trampolines |
@@ -38,11 +38,13 @@ and language bindings for Python and Rust.
 |--------|-------|
 | Instruction encodings | 1,396 |
 | Unique mnemonics | 1,091 |
-| Test corpus variants | 1,896 (100% roundtrip) |
+| Test corpus variants | 2,244 (100% roundtrip) |
 | Decode coverage | 100% |
+| Assembler DSL methods | 1,580 |
+| Text assembler mnemonics | 585 |
 | IR lifter handlers | 831 mnemonics |
 | Emulator handlers | 638 mnemonics |
-| Test suites | 12 (400+ assertions) |
+| Test suites | 12 (1,200+ assertions) |
 
 ## Quick Start
 
