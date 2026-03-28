@@ -21,7 +21,7 @@ and language bindings for Python and Rust.
 | **Emulator** | Execute instructions on a virtual `CpuState` with GPRs, RFLAGS, XMM/YMM/ZMM, x87 FPU, and byte-addressable memory. 638 mnemonic handlers |
 | **IR Lifter** | Lift instructions to a flat SSA-style intermediate representation with 47 IR opcodes. 831 mnemonic handlers covering ALU, SSE/AVX, BMI, AES-NI, SHA, x87, and system instructions |
 | **Assembler DSL** | Chainable `CodeGen` class: `e.mov(rax, 42).add(rax, rcx).ret();` with label support |
-| **Text Assembler** | Assemble Intel-syntax text to machine code: 585 mnemonics, memory operands, labels, prefixes, segment overrides, data directives |
+| **Text Assembler** | Assemble Intel-syntax text to machine code: 585 mnemonics, memory/SIB, labels, prefixes, segments, XMM/ZMM/MMX, AVX-512 masking, directives (db/dw/dd/dq/times/align/equ), error reporting |
 | **Semantics** | Per-instruction classification: flag reads/writes, operand access, flow type, category, privilege level |
 | **Inline Hooking** | Handle-based API to install, enable, disable, and remove function hooks with trampoline generation (Windows + Linux) |
 | **Relocation** | Relocate RIP-relative, branch, and call instructions to new addresses. Stolen-byte calculation for hook trampolines |
@@ -161,8 +161,8 @@ if (sem) {
 
 ## Text Assembler
 
-Assemble x86-64 from Intel syntax text. 585 mnemonics with memory operands,
-labels, prefixes, segment overrides, and data directives.
+Assemble x86-64 from Intel-syntax text. 585 mnemonics with full addressing
+modes, XMM/ZMM/MMX registers, AVX-512 masking, labels, prefixes, and directives.
 
 ```cpp
 #include <vedx64/assembler.hpp>
@@ -183,13 +183,40 @@ done:
     ret
 )");
 
-// Features: memory, segments, prefixes, data
-assemble("mov rax, fs:[rbx+8]");     // segment override
-assemble("lock add [rax], rcx");      // lock prefix
-assemble("rep movsb");                 // rep prefix
-assemble("lea rax, [rip+0x1000]");     // RIP-relative
-assemble("db 0x90, 0x90");             // raw bytes
-assemble("dd 0xDEADBEEF");             // 32-bit data
+// Memory, segments, prefixes
+assemble("mov rax, fs:[rbx+8]");       // segment override
+assemble("lock add [rax], rcx");        // lock prefix
+assemble("rep movsb");                   // rep prefix
+assemble("lea rax, [rip+0x1000]");       // RIP-relative
+
+// SIMD registers
+assemble("movaps xmm0, [rax]");         // XMM + memory
+assemble("movq mm0, mm1");              // MMX
+assemble("vpxord zmm0 {k1} {z}, zmm1, zmm2"); // AVX-512 masked
+
+// Directives
+assemble("db 0x90, 0x90");              // raw bytes
+assemble("dd 0xDEADBEEF");              // 32-bit data
+assemble("times 16 nop");               // repeat
+
+// Error reporting
+std::string err;
+assemble("mov rax", err);  // err = "unsupported operand combination for: mov"
+```
+
+Block assembly supports labels, `equ` constants, `align`, and comments:
+
+```cpp
+auto code = vedx64::assemble_block(R"(
+    size equ 0x20
+    push rbp
+    mov rbp, rsp
+    sub rsp, size        ; use equ constant
+    align 16
+loop:
+    nop
+    jmp loop             ; backward label
+)");
 ```
 
 ## API Reference
@@ -203,7 +230,7 @@ assemble("dd 0xDEADBEEF");             // 32-bit data
 | `vedx64/instruction.hpp` | `Instruction` high-level wrapper with `from_decoded()`, `decode_instruction()`, typed operand vector |
 | `vedx64/encoding_id.hpp` | `EncodingId` typed enum (1396 unique encodings) |
 | `vedx64/codegen.hpp` | `CodeGen` assembler DSL with `Reg`, `Xmm`, `Mem` operand types and label support |
-| `vedx64/assembler.hpp` | `assemble()`, `assemble_block()` — text-to-bytes with 585 mnemonics, memory, labels, prefixes, data directives |
+| `vedx64/assembler.hpp` | `assemble()`, `assemble_block()` — 585 mnemonics, memory/SIB, labels, XMM/ZMM/MMX, AVX-512 `{k}{z}`, directives, error reporting |
 | `vedx64/semantics.hpp` | `Semantics` struct, `get_semantics()`, flag/flow/category analysis, `is_branch()`, `is_call()`, `is_return()` |
 | `vedx64/ir.hpp` | `ir::Opcode` (47 opcodes), `VarNode` (GPR/XMM/Temp/RAM/Const), `Op`, `Lifted`, `lift()`, `execute()` |
 | `vedx64/emu.hpp` | `CpuState` (GPR, RFLAGS, XMM/YMM, x87, memory), `emu_init()`, `emu_step()`, `emu_run()`, `StepResult` |
@@ -332,7 +359,7 @@ tests/                Test executables (12 suites)
 examples/             Example programs (10 examples)
 python/               Python nanobind binding
 rust/                 Rust cxx binding crate
-tools/                instrgen corpus generator, standalone disassembler
+tools/                instrgen corpus generator, standalone disassembler, standalone assembler
 ```
 
 ## License
