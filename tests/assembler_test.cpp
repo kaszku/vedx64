@@ -354,6 +354,40 @@ int main() {
     auto bad_block = vedx64::assemble_block("push rbp\nfoobar\nret");
     CHECK(!bad_block.has_value(), "block with invalid fails");
 
+    printf("  Labels...\n");
+    auto lbl1 = vedx64::assemble_block("jmp end\nnop\nnop\nend:\nret");
+    CHECK(lbl1.has_value(), "forward jump label");
+    if (lbl1.has_value()) {
+        // jmp rel32 (5 bytes) + nop + nop + ret = 8 bytes
+        CHECK(lbl1->size() == 8, "forward jump size");
+        CHECK((*lbl1)[0] == 0xE9, "forward jump opcode");
+        // rel32 should be 2 (skip 2 nops)
+        int32_t rel1 = *(int32_t*)(lbl1->data() + 1);
+        CHECK(rel1 == 2, "forward jump offset is 2");
+    }
+
+    auto lbl2 = vedx64::assemble_block("loop:\nnop\njmp loop");
+    CHECK(lbl2.has_value(), "backward jump label");
+    if (lbl2.has_value()) {
+        // nop (1) + jmp rel32 (5) = 6 bytes
+        CHECK(lbl2->size() == 6, "backward jump size");
+        int32_t rel2 = *(int32_t*)(lbl2->data() + 2);
+        // rel = 0 - (1 + 5) = -6
+        CHECK(rel2 == -6, "backward jump offset is -6");
+    }
+
+    auto lbl3 = vedx64::assemble_block("cmp eax, 0\nje done\nadd eax, 1\ndone:\nret");
+    CHECK(lbl3.has_value(), "conditional jump label");
+
+    auto lbl4 = vedx64::assemble_block("start: nop\njmp start");
+    CHECK(lbl4.has_value(), "label on same line");
+
+    auto lbl5 = vedx64::assemble_block("jmp skip\nfail: int3\nskip:\nret");
+    CHECK(lbl5.has_value(), "multiple labels");
+
+    auto lbl6 = vedx64::assemble_block("call func\nret\nfunc:\nnop\nret");
+    CHECK(lbl6.has_value(), "call label");
+
     printf("  Mass roundtrip...\n");
     const char* roundtrip_tests[] = {
         // Zero-operand

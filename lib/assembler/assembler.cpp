@@ -9,6 +9,7 @@
 #include <sstream>
 #include <cstring>
 #include <cstdlib>
+#include <unordered_map>
 
 namespace vedx64 {
 
@@ -3225,25 +3226,118 @@ std::optional<std::vector<uint8_t>> assemble(const std::string& text) {
     return std::nullopt;
 }
 
-std::optional<std::vector<uint8_t>> assemble_block(const std::string& text) {
-    std::vector<uint8_t> result;
+namespace {
+struct Stmt { std::string text; bool is_label; std::string label_name; };
+std::vector<Stmt> parse_stmts(const std::string& text) {
+    std::vector<Stmt> stmts;
     std::istringstream stream(text);
     std::string line;
     while (std::getline(stream, line)) {
         std::istringstream semi(line);
         std::string part;
         while (std::getline(semi, part, ';')) {
-            std::string trimmed = trim(part);
-            if (trimmed.empty()) continue;
-            size_t comment = trimmed.find('#');
-            if (comment == std::string::npos) comment = trimmed.find("//");
-            if (comment != std::string::npos) trimmed = trim(trimmed.substr(0, comment));
-            if (trimmed.empty()) continue;
-            auto bytes = assemble(trimmed);
+            std::string t = trim(part);
+            if (t.empty()) continue;
+            size_t c = t.find('#');
+            if (c == std::string::npos) c = t.find("//");
+            if (c != std::string::npos) t = trim(t.substr(0, c));
+            if (t.empty()) continue;
+            if (t.back() == ':') {
+                std::string name = trim(t.substr(0, t.size() - 1));
+                if (!name.empty()) { stmts.push_back({t, true, to_lower(name)}); continue; }
+            }
+            size_t colon = t.find(':');
+            if (colon != std::string::npos && colon > 0 && t[colon-1] != ']') {
+                std::string before = trim(t.substr(0, colon));
+                bool valid_label = !before.empty() && before.find(' ') == std::string::npos && before.find('[') == std::string::npos;
+                if (valid_label) {
+                    stmts.push_back({t, true, to_lower(before)});
+                    std::string after = trim(t.substr(colon + 1));
+                    if (!after.empty()) stmts.push_back({after, false, ""});
+                    continue;
+                }
+            }
+            stmts.push_back({t, false, ""});
+        }
+    }
+    return stmts;
+}
+} // anon ns
+
+std::optional<std::vector<uint8_t>> assemble_block(const std::string& text) {
+    auto stmts = parse_stmts(text);
+    if (stmts.empty()) return std::vector<uint8_t>{};
+
+    bool has_labels = false;
+    for (auto& s : stmts) if (s.is_label) { has_labels = true; break; }
+
+    if (!has_labels) {
+        std::vector<uint8_t> result;
+        for (auto& s : stmts) {
+            auto bytes = assemble(s.text);
             if (!bytes) return std::nullopt;
             result.insert(result.end(), bytes->begin(), bytes->end());
         }
+        return result;
     }
+
+    std::unordered_map<std::string, int32_t> labels;
+    std::vector<std::vector<uint8_t>> insn_bytes;
+    std::vector<int> insn_idx;
+    std::vector<bool> needs_resolve;
+
+    int32_t offset = 0;
+    for (size_t i = 0; i < stmts.size(); ++i) {
+        if (stmts[i].is_label) {
+            labels[stmts[i].label_name] = offset;
+            insn_idx.push_back(-1);
+            needs_resolve.push_back(false);
+            continue;
+        }
+        auto bytes = assemble(stmts[i].text);
+        if (bytes) {
+            insn_idx.push_back((int)insn_bytes.size());
+            needs_resolve.push_back(false);
+            offset += (int32_t)bytes->size();
+            insn_bytes.push_back(std::move(*bytes));
+        } else {
+            std::string low = to_lower(stmts[i].text);
+            size_t sp = low.find_first_of(" \t");
+            if (sp == std::string::npos) return std::nullopt;
+            std::string mnem_s = trim(low.substr(0, sp));
+            std::string placeholder = mnem_s + " 0";
+            auto pbytes = assemble(placeholder);
+            if (!pbytes) return std::nullopt;
+            insn_idx.push_back((int)insn_bytes.size());
+            needs_resolve.push_back(true);
+            offset += (int32_t)pbytes->size();
+            insn_bytes.push_back(std::move(*pbytes));
+        }
+    }
+
+    offset = 0;
+    for (size_t i = 0; i < stmts.size(); ++i) {
+        if (stmts[i].is_label) continue;
+        int idx = insn_idx[i];
+        if (needs_resolve[i]) {
+            std::string low = to_lower(stmts[i].text);
+            size_t sp = low.find_first_of(" \t");
+            std::string operand = trim(low.substr(sp));
+            auto it = labels.find(operand);
+            if (it != labels.end()) {
+                int32_t insn_end = offset + (int32_t)insn_bytes[idx].size();
+                int32_t rel = it->second - insn_end;
+                std::string mnem_s = trim(low.substr(0, sp));
+                std::string resolved = mnem_s + " " + std::to_string(rel);
+                auto bytes = assemble(resolved);
+                if (bytes) insn_bytes[idx] = std::move(*bytes);
+            }
+        }
+        offset += (int32_t)insn_bytes[idx].size();
+    }
+
+    std::vector<uint8_t> result;
+    for (auto& b : insn_bytes) result.insert(result.end(), b.begin(), b.end());
     return result;
 }
 
