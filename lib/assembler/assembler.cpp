@@ -3778,5 +3778,31 @@ std::optional<std::vector<uint8_t>> assemble_block(const std::string& text) {
     return result;
 }
 
+std::optional<std::vector<uint8_t>> assemble_block(const std::string& text, std::string& error) {
+    auto stmts = parse_stmts(text);
+    if (stmts.empty()) return std::vector<uint8_t>{};
+    int line = 0;
+    for (auto& s : stmts) {
+        line++;
+        if (s.is_label) continue;
+        std::string err;
+        auto bytes = assemble(s.text, err);
+        if (!bytes) {
+            // Check if it might be a label reference (will be resolved in 2-pass)
+            std::string low = to_lower(s.text);
+            size_t spc = low.find_first_of(" \t");
+            if (spc != std::string::npos) {
+                std::string m = trim(low.substr(0, spc));
+                std::string placeholder = m + " 0";
+                if (assemble(placeholder)) continue; // likely a label ref
+            }
+            error = "line " + std::to_string(line) + ": " + err;
+            return std::nullopt;
+        }
+    }
+    // If validation passed, do the actual assembly
+    return assemble_block(text);
+}
+
 } // namespace vedx64
 #endif // VEDX64_ASSEMBLER

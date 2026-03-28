@@ -491,6 +491,18 @@ int main() {
     CHECK(asm_bytes("jmp 0", {0xE9, 0x00, 0x00, 0x00, 0x00}), "jmp 0 = E9 00000000");
     CHECK(asm_bytes("call 0", {0xE8, 0x00, 0x00, 0x00, 0x00}), "call 0 = E8 00000000");
 
+    printf("  Byte/dword opcode selection...\n");
+    CHECK(asm_bytes("dec ecx", {0xFF, 0xC9}), "dec ecx = FF C9");
+    CHECK(asm_bytes("dec cl", {0xFE, 0xC9}), "dec cl = FE C9");
+    CHECK(asm_bytes("dec rcx", {0x48, 0xFF, 0xC9}), "dec rcx = 48 FF C9");
+    CHECK(asm_bytes("inc eax", {0xFF, 0xC0}), "inc eax = FF C0");
+    CHECK(asm_bytes("inc al", {0xFE, 0xC0}), "inc al = FE C0");
+    CHECK(asm_bytes("inc rax", {0x48, 0xFF, 0xC0}), "inc rax = 48 FF C0");
+    CHECK(asm_bytes("neg eax", {0xF7, 0xD8}), "neg eax = F7 D8");
+    CHECK(asm_bytes("neg al", {0xF6, 0xD8}), "neg al = F6 D8");
+    CHECK(asm_bytes("not eax", {0xF7, 0xD0}), "not eax = F7 D0");
+    CHECK(asm_bytes("not al", {0xF6, 0xD0}), "not al = F6 D0");
+
     printf("  Error cases...\n");
     CHECK(!vedx64::assemble("foobar").has_value(), "invalid mnem");
     CHECK(!vedx64::assemble("").has_value(), "empty string");

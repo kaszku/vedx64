@@ -32,4 +32,7 @@ std::optional<std::vector<uint8_t>> assemble(const std::string& text, std::strin
 /// Returns concatenated bytes on success, std::nullopt if any line fails.
 std::optional<std::vector<uint8_t>> assemble_block(const std::string& text);
 
+/// Assemble block with error reporting (line number + description).
+std::optional<std::vector<uint8_t>> assemble_block(const std::string& text, std::string& error);
+
 } // namespace vedx64

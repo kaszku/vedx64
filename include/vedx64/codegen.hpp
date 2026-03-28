@@ -930,7 +930,7 @@ public:
         return *this;
     }
     CodeGen& call(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xFF);
         emit_mem(2, m);
         return *this;
@@ -943,7 +943,7 @@ public:
         return *this;
     }
     CodeGen& callf(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xFF);
         emit_mem(3, m);
         return *this;
@@ -976,7 +976,7 @@ public:
         return *this;
     }
     CodeGen& clflush(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0xAE);
         emit_mem(7, m);
         return *this;
@@ -1337,7 +1337,7 @@ public:
         return *this;
     }
     CodeGen& cmpxchg8b(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0xC7);
         emit_mem(1, m);
         return *this;
@@ -1775,27 +1775,31 @@ public:
     }
 
     CodeGen& dec(Reg r) {
+        if (r.bits == 16) emit8(0x66);
         emit_rex_if_needed(r.bits==64, 0, 0, r.id);
-        emit8(0xFE);
+        emit8(r.bits == 8 ? 0xFE : 0xFF);
         emit_modrm(3, 1, r.id);
         return *this;
     }
     CodeGen& dec(Mem m) {
-        emit_rex_mem(false, 0, m);
-        emit8(0xFE);
+        emit_rex_mem(m.size_hint==8, 0, m);
+        if (m.size_hint == 2) emit8(0x66);
+        emit8(m.size_hint == 1 ? 0xFE : 0xFF);
         emit_mem(1, m);
         return *this;
     }
 
     CodeGen& div(Reg r) {
+        if (r.bits == 16) emit8(0x66);
         emit_rex_if_needed(r.bits==64, 0, 0, r.id);
-        emit8(0xF6);
+        emit8(r.bits == 8 ? 0xF6 : 0xF7);
         emit_modrm(3, 6, r.id);
         return *this;
     }
     CodeGen& div(Mem m) {
-        emit_rex_mem(false, 0, m);
-        emit8(0xF6);
+        emit_rex_mem(m.size_hint==8, 0, m);
+        if (m.size_hint == 2) emit8(0x66);
+        emit8(m.size_hint == 1 ? 0xF6 : 0xF7);
         emit_mem(6, m);
         return *this;
     }
@@ -1956,7 +1960,7 @@ public:
         return *this;
     }
     CodeGen& fadd(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xD8);
         emit_mem(0, m);
         return *this;
@@ -1975,7 +1979,7 @@ public:
         return *this;
     }
     CodeGen& fbld(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xDF);
         emit_mem(4, m);
         return *this;
@@ -1988,7 +1992,7 @@ public:
         return *this;
     }
     CodeGen& fbstp(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xDF);
         emit_mem(6, m);
         return *this;
@@ -2069,7 +2073,7 @@ public:
         return *this;
     }
     CodeGen& fcom(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xD8);
         emit_mem(2, m);
         return *this;
@@ -2105,7 +2109,7 @@ public:
         return *this;
     }
     CodeGen& fcomp(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xD8);
         emit_mem(3, m);
         return *this;
@@ -2159,7 +2163,7 @@ public:
         return *this;
     }
     CodeGen& fdiv(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xD8);
         emit_mem(6, m);
         return *this;
@@ -2178,7 +2182,7 @@ public:
         return *this;
     }
     CodeGen& fdivr(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xD8);
         emit_mem(7, m);
         return *this;
@@ -2217,7 +2221,7 @@ public:
         return *this;
     }
     CodeGen& fiadd(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xDA);
         emit_mem(0, m);
         return *this;
@@ -2230,7 +2234,7 @@ public:
         return *this;
     }
     CodeGen& ficom(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xDA);
         emit_mem(2, m);
         return *this;
@@ -2243,7 +2247,7 @@ public:
         return *this;
     }
     CodeGen& ficomp(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xDA);
         emit_mem(3, m);
         return *this;
@@ -2256,7 +2260,7 @@ public:
         return *this;
     }
     CodeGen& fidiv(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xDA);
         emit_mem(6, m);
         return *this;
@@ -2269,7 +2273,7 @@ public:
         return *this;
     }
     CodeGen& fidivr(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xDA);
         emit_mem(7, m);
         return *this;
@@ -2282,7 +2286,7 @@ public:
         return *this;
     }
     CodeGen& fild(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xDB);
         emit_mem(0, m);
         return *this;
@@ -2295,7 +2299,7 @@ public:
         return *this;
     }
     CodeGen& fimul(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xDA);
         emit_mem(1, m);
         return *this;
@@ -2323,7 +2327,7 @@ public:
         return *this;
     }
     CodeGen& fist(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xDB);
         emit_mem(2, m);
         return *this;
@@ -2336,7 +2340,7 @@ public:
         return *this;
     }
     CodeGen& fistp(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xDB);
         emit_mem(3, m);
         return *this;
@@ -2349,7 +2353,7 @@ public:
         return *this;
     }
     CodeGen& fisttp(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xDB);
         emit_mem(1, m);
         return *this;
@@ -2362,7 +2366,7 @@ public:
         return *this;
     }
     CodeGen& fisub(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xDA);
         emit_mem(4, m);
         return *this;
@@ -2375,7 +2379,7 @@ public:
         return *this;
     }
     CodeGen& fisubr(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xDA);
         emit_mem(5, m);
         return *this;
@@ -2388,7 +2392,7 @@ public:
         return *this;
     }
     CodeGen& fld(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xD9);
         emit_mem(0, m);
         return *this;
@@ -2408,7 +2412,7 @@ public:
         return *this;
     }
     CodeGen& fldcw(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xD9);
         emit_mem(5, m);
         return *this;
@@ -2421,7 +2425,7 @@ public:
         return *this;
     }
     CodeGen& fldenv(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xD9);
         emit_mem(4, m);
         return *this;
@@ -2476,7 +2480,7 @@ public:
         return *this;
     }
     CodeGen& fmul(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xD8);
         emit_mem(1, m);
         return *this;
@@ -2530,7 +2534,7 @@ public:
         return *this;
     }
     CodeGen& fnsave(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xDD);
         emit_mem(6, m);
         return *this;
@@ -2550,7 +2554,7 @@ public:
         return *this;
     }
     CodeGen& fnstcw(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xD9);
         emit_mem(7, m);
         return *this;
@@ -2563,7 +2567,7 @@ public:
         return *this;
     }
     CodeGen& fnstenv(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xD9);
         emit_mem(6, m);
         return *this;
@@ -2576,7 +2580,7 @@ public:
         return *this;
     }
     CodeGen& fnstsw(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xDD);
         emit_mem(7, m);
         return *this;
@@ -2624,7 +2628,7 @@ public:
         return *this;
     }
     CodeGen& frstor(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xDD);
         emit_mem(4, m);
         return *this;
@@ -2639,7 +2643,7 @@ public:
     }
     CodeGen& fsave(Mem m) {
         emit8(0x9B);
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xDD);
         emit_mem(6, m);
         return *this;
@@ -2688,7 +2692,7 @@ public:
         return *this;
     }
     CodeGen& fst(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xD9);
         emit_mem(2, m);
         return *this;
@@ -2703,7 +2707,7 @@ public:
     }
     CodeGen& fstcw(Mem m) {
         emit8(0x9B);
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xD9);
         emit_mem(7, m);
         return *this;
@@ -2718,7 +2722,7 @@ public:
     }
     CodeGen& fstenv(Mem m) {
         emit8(0x9B);
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xD9);
         emit_mem(6, m);
         return *this;
@@ -2731,7 +2735,7 @@ public:
         return *this;
     }
     CodeGen& fstp(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xD9);
         emit_mem(3, m);
         return *this;
@@ -2764,7 +2768,7 @@ public:
     }
     CodeGen& fstsw(Mem m) {
         emit8(0x9B);
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xDD);
         emit_mem(7, m);
         return *this;
@@ -2777,7 +2781,7 @@ public:
         return *this;
     }
     CodeGen& fsub(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xD8);
         emit_mem(4, m);
         return *this;
@@ -2796,7 +2800,7 @@ public:
         return *this;
     }
     CodeGen& fsubr(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xD8);
         emit_mem(5, m);
         return *this;
@@ -2878,7 +2882,7 @@ public:
         return *this;
     }
     CodeGen& fxrstor(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0xAE);
         emit_mem(1, m);
         return *this;
@@ -2891,7 +2895,7 @@ public:
         return *this;
     }
     CodeGen& fxsave(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0xAE);
         emit_mem(0, m);
         return *this;
@@ -2964,7 +2968,7 @@ public:
         return *this;
     }
     CodeGen& hint_nop(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x18);
         emit_mem(0, m);
         return *this;
@@ -3010,14 +3014,16 @@ public:
     }
 
     CodeGen& idiv(Reg r) {
+        if (r.bits == 16) emit8(0x66);
         emit_rex_if_needed(r.bits==64, 0, 0, r.id);
-        emit8(0xF6);
+        emit8(r.bits == 8 ? 0xF6 : 0xF7);
         emit_modrm(3, 7, r.id);
         return *this;
     }
     CodeGen& idiv(Mem m) {
-        emit_rex_mem(false, 0, m);
-        emit8(0xF6);
+        emit_rex_mem(m.size_hint==8, 0, m);
+        if (m.size_hint == 2) emit8(0x66);
+        emit8(m.size_hint == 1 ? 0xF6 : 0xF7);
         emit_mem(7, m);
         return *this;
     }
@@ -3042,14 +3048,16 @@ public:
         return *this;
     }
     CodeGen& imul(Reg r) {
+        if (r.bits == 16) emit8(0x66);
         emit_rex_if_needed(r.bits==64, 0, 0, r.id);
-        emit8(0x69);
+        emit8(r.bits == 8 ? 0xF6 : 0x69);
         emit_modrm(3, 0, r.id);
         return *this;
     }
     CodeGen& imul(Mem m) {
-        emit_rex_mem(false, 0, m);
-        emit8(0x69);
+        emit_rex_mem(m.size_hint==8, 0, m);
+        if (m.size_hint == 2) emit8(0x66);
+        emit8(m.size_hint == 1 ? 0xF6 : 0x69);
         emit_mem(0, m);
         return *this;
     }
@@ -3060,14 +3068,16 @@ public:
     }
 
     CodeGen& inc(Reg r) {
+        if (r.bits == 16) emit8(0x66);
         emit_rex_if_needed(r.bits==64, 0, 0, r.id);
-        emit8(0xFE);
+        emit8(r.bits == 8 ? 0xFE : 0xFF);
         emit_modrm(3, 0, r.id);
         return *this;
     }
     CodeGen& inc(Mem m) {
-        emit_rex_mem(false, 0, m);
-        emit8(0xFE);
+        emit_rex_mem(m.size_hint==8, 0, m);
+        if (m.size_hint == 2) emit8(0x66);
+        emit8(m.size_hint == 1 ? 0xFE : 0xFF);
         emit_mem(0, m);
         return *this;
     }
@@ -3123,7 +3133,7 @@ public:
         return *this;
     }
     CodeGen& invlpg(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x01);
         emit_mem(7, m);
         return *this;
@@ -3195,7 +3205,7 @@ public:
         return *this;
     }
     CodeGen& jmp(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xFF);
         emit_mem(4, m);
         return *this;
@@ -3214,7 +3224,7 @@ public:
         return *this;
     }
     CodeGen& jmpf(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0xFF);
         emit_mem(5, m);
         return *this;
@@ -3320,7 +3330,7 @@ public:
         return *this;
     }
     CodeGen& ldmxcsr(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0xAE);
         emit_mem(2, m);
         return *this;
@@ -3372,7 +3382,7 @@ public:
         return *this;
     }
     CodeGen& lgdt(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x01);
         emit_mem(2, m);
         return *this;
@@ -3392,7 +3402,7 @@ public:
         return *this;
     }
     CodeGen& lidt(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x01);
         emit_mem(3, m);
         return *this;
@@ -3405,7 +3415,7 @@ public:
         return *this;
     }
     CodeGen& lldt(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x00);
         emit_mem(2, m);
         return *this;
@@ -3418,7 +3428,7 @@ public:
         return *this;
     }
     CodeGen& lmsw(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x01);
         emit_mem(6, m);
         return *this;
@@ -3468,7 +3478,7 @@ public:
         return *this;
     }
     CodeGen& ltr(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x00);
         emit_mem(3, m);
         return *this;
@@ -4229,14 +4239,16 @@ public:
     }
 
     CodeGen& mul(Reg r) {
+        if (r.bits == 16) emit8(0x66);
         emit_rex_if_needed(r.bits==64, 0, 0, r.id);
-        emit8(0xF6);
+        emit8(r.bits == 8 ? 0xF6 : 0xF7);
         emit_modrm(3, 4, r.id);
         return *this;
     }
     CodeGen& mul(Mem m) {
-        emit_rex_mem(false, 0, m);
-        emit8(0xF6);
+        emit_rex_mem(m.size_hint==8, 0, m);
+        if (m.size_hint == 2) emit8(0x66);
+        emit8(m.size_hint == 1 ? 0xF6 : 0xF7);
         emit_mem(4, m);
         return *this;
     }
@@ -4315,14 +4327,16 @@ public:
     }
 
     CodeGen& neg(Reg r) {
+        if (r.bits == 16) emit8(0x66);
         emit_rex_if_needed(r.bits==64, 0, 0, r.id);
-        emit8(0xF6);
+        emit8(r.bits == 8 ? 0xF6 : 0xF7);
         emit_modrm(3, 3, r.id);
         return *this;
     }
     CodeGen& neg(Mem m) {
-        emit_rex_mem(false, 0, m);
-        emit8(0xF6);
+        emit_rex_mem(m.size_hint==8, 0, m);
+        if (m.size_hint == 2) emit8(0x66);
+        emit8(m.size_hint == 1 ? 0xF6 : 0xF7);
         emit_mem(3, m);
         return *this;
     }
@@ -4338,21 +4352,23 @@ public:
         return *this;
     }
     CodeGen& nop(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x0D);
         emit_mem(0, m);
         return *this;
     }
 
     CodeGen& not_(Reg r) {
+        if (r.bits == 16) emit8(0x66);
         emit_rex_if_needed(r.bits==64, 0, 0, r.id);
-        emit8(0xF6);
+        emit8(r.bits == 8 ? 0xF6 : 0xF7);
         emit_modrm(3, 2, r.id);
         return *this;
     }
     CodeGen& not_(Mem m) {
-        emit_rex_mem(false, 0, m);
-        emit8(0xF6);
+        emit_rex_mem(m.size_hint==8, 0, m);
+        if (m.size_hint == 2) emit8(0x66);
+        emit8(m.size_hint == 1 ? 0xF6 : 0xF7);
         emit_mem(2, m);
         return *this;
     }
@@ -6379,7 +6395,7 @@ public:
         return *this;
     }
     CodeGen& prefetchnta(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x18);
         emit_mem(0, m);
         return *this;
@@ -6392,7 +6408,7 @@ public:
         return *this;
     }
     CodeGen& prefetcht0(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x18);
         emit_mem(1, m);
         return *this;
@@ -6405,7 +6421,7 @@ public:
         return *this;
     }
     CodeGen& prefetcht1(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x18);
         emit_mem(2, m);
         return *this;
@@ -6418,7 +6434,7 @@ public:
         return *this;
     }
     CodeGen& prefetcht2(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x18);
         emit_mem(3, m);
         return *this;
@@ -7772,7 +7788,7 @@ public:
         return *this;
     }
     CodeGen& setb(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x92);
         emit_mem(0, m);
         return *this;
@@ -7785,7 +7801,7 @@ public:
         return *this;
     }
     CodeGen& setbe(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x96);
         emit_mem(0, m);
         return *this;
@@ -7798,7 +7814,7 @@ public:
         return *this;
     }
     CodeGen& setl(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x9C);
         emit_mem(0, m);
         return *this;
@@ -7811,7 +7827,7 @@ public:
         return *this;
     }
     CodeGen& setle(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x9E);
         emit_mem(0, m);
         return *this;
@@ -7824,7 +7840,7 @@ public:
         return *this;
     }
     CodeGen& setnb(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x93);
         emit_mem(0, m);
         return *this;
@@ -7837,7 +7853,7 @@ public:
         return *this;
     }
     CodeGen& setnbe(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x97);
         emit_mem(0, m);
         return *this;
@@ -7850,7 +7866,7 @@ public:
         return *this;
     }
     CodeGen& setnl(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x9D);
         emit_mem(0, m);
         return *this;
@@ -7863,7 +7879,7 @@ public:
         return *this;
     }
     CodeGen& setnle(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x9F);
         emit_mem(0, m);
         return *this;
@@ -7876,7 +7892,7 @@ public:
         return *this;
     }
     CodeGen& setno(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x91);
         emit_mem(0, m);
         return *this;
@@ -7889,7 +7905,7 @@ public:
         return *this;
     }
     CodeGen& setnp(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x9B);
         emit_mem(0, m);
         return *this;
@@ -7902,7 +7918,7 @@ public:
         return *this;
     }
     CodeGen& setns(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x99);
         emit_mem(0, m);
         return *this;
@@ -7915,7 +7931,7 @@ public:
         return *this;
     }
     CodeGen& setnz(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x95);
         emit_mem(0, m);
         return *this;
@@ -7928,7 +7944,7 @@ public:
         return *this;
     }
     CodeGen& seto(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x90);
         emit_mem(0, m);
         return *this;
@@ -7941,7 +7957,7 @@ public:
         return *this;
     }
     CodeGen& setp(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x9A);
         emit_mem(0, m);
         return *this;
@@ -7954,7 +7970,7 @@ public:
         return *this;
     }
     CodeGen& sets(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x98);
         emit_mem(0, m);
         return *this;
@@ -7967,7 +7983,7 @@ public:
         return *this;
     }
     CodeGen& setz(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x94);
         emit_mem(0, m);
         return *this;
@@ -7986,7 +8002,7 @@ public:
         return *this;
     }
     CodeGen& sgdt(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x01);
         emit_mem(0, m);
         return *this;
@@ -8081,7 +8097,7 @@ public:
         return *this;
     }
     CodeGen& sidt(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x01);
         emit_mem(1, m);
         return *this;
@@ -8094,7 +8110,7 @@ public:
         return *this;
     }
     CodeGen& sldt(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x00);
         emit_mem(0, m);
         return *this;
@@ -8107,7 +8123,7 @@ public:
         return *this;
     }
     CodeGen& smsw(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x01);
         emit_mem(4, m);
         return *this;
@@ -8201,7 +8217,7 @@ public:
         return *this;
     }
     CodeGen& stmxcsr(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0xAE);
         emit_mem(3, m);
         return *this;
@@ -8219,7 +8235,7 @@ public:
         return *this;
     }
     CodeGen& str(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x00);
         emit_mem(1, m);
         return *this;
@@ -8499,7 +8515,7 @@ public:
         return *this;
     }
     CodeGen& verr(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x00);
         emit_mem(4, m);
         return *this;
@@ -8512,7 +8528,7 @@ public:
         return *this;
     }
     CodeGen& verw(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0x00);
         emit_mem(5, m);
         return *this;
@@ -8534,7 +8550,7 @@ public:
     }
     CodeGen& vmclear(Mem m) {
         emit8(0x66);
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0xC7);
         emit_mem(6, m);
         return *this;
@@ -8554,7 +8570,7 @@ public:
         return *this;
     }
     CodeGen& vmptrld(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0xC7);
         emit_mem(6, m);
         return *this;
@@ -8567,7 +8583,7 @@ public:
         return *this;
     }
     CodeGen& vmptrst(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0xC7);
         emit_mem(7, m);
         return *this;
@@ -8622,7 +8638,7 @@ public:
     }
     CodeGen& vmxon(Mem m) {
         emit8(0xF3);
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0xC7);
         emit_mem(6, m);
         return *this;
@@ -8754,7 +8770,7 @@ public:
         return *this;
     }
     CodeGen& xrstor(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0xAE);
         emit_mem(5, m);
         return *this;
@@ -8767,7 +8783,7 @@ public:
         return *this;
     }
     CodeGen& xsave(Mem m) {
-        emit_rex_mem(false, 0, m);
+        emit_rex_mem(m.size_hint==8, 0, m);
         emit8(0x0F); emit8(0xAE);
         emit_mem(4, m);
         return *this;

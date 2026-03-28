@@ -68,7 +68,7 @@ int main(int argc, char** argv) {
     std::string error;
     std::optional<std::vector<uint8_t>> result;
     if (single_mode) { result = assemble(text, error); }
-    else { result = assemble_block(text); if (!result) error = "block assembly failed"; }
+    else { result = assemble_block(text, error); }
     if (!result) {
         fprintf(stderr, "Error: %s\n", error.c_str());
         return 1;
