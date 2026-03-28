@@ -348,7 +348,7 @@ int main() {
     }
     {
         auto d3 = vedx64::assemble("db \"ABC\"");
-        CHECK(d3.has_value() && d3->size() == 3 && (*d3)[0] == 'a' && (*d3)[1] == 'b' && (*d3)[2] == 'c', "db string");
+        CHECK(d3.has_value() && d3->size() == 3 && (*d3)[0] == 'A' && (*d3)[1] == 'B' && (*d3)[2] == 'C', "db string");
     }
     {
         auto d4 = vedx64::assemble("dw 0x1234");

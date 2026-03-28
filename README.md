@@ -9,7 +9,7 @@ and language bindings for Python and Rust.
 
 > **Note:** The source code in this repository was generated with the assistance of AI
 > (Claude, Anthropic). The instruction tables are derived from the x86 reference XML
-> (`coder64.xml`) and validated against Capstone for correctness.
+> (`coder64.xml`).
 
 ## Features
 
@@ -17,7 +17,7 @@ and language bindings for Python and Rust.
 |--------|-------------|
 | **Decoder** | Decode raw bytes into structured `DecodedInstr` with full prefix, REX, VEX/EVEX, ModRM, SIB, displacement and immediate support |
 | **Encoder** | Re-encode a `DecodedInstr` back to machine code bytes |
-| **Disassembler** | Format instructions as Intel-syntax text with EVEX masking ({k1}{z}) and rounding ({rn-sae}) decorations. 98.4% Capstone-compatible. Fastest benchmarked: 6.4 M insn/s |
+| **Disassembler** | Format instructions as Intel-syntax text with EVEX masking ({k1}{z}) and rounding ({rn-sae}) decorations |
 | **Emulator** | Execute instructions on a virtual `CpuState` with GPRs, RFLAGS, XMM/YMM/ZMM, x87 FPU, and byte-addressable memory. 638 mnemonic handlers |
 | **IR Lifter** | Lift instructions to a flat SSA-style intermediate representation with 47 IR opcodes. 831 mnemonic handlers covering ALU, SSE/AVX, BMI, AES-NI, SHA, x87, and system instructions |
 | **Assembler DSL** | Chainable `CodeGen` class: `e.mov(rax, 42).add(rax, rcx).ret();` with label support |
@@ -40,22 +40,9 @@ and language bindings for Python and Rust.
 | Unique mnemonics | 1,091 |
 | Test corpus variants | 1,896 (100% roundtrip) |
 | Decode coverage | 100% |
-| Capstone match | 98.4% (31 style-only diffs, zero correctness bugs) |
 | IR lifter handlers | 831 mnemonics |
 | Emulator handlers | 638 mnemonics |
 | Test suites | 12 (400+ assertions) |
-
-## Performance
-
-Benchmark against Capstone, Zydis, bddisasm, and distorm (ARM64 native, 13KB corpus):
-
-| Engine | Decode (M insn/s) | Decode+Disasm (M insn/s) |
-|--------|-------------------|--------------------------|
-| **vedx64** | **23.5** | **6.4** |
-| bddisasm | 8.4 | 3.1 |
-| distorm | 7.5 | 4.6 |
-| Zydis | 6.1 | 3.9 |
-| Capstone 6 | — | 1.9 |
 
 ## Quick Start
 

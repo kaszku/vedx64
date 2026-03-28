@@ -2736,7 +2736,8 @@ static std::optional<std::vector<uint8_t>> asm_x(const std::string& mnem, const 
 }
 
 std::optional<std::vector<uint8_t>> assemble(const std::string& text) {
-    std::string s = trim(to_lower(text));
+    std::string s = trim(text);
+    { bool in_quote = false; for (auto& c : s) { if (c == '"') in_quote = !in_quote; else if (!in_quote) c = (char)std::tolower((unsigned char)c); } }
     if (s.empty()) return std::nullopt;
 
     size_t space = s.find_first_of(" \t");
