@@ -421,6 +421,76 @@ int main() {
     CHECK(asm_ok("vpternlogd zmm0 {k1}, zmm1, zmm2, 0xFF"), "vpternlogd masked");
     CHECK(asm_ok("vpternlogd zmm0 {k1} {z}, zmm1, zmm2, 0xFF"), "vpternlogd masked+z");
 
+    printf("  Encoding verification...\n");
+    auto asm_bytes = [](const char* text, std::initializer_list<uint8_t> expected) -> bool {
+        auto bytes = vedx64::assemble(text);
+        if (!bytes || bytes->size() != expected.size()) return false;
+        auto it = expected.begin();
+        for (size_t i = 0; i < bytes->size(); ++i, ++it) if ((*bytes)[i] != *it) return false;
+        return true;
+    };
+
+    CHECK(asm_bytes("nop", {0x90}), "nop = 90");
+    CHECK(asm_bytes("ret", {0xC3}), "ret = C3");
+    CHECK(asm_bytes("int3", {0xCC}), "int3 = CC");
+    CHECK(asm_bytes("hlt", {0xF4}), "hlt = F4");
+    CHECK(asm_bytes("clc", {0xF8}), "clc = F8");
+    CHECK(asm_bytes("stc", {0xF9}), "stc = F9");
+    CHECK(asm_bytes("syscall", {0x0F, 0x05}), "syscall = 0F 05");
+
+    CHECK(asm_bytes("push rax", {0x50}), "push rax = 50");
+    CHECK(asm_bytes("push rcx", {0x51}), "push rcx = 51");
+    CHECK(asm_bytes("push rbp", {0x55}), "push rbp = 55");
+    CHECK(asm_bytes("pop rax", {0x58}), "pop rax = 58");
+    CHECK(asm_bytes("pop rbp", {0x5D}), "pop rbp = 5D");
+    CHECK(asm_bytes("push r12", {0x41, 0x54}), "push r12 = 41 54");
+
+    CHECK(asm_bytes("mov rax, rcx", {0x48, 0x89, 0xC8}), "mov rax,rcx = 48 89 C8");
+    CHECK(asm_bytes("mov eax, ecx", {0x89, 0xC8}), "mov eax,ecx = 89 C8");
+    CHECK(asm_bytes("xor eax, eax", {0x31, 0xC0}), "xor eax,eax = 31 C0");
+
+    CHECK(asm_bytes("mov rax, [rbx]", {0x48, 0x8B, 0x03}), "mov rax,[rbx] = 48 8B 03");
+    CHECK(asm_bytes("mov rax, [rcx]", {0x48, 0x8B, 0x01}), "mov rax,[rcx] = 48 8B 01");
+    CHECK(asm_bytes("mov [rax], rcx", {0x48, 0x89, 0x08}), "mov [rax],rcx = 48 89 08");
+    CHECK(asm_bytes("mov eax, [rsp]", {0x8B, 0x04, 0x24}), "mov eax,[rsp] = 8B 04 24");
+    CHECK(asm_bytes("mov rax, [rbp+0]", {0x48, 0x8B, 0x45, 0x00}), "mov rax,[rbp+0] = 48 8B 45 00");
+    CHECK(asm_bytes("mov rax, [rbx+rcx*4+8]", {0x48, 0x8B, 0x44, 0x8B, 0x08}), "mov rax,[rbx+rcx*4+8]");
+
+    CHECK(asm_bytes("mov rax, [rbx+8]", {0x48, 0x8B, 0x43, 0x08}), "mov rax,[rbx+8] = disp8");
+    CHECK(asm_bytes("mov rax, [rbp-8]", {0x48, 0x8B, 0x45, 0xF8}), "mov rax,[rbp-8] = disp8 neg");
+
+    CHECK(asm_bytes("lock add [rax], rcx", {0xF0, 0x48, 0x01, 0x08}), "lock add = F0 prefix");
+
+    {
+        auto seg = vedx64::assemble("mov rax, fs:[rbx]");
+        CHECK(seg.has_value() && seg->size() > 0 && (*seg)[0] == 0x64, "fs: prefix = 0x64");
+    }
+    {
+        auto seg = vedx64::assemble("mov rax, gs:[rbx]");
+        CHECK(seg.has_value() && seg->size() > 0 && (*seg)[0] == 0x65, "gs: prefix = 0x65");
+    }
+
+    CHECK(asm_bytes("rep movsb", {0xF3, 0xA4}), "rep movsb = F3 A4");
+    CHECK(asm_bytes("repne scasb", {0xF2, 0xAE}), "repne scasb = F2 AE");
+
+    {
+        auto rip = vedx64::assemble("mov rax, [rip+0]");
+        CHECK(rip.has_value() && rip->size() == 7, "rip-relative size");
+        // ModRM = 05 (mod=00, reg=rax, rm=101=RIP)
+        CHECK(rip.has_value() && (*rip)[2] == 0x05, "rip-relative modrm = 05");
+    }
+
+    CHECK(asm_bytes("db 0x41, 0x42, 0x43", {0x41, 0x42, 0x43}), "db exact");
+    CHECK(asm_bytes("dw 0x1234", {0x34, 0x12}), "dw little-endian");
+    CHECK(asm_bytes("dd 0xDEADBEEF", {0xEF, 0xBE, 0xAD, 0xDE}), "dd little-endian");
+
+    CHECK(asm_bytes("times 4 nop", {0x90, 0x90, 0x90, 0x90}), "times 4 nop exact");
+
+    CHECK(asm_bytes("xorps xmm0, xmm0", {0x0F, 0x57, 0xC0}), "xorps xmm0,xmm0");
+
+    CHECK(asm_bytes("jmp 0", {0xE9, 0x00, 0x00, 0x00, 0x00}), "jmp 0 = E9 00000000");
+    CHECK(asm_bytes("call 0", {0xE8, 0x00, 0x00, 0x00, 0x00}), "call 0 = E8 00000000");
+
     printf("  Error cases...\n");
     CHECK(!vedx64::assemble("foobar").has_value(), "invalid mnem");
     CHECK(!vedx64::assemble("").has_value(), "empty string");
