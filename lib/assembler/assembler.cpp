@@ -171,6 +171,16 @@ bool parse_mem(const std::string& s, Mem& out) {
     else if (t.substr(0, 6) == "qword ") { out.size_hint = 8; t = trim(t.substr(6)); }
     if (t.substr(0, 4) == "ptr ") t = trim(t.substr(4));
 
+    if (t.size() >= 3 && t[2] == ':') {
+        std::string seg = t.substr(0, 2);
+        if (seg == "fs") { out.seg = SegOverride::FS; t = trim(t.substr(3)); }
+        else if (seg == "gs") { out.seg = SegOverride::GS; t = trim(t.substr(3)); }
+        else if (seg == "cs") { out.seg = SegOverride::CS; t = trim(t.substr(3)); }
+        else if (seg == "ss") { out.seg = SegOverride::SS; t = trim(t.substr(3)); }
+        else if (seg == "ds") { out.seg = SegOverride::DS; t = trim(t.substr(3)); }
+        else if (seg == "es") { out.seg = SegOverride::ES; t = trim(t.substr(3)); }
+    }
+
     if (t.empty() || t.front() != '[' || t.back() != ']') return false;
     t = t.substr(1, t.size() - 2); // strip brackets
     t = trim(t);
@@ -206,14 +216,17 @@ bool parse_mem(const std::string& s, Mem& out) {
             out.index = idx; out.scale = (uint8_t)sc; has_index = true;
             continue;
         }
+        // Check for rip
+        if (tok == "rip") {
+            out.rip_relative = true;
+            continue;
+        }
         // Check for register
         Reg r;
         std::string clean = tok;
         if (!clean.empty() && clean[0] == '-') clean = clean.substr(1);
         if (parse_gpr(clean, r)) {
-            if (clean == "rip") {
-                out.rip_relative = true;
-            } else if (!has_base) {
+            if (!has_base) {
                 out.base = r; has_base = true;
             } else if (!has_index) {
                 out.index = r; out.scale = 1; has_index = true;

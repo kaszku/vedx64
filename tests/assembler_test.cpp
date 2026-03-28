@@ -322,6 +322,21 @@ int main() {
     CHECK(asm_ok("fstp [rbx]"), "fstp mem");
     CHECK(asm_ok("lgdt [rax]"), "lgdt mem");
 
+    printf("  Segment overrides...\n");
+    CHECK(asm_ok("mov rax, fs:[rbx]"), "fs:[rbx]");
+    CHECK(asm_ok("mov rax, gs:[rcx]"), "gs:[rcx]");
+    CHECK(asm_ok("mov rax, fs:[rbx+8]"), "fs:[rbx+8]");
+    CHECK(asm_ok("mov rax, gs:[0x28]"), "gs:[0x28]");
+    CHECK(asm_ok("mov rax, fs:[rbx+rcx*4]"), "fs:sib");
+    CHECK(asm_ok("mov gs:[rax], rcx"), "gs:store");
+    CHECK(asm_ok("add dword fs:[rax], 1"), "fs:add mi");
+
+    printf("  RIP-relative...\n");
+    CHECK(asm_ok("mov rax, [rip+0x100]"), "rip+disp");
+    CHECK(asm_ok("mov eax, [rip+0]"), "rip+0");
+    CHECK(asm_ok("lea rax, [rip+0x1000]"), "lea rip");
+    CHECK(asm_ok("cmp dword [rip+4], 0"), "cmp rip mi");
+
     printf("  Error cases...\n");
     CHECK(!vedx64::assemble("foobar").has_value(), "invalid mnem");
     CHECK(!vedx64::assemble("").has_value(), "empty string");
@@ -373,6 +388,8 @@ int main() {
         "lock add [rax], rcx", "rep movsb",
         // Mem-only
         "prefetcht0 [rax]", "clflush [rax]", "inc dword [rax]",
+        // Segment/RIP
+        "mov rax, fs:[rbx]", "mov rax, gs:[0x28]", "mov rax, [rip+0x100]",
     };
     int rt_pass = 0, rt_total = 0;
     for (auto text : roundtrip_tests) {
