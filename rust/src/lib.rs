@@ -182,12 +182,18 @@ pub fn disassemble(code: &[u8], rip: u64) -> Option<String> {
 pub fn table_size() -> usize { ffi::table_size() }
 
 /// Assemble a single instruction from Intel syntax text.
-/// Returns encoded bytes, or empty Vec if assembly fails.
-pub fn assemble(text: &str) -> Vec<u8> { ffi::assemble(text) }
+/// Returns encoded bytes, or None if assembly fails.
+pub fn assemble(text: &str) -> Option<Vec<u8>> {
+    let v = ffi::assemble(text);
+    if v.is_empty() { None } else { Some(v) }
+}
 
 /// Assemble multiple instructions with label support.
-/// Returns encoded bytes, or empty Vec if assembly fails.
-pub fn assemble_block(text: &str) -> Vec<u8> { ffi::assemble_block(text) }
+/// Returns encoded bytes, or None if assembly fails.
+pub fn assemble_block(text: &str) -> Option<Vec<u8>> {
+    let v = ffi::assemble_block(text);
+    if v.is_empty() { None } else { Some(v) }
+}
 
 /// Check if an instruction can be safely relocated.
 pub fn can_relocate(code: &[u8]) -> bool { ffi::can_relocate(code) }

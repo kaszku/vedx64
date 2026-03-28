@@ -825,13 +825,27 @@ NB_MODULE(vedx64_py, m) {
         auto bytes = vedx64::assemble(text);
         if (!bytes) return nb::none();
         return nb::bytes((const char*)bytes->data(), bytes->size());
-    }, nb::arg("text"), "Assemble a single x86-64 instruction from Intel syntax, returns bytes or None");
+    }, nb::arg("text"), "Assemble a single x86-64 instruction, returns bytes or None");
+
+    m.def("assemble_ex", [](const std::string& text) -> nb::bytes {
+        std::string err;
+        auto bytes = vedx64::assemble(text, err);
+        if (!bytes) throw std::runtime_error(err);
+        return nb::bytes((const char*)bytes->data(), bytes->size());
+    }, nb::arg("text"), "Assemble instruction, raises RuntimeError on failure");
 
     m.def("assemble_block", [](const std::string& text) -> nb::object {
         auto bytes = vedx64::assemble_block(text);
         if (!bytes) return nb::none();
         return nb::bytes((const char*)bytes->data(), bytes->size());
-    }, nb::arg("text"), "Assemble multiple instructions with label support, returns bytes or None");
+    }, nb::arg("text"), "Assemble block with labels, returns bytes or None");
+
+    m.def("assemble_block_ex", [](const std::string& text) -> nb::bytes {
+        std::string err;
+        auto bytes = vedx64::assemble_block(text, err);
+        if (!bytes) throw std::runtime_error(err);
+        return nb::bytes((const char*)bytes->data(), bytes->size());
+    }, nb::arg("text"), "Assemble block, raises RuntimeError with line number on failure");
 #endif // VEDX64_ASSEMBLER
 
     m.def("mnemonic_name", [](Mnemonic m) -> std::string {

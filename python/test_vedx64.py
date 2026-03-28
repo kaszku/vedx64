@@ -143,6 +143,34 @@ def test_assemble_block():
         di = v.decode(mov)
         assert di is not None and di.length > 0
 
+def test_assemble_ex():
+    if not hasattr(v, 'assemble_ex'):
+        return
+    # Success
+    assert v.assemble_ex('nop') == b'\x90'
+    # Error with message
+    try:
+        v.assemble_ex('foobar')
+        assert False, 'should have raised'
+    except RuntimeError as e:
+        assert 'unknown instruction' in str(e)
+    try:
+        v.assemble_ex('mov rax')
+        assert False, 'should have raised'
+    except RuntimeError as e:
+        assert 'unsupported operand' in str(e)
+
+def test_assemble_block_ex():
+    if not hasattr(v, 'assemble_block_ex'):
+        return
+    code = v.assemble_block_ex('push rbp\nnop\nret')
+    assert len(code) >= 3
+    try:
+        v.assemble_block_ex('push rbp\nfoobar\nret')
+        assert False, 'should have raised'
+    except RuntimeError as e:
+        assert 'line' in str(e)
+
 if __name__ == "__main__":
     tests = [v for k, v in globals().items() if k.startswith("test_")]
     passed = 0
