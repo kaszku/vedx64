@@ -519,6 +519,16 @@ int main() {
         CHECK(a3->size() == 9, "align 8: 1 + 7 pad + 1 ret = 9");
     }
 
+    printf("  Shift-by-CL and IMUL...\n");
+    CHECK(asm_bytes("shr rax, cl", {0x48, 0xD3, 0xE8}), "shr rax, cl");
+    CHECK(asm_bytes("shl ecx, cl", {0xD3, 0xE1}), "shl ecx, cl");
+    CHECK(asm_bytes("sar rdx, cl", {0x48, 0xD3, 0xFA}), "sar rdx, cl");
+    CHECK(asm_bytes("rol eax, cl", {0xD3, 0xC0}), "rol eax, cl");
+    CHECK(asm_bytes("ror eax, cl", {0xD3, 0xC8}), "ror eax, cl");
+    CHECK(asm_bytes("imul rax, rcx", {0x48, 0x0F, 0xAF, 0xC1}), "imul rax, rcx = 0F AF");
+    CHECK(asm_ok("imul eax, ecx"), "imul eax, ecx");
+    CHECK(asm_ok("imul rax, rcx, 42"), "imul rax, rcx, 42");
+
     printf("  Error cases...\n");
     CHECK(!vedx64::assemble("foobar").has_value(), "invalid mnem");
     CHECK(!vedx64::assemble("").has_value(), "empty string");

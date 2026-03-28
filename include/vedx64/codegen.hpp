@@ -776,9 +776,9 @@ public:
     }
 
     CodeGen& bsf(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x0F); emit8(0xBC);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& bsf(Reg dst, Mem src) {
@@ -789,9 +789,9 @@ public:
     }
 
     CodeGen& bsr(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x0F); emit8(0xBD);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& bsr(Reg dst, Mem src) {
@@ -836,10 +836,9 @@ public:
     }
 
     CodeGen& btc(Reg dst, Reg src) {
-        (void)src;
-        emit_rex_if_needed(dst.bits==64, 7, 0, dst.id);
-        emit8(0x0F); emit8(0xBA);
-        emit_modrm(3, 7, dst.id);
+        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit8(0x0F); emit8(0xBB);
+        emit_modrm(3, src.id, dst.id);
         return *this;
     }
     CodeGen& btc(Mem dst, Reg src) {
@@ -997,9 +996,9 @@ public:
     }
 
     CodeGen& cmovb(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x0F); emit8(0x42);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& cmovb(Reg dst, Mem src) {
@@ -1010,9 +1009,9 @@ public:
     }
 
     CodeGen& cmovbe(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x0F); emit8(0x46);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& cmovbe(Reg dst, Mem src) {
@@ -1023,9 +1022,9 @@ public:
     }
 
     CodeGen& cmovl(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x0F); emit8(0x4C);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& cmovl(Reg dst, Mem src) {
@@ -1036,9 +1035,9 @@ public:
     }
 
     CodeGen& cmovle(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x0F); emit8(0x4E);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& cmovle(Reg dst, Mem src) {
@@ -1049,9 +1048,9 @@ public:
     }
 
     CodeGen& cmovnb(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x0F); emit8(0x43);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& cmovnb(Reg dst, Mem src) {
@@ -1062,9 +1061,9 @@ public:
     }
 
     CodeGen& cmovnbe(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x0F); emit8(0x47);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& cmovnbe(Reg dst, Mem src) {
@@ -1075,9 +1074,9 @@ public:
     }
 
     CodeGen& cmovnl(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x0F); emit8(0x4D);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& cmovnl(Reg dst, Mem src) {
@@ -1088,9 +1087,9 @@ public:
     }
 
     CodeGen& cmovnle(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x0F); emit8(0x4F);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& cmovnle(Reg dst, Mem src) {
@@ -1101,9 +1100,9 @@ public:
     }
 
     CodeGen& cmovno(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x0F); emit8(0x41);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& cmovno(Reg dst, Mem src) {
@@ -1114,9 +1113,9 @@ public:
     }
 
     CodeGen& cmovnp(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x0F); emit8(0x4B);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& cmovnp(Reg dst, Mem src) {
@@ -1127,9 +1126,9 @@ public:
     }
 
     CodeGen& cmovns(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x0F); emit8(0x49);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& cmovns(Reg dst, Mem src) {
@@ -1140,9 +1139,9 @@ public:
     }
 
     CodeGen& cmovnz(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x0F); emit8(0x45);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& cmovnz(Reg dst, Mem src) {
@@ -1153,9 +1152,9 @@ public:
     }
 
     CodeGen& cmovo(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x0F); emit8(0x40);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& cmovo(Reg dst, Mem src) {
@@ -1166,9 +1165,9 @@ public:
     }
 
     CodeGen& cmovp(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x0F); emit8(0x4A);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& cmovp(Reg dst, Mem src) {
@@ -1179,9 +1178,9 @@ public:
     }
 
     CodeGen& cmovs(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x0F); emit8(0x48);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& cmovs(Reg dst, Mem src) {
@@ -1192,9 +1191,9 @@ public:
     }
 
     CodeGen& cmovz(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x0F); emit8(0x44);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& cmovz(Reg dst, Mem src) {
@@ -1381,10 +1380,10 @@ public:
 
     CodeGen& crc32(Reg dst, Reg src) {
         if (dst.bits == 16) emit8(0x66); else emit8(0xF2);
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x0F); emit8(0x38);
         emit8(0xF1);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& crc32(Reg dst, Mem src) {
@@ -3028,9 +3027,9 @@ public:
     }
 
     CodeGen& imul(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
-        emit8(0x69);
-        emit_modrm(3, src.id, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
+        emit8(0x0F); emit8(0xAF);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& imul(Reg dst, Mem src) {
@@ -4131,9 +4130,9 @@ public:
     }
 
     CodeGen& movsx(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x0F); emit8(0xBE);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& movsx(Reg dst, Mem src) {
@@ -4144,9 +4143,9 @@ public:
     }
 
     CodeGen& movsxd(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x63);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& movsxd(Reg dst, Mem src) {
@@ -4204,9 +4203,9 @@ public:
     }
 
     CodeGen& movzx(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x0F); emit8(0xB6);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& movzx(Reg dst, Mem src) {
@@ -6336,9 +6335,9 @@ public:
 
     CodeGen& popcnt(Reg dst, Reg src) {
         if (dst.bits == 16) emit8(0x66); else emit8(0xF3);
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x0F); emit8(0xB8);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& popcnt(Reg dst, Mem src) {
@@ -8426,9 +8425,9 @@ public:
     }
 
     CodeGen& ud(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x0F); emit8(0xB9);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& ud(Reg dst, Mem src) {
@@ -8609,9 +8608,9 @@ public:
     }
 
     CodeGen& vmwrite(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x0F); emit8(0x79);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& vmwrite(Reg dst, Mem src) {
@@ -8667,9 +8666,9 @@ public:
     }
 
     CodeGen& xchg(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x87);
-        emit_modrm(3, src.id, dst.id);
+        emit_modrm(3, dst.id, src.id);
         return *this;
     }
     CodeGen& xchg(Reg dst, Mem src) {
