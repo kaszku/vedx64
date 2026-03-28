@@ -116,6 +116,34 @@ def test_branch_flow():
     assert flow is not None
     assert flow.type == v.FlowType.Return  # BranchFlowType in C++, exposed as FlowType in Python
 
+def test_assemble():
+    if not hasattr(v, 'assemble'):
+        return  # VEDX64_ASSEMBLER not enabled
+    # Single instruction
+    nop = v.assemble('nop')
+    assert nop == b'\x90', f'nop: {nop}'
+    ret = v.assemble('ret')
+    assert ret == b'\xc3', f'ret: {ret}'
+    # Memory operand
+    mov_rm = v.assemble('mov rax, [rbx]')
+    assert mov_rm is not None and len(mov_rm) > 0
+    # Invalid
+    assert v.assemble('foobar') is None
+
+def test_assemble_block():
+    if not hasattr(v, 'assemble_block'):
+        return
+    code = v.assemble_block('push rbp\nmov rbp, rsp\nnop\nret')
+    assert code is not None and len(code) >= 4
+    # Labels
+    labeled = v.assemble_block('jmp end\nnop\nend:\nret')
+    assert labeled is not None
+    # Roundtrip: assemble then decode
+    mov = v.assemble('mov rax, rcx')
+    if mov:
+        di = v.decode(mov)
+        assert di is not None and di.length > 0
+
 if __name__ == "__main__":
     tests = [v for k, v in globals().items() if k.startswith("test_")]
     passed = 0

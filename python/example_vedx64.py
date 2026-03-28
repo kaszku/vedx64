@@ -202,6 +202,42 @@ def example_branch_analysis():
             print(f"  {desc:20s}  (decode failed)")
 
 
+def example_assemble():
+    """Assemble instructions from text."""
+    if not hasattr(v, 'assemble'):
+        print("\n=== Text Assembler (not available) ===")
+        return
+    print("\n=== Text Assembler ===\n")
+    tests = [
+        "nop", "ret", "push rbp", "mov rbp, rsp",
+        "mov rax, [rbx+rcx*4+8]", "add dword [rsp+8], 1",
+        "lock add [rax], rcx", "rep movsb",
+    ]
+    for text in tests:
+        result = v.assemble(text)
+        if result:
+            hexs = ' '.join(f'{b:02X}' for b in result)
+            print(f"  {text:35s} -> {hexs}")
+        else:
+            print(f"  {text:35s} -> FAILED")
+
+    # Block with labels
+    print("\n  Block with labels:")
+    code = v.assemble_block("""
+        xor eax, eax
+        cmp ecx, 0
+        je done
+    loop:
+        add eax, 1
+        dec ecx
+        jnz loop
+    done:
+        ret
+    """)
+    if code:
+        print(f"  {len(code)} bytes: {' '.join(f'{b:02X}' for b in code)}")
+
+
 if __name__ == "__main__":
     example_decode()
     example_encode_roundtrip()
@@ -212,4 +248,5 @@ if __name__ == "__main__":
     example_instruction_api()
     example_relocation()
     example_branch_analysis()
+    example_assemble()
 

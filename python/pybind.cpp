@@ -17,6 +17,9 @@
 #endif
 #include "vedx64/relocation.hpp"
 #include "vedx64/branch_follow.hpp"
+#ifdef VEDX64_ASSEMBLER
+#include "vedx64/assembler.hpp"
+#endif
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
@@ -817,6 +820,20 @@ NB_MODULE(vedx64_py, m) {
         }
         return results;
     }, nb::arg("data"), nb::arg("rip") = 0, "Disassemble all instructions, returns list of (address, text, length)");
+
+#ifdef VEDX64_ASSEMBLER
+    m.def("assemble", [](const std::string& text) -> nb::object {
+        auto bytes = vedx64::assemble(text);
+        if (!bytes) return nb::none();
+        return nb::bytes((const char*)bytes->data(), bytes->size());
+    }, nb::arg("text"), "Assemble a single x86-64 instruction from Intel syntax, returns bytes or None");
+
+    m.def("assemble_block", [](const std::string& text) -> nb::object {
+        auto bytes = vedx64::assemble_block(text);
+        if (!bytes) return nb::none();
+        return nb::bytes((const char*)bytes->data(), bytes->size());
+    }, nb::arg("text"), "Assemble multiple instructions with label support, returns bytes or None");
+#endif // VEDX64_ASSEMBLER
 
     m.def("mnemonic_name", [](Mnemonic m) -> std::string {
         return vedx64::mnemonic_name(m);

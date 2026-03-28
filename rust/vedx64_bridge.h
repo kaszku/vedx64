@@ -99,6 +99,22 @@ rust::String mnemonic_name(uint16_t m) {
 }
 #endif // VEDX64_STRINGS
 
+#ifdef VEDX64_ASSEMBLER
+rust::Vec<uint8_t> assemble(rust::Str text) {
+    rust::Vec<uint8_t> result;
+    auto bytes = vedx64::assemble(std::string(text.data(), text.size()));
+    if (bytes) for (auto b : *bytes) result.push_back(b);
+    return result;
+}
+
+rust::Vec<uint8_t> assemble_block(rust::Str text) {
+    rust::Vec<uint8_t> result;
+    auto bytes = vedx64::assemble_block(std::string(text.data(), text.size()));
+    if (bytes) for (auto b : *bytes) result.push_back(b);
+    return result;
+}
+#endif // VEDX64_ASSEMBLER
+
 size_t table_size() { return vedx64::g_instr_table_size; }
 
 bool can_relocate(rust::Slice<const uint8_t> code) {

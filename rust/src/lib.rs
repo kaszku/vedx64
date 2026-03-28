@@ -81,6 +81,10 @@ mod ffi {
         fn mnemonic_name(m: u16) -> String;
         fn table_size() -> usize;
 
+        // Assembler
+        fn assemble(text: &str) -> Vec<u8>;
+        fn assemble_block(text: &str) -> Vec<u8>;
+
         // Relocation
         fn can_relocate(code: &[u8]) -> bool;
         fn is_rip_relative(code: &[u8]) -> bool;
@@ -177,6 +181,14 @@ pub fn disassemble(code: &[u8], rip: u64) -> Option<String> {
 
 /// Instruction table size.
 pub fn table_size() -> usize { ffi::table_size() }
+
+/// Assemble a single instruction from Intel syntax text.
+/// Returns encoded bytes, or empty Vec if assembly fails.
+pub fn assemble(text: &str) -> Vec<u8> { ffi::assemble(text) }
+
+/// Assemble multiple instructions with label support.
+/// Returns encoded bytes, or empty Vec if assembly fails.
+pub fn assemble_block(text: &str) -> Vec<u8> { ffi::assemble_block(text) }
 
 /// Check if an instruction can be safely relocated.
 pub fn can_relocate(code: &[u8]) -> bool { ffi::can_relocate(code) }
