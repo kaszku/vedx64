@@ -40,6 +40,7 @@ int main(int argc, char** argv) {
     bool single_mode = false;
     const char* single_text = nullptr;
     uint64_t base_addr = 0;
+    bool interactive = false;
 
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-o") == 0 && i+1 < argc) output_file = argv[++i];
@@ -47,6 +48,7 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--hex") == 0) hex_mode = true;
         else if (strcmp(argv[i], "--disasm") == 0 || strcmp(argv[i], "-d") == 0) disasm_mode = true;
         else if (strcmp(argv[i], "-e") == 0 && i+1 < argc) { single_mode = true; single_text = argv[++i]; }
+        else if (strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--interactive") == 0) interactive = true;
         else if (argv[i][0] != '-') input_file = argv[i];
         else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             printf("Usage: vedx64_asm [options] [input.asm]\n");
@@ -54,12 +56,44 @@ int main(int argc, char** argv) {
             printf("  -o FILE     Write binary output to file\n");
             printf("  --hex       Print hex dump\n");
             printf("  -d          Disassemble output\n");
+            printf("  -i          Interactive REPL mode\n");
             printf("  --base ADDR Set base address for disassembly\n");
             printf("  -h          Show this help\n");
             printf("\nReads from stdin if no input file given.\n");
             printf("Writes binary to stdout if no -o or --hex.\n");
             return 0;
         }
+    }
+
+    if (interactive) {
+        printf("vedx64 assembler REPL. Type instructions, 'q' to quit.\n");
+        uint64_t addr = base_addr;
+        char line[1024];
+        while (true) {
+            printf("%016llx> ", (unsigned long long)addr);
+            fflush(stdout);
+            if (!fgets(line, sizeof(line), stdin)) break;
+            size_t len = strlen(line);
+            while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r')) line[--len] = 0;
+            if (len == 0) continue;
+            if (strcmp(line, "q") == 0 || strcmp(line, "quit") == 0 || strcmp(line, "exit") == 0) break;
+            std::string err;
+            auto bytes = assemble(std::string(line), err);
+            if (!bytes) { printf("  error: %s\n", err.c_str()); continue; }
+            printf("  ");
+            for (auto b : *bytes) printf("%02X ", b);
+#ifdef VEDX64_STRINGS
+            char dis[256];
+            size_t n = disassemble(bytes->data(), bytes->size(), dis, sizeof(dis), addr);
+            if (n > 0) {
+                for (size_t j = bytes->size(); j < 12; ++j) printf("   ");
+                printf("%s", dis);
+            }
+#endif
+            printf("\n");
+            addr += bytes->size();
+        }
+        return 0;
     }
 
     std::string text;
