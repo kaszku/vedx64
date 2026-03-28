@@ -288,6 +288,40 @@ int main() {
     CHECK(asm_ok("jmp [rax]"), "jmp mem");
     CHECK(asm_ok("jmp [rbx+rcx*8]"), "jmp mem sib");
 
+    printf("  Lock/rep prefixes...\n");
+    CHECK(asm_ok("lock add [rax], rcx"), "lock add mr");
+    CHECK(asm_ok("lock xadd [rax], rcx"), "lock xadd");
+    CHECK(asm_ok("lock cmpxchg [rax], rcx"), "lock cmpxchg");
+    CHECK(asm_ok("lock inc dword [rax]"), "lock inc");
+    CHECK(asm_ok("lock dec qword [rbx]"), "lock dec");
+    CHECK(asm_ok("rep movsb"), "rep movsb");
+    CHECK(asm_ok("rep movsq"), "rep movsq");
+    CHECK(asm_ok("rep stosb"), "rep stosb");
+    CHECK(asm_ok("rep stosq"), "rep stosq");
+    CHECK(asm_ok("repe cmpsb"), "repe cmpsb");
+    CHECK(asm_ok("repne scasb"), "repne scasb");
+    {
+        auto lock_bytes = vedx64::assemble("lock add [rax], rcx");
+        CHECK(lock_bytes.has_value() && lock_bytes->size() > 0 && (*lock_bytes)[0] == 0xF0, "lock prefix is 0xF0");
+    }
+
+    printf("  Mem-only instructions...\n");
+    CHECK(asm_ok("prefetcht0 [rax]"), "prefetcht0");
+    CHECK(asm_ok("prefetcht1 [rbx]"), "prefetcht1");
+    CHECK(asm_ok("prefetcht2 [rcx]"), "prefetcht2");
+    CHECK(asm_ok("prefetchnta [rdx]"), "prefetchnta");
+    CHECK(asm_ok("clflush [rax]"), "clflush");
+    CHECK(asm_ok("inc dword [rax]"), "inc mem");
+    CHECK(asm_ok("dec qword [rbx]"), "dec mem");
+    CHECK(asm_ok("neg dword [rcx]"), "neg mem");
+    CHECK(asm_ok("not qword [rdx]"), "not mem");
+    CHECK(asm_ok("div [rax]"), "div mem");
+    CHECK(asm_ok("idiv [rbx]"), "idiv mem");
+    CHECK(asm_ok("mul [rcx]"), "mul mem");
+    CHECK(asm_ok("fld [rax]"), "fld mem");
+    CHECK(asm_ok("fstp [rbx]"), "fstp mem");
+    CHECK(asm_ok("lgdt [rax]"), "lgdt mem");
+
     printf("  Error cases...\n");
     CHECK(!vedx64::assemble("foobar").has_value(), "invalid mnem");
     CHECK(!vedx64::assemble("").has_value(), "empty string");
@@ -335,6 +369,10 @@ int main() {
         // Jumps/calls
         "jmp 0x10", "call 0x100", "je 0x20", "jne 0x30",
         "call [rax]", "jmp [rax]",
+        // Prefixes
+        "lock add [rax], rcx", "rep movsb",
+        // Mem-only
+        "prefetcht0 [rax]", "clflush [rax]", "inc dword [rax]",
     };
     int rt_pass = 0, rt_total = 0;
     for (auto text : roundtrip_tests) {
