@@ -376,6 +376,43 @@ int main() {
         CHECK(d9.has_value(), "db in block with labels");
     }
 
+    printf("  MMX registers...\n");
+    CHECK(asm_ok("movq mm0, mm1"), "movq mm mm");
+    CHECK(asm_ok("paddb mm0, mm1"), "paddb mm");
+    CHECK(asm_ok("paddw mm0, mm1"), "paddw mm");
+    CHECK(asm_ok("paddd mm0, mm1"), "paddd mm");
+    CHECK(asm_ok("pxor mm0, mm1"), "pxor mm");
+    CHECK(asm_ok("pand mm0, mm1"), "pand mm");
+    CHECK(asm_ok("por mm0, mm1"), "por mm");
+    CHECK(asm_ok("movq mm0, [rax]"), "movq mm mem");
+    CHECK(asm_ok("cvtpi2ps xmm0, mm0"), "cvtpi2ps xmm mm");
+    CHECK(asm_ok("cvtps2pi mm0, xmm0"), "cvtps2pi mm xmm");
+
+    printf("  Times directive...\n");
+    {
+        auto t1 = vedx64::assemble("times 5 nop");
+        CHECK(t1.has_value() && t1->size() == 5, "times 5 nop");
+        for (size_t i = 0; i < 5 && t1.has_value(); ++i) CHECK((*t1)[i] == 0x90, "times nop byte");
+    }
+    {
+        auto t2 = vedx64::assemble("times 3 db 0xCC");
+        CHECK(t2.has_value() && t2->size() == 3, "times 3 db");
+    }
+    {
+        auto t3 = vedx64::assemble("times 0 nop");
+        CHECK(t3.has_value() && t3->size() == 0, "times 0");
+    }
+
+    printf("  Equ constants...\n");
+    {
+        auto e1 = vedx64::assemble_block("size equ 0x20\nsub rsp, size\nadd rsp, size");
+        CHECK(e1.has_value(), "equ basic");
+    }
+    {
+        auto e2 = vedx64::assemble_block("val equ 42\nmov eax, val");
+        CHECK(e2.has_value(), "equ in mov");
+    }
+
     printf("  Error cases...\n");
     CHECK(!vedx64::assemble("foobar").has_value(), "invalid mnem");
     CHECK(!vedx64::assemble("").has_value(), "empty string");

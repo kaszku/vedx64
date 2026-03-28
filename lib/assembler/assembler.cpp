@@ -120,11 +120,23 @@ const XmmInfo g_xmm_table[] = {
     {"xmm15", 15},
 };
 
-enum class OpKind { Reg, Xmm, Mem, Imm };
+const XmmInfo g_mmx_table[] = {
+    {"mm0", 0},
+    {"mm1", 1},
+    {"mm2", 2},
+    {"mm3", 3},
+    {"mm4", 4},
+    {"mm5", 5},
+    {"mm6", 6},
+    {"mm7", 7},
+};
+
+enum class OpKind { Reg, Xmm, Mmx, Mem, Imm };
 struct ParsedOp {
     OpKind kind;
     Reg reg;
     Xmm xmm;
+    Mmx mmx;
     Mem mem;
     int64_t imm;
 };
@@ -139,6 +151,13 @@ bool parse_gpr(const std::string& s, Reg& out) {
 bool parse_xmm(const std::string& s, Xmm& out) {
     for (auto& x : g_xmm_table) {
         if (s == x.name) { out = Xmm{x.id}; return true; }
+    }
+    return false;
+}
+
+bool parse_mmx(const std::string& s, Mmx& out) {
+    for (auto& x : g_mmx_table) {
+        if (s == x.name) { out = Mmx{x.id}; return true; }
     }
     return false;
 }
@@ -253,6 +272,8 @@ bool parse_operand(const std::string& s, ParsedOp& out) {
     Reg r; Xmm x; Mem m; int64_t imm;
     if (parse_gpr(s, r)) { out.kind = OpKind::Reg; out.reg = r; return true; }
     if (parse_xmm(s, x)) { out.kind = OpKind::Xmm; out.xmm = x; return true; }
+    Mmx mm;
+    if (parse_mmx(s, mm)) { out.kind = OpKind::Mmx; out.mmx = mm; return true; }
     // Try memory (contains [ or starts with size prefix)
     if (s.find('[') != std::string::npos || s.substr(0,4) == "byte" ||
         s.substr(0,4) == "word" || s.substr(0,5) == "dword" || s.substr(0,5) == "qword") {
@@ -625,14 +646,20 @@ static std::optional<std::vector<uint8_t>> asm_cv(const std::string& mnem, const
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.cvtpd2dq(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "cvtpd2pi") {
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Xmm) { gen.cvtpd2pi(ops[0].mmx, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.cvtpd2pi(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "cvtpd2ps") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.cvtpd2ps(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.cvtpd2ps(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "cvtpi2pd") {
+        if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mmx) { gen.cvtpi2pd(ops[0].xmm, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.cvtpi2pd(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "cvtpi2ps") {
+        if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mmx) { gen.cvtpi2ps(ops[0].xmm, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.cvtpi2ps(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "cvtps2dq") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.cvtps2dq(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -643,6 +670,8 @@ static std::optional<std::vector<uint8_t>> asm_cv(const std::string& mnem, const
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.cvtps2pd(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "cvtps2pi") {
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Xmm) { gen.cvtps2pi(ops[0].mmx, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.cvtps2pi(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "cvtsd2si") {
         if (n == 2 && ops[0].kind == OpKind::Reg && ops[1].kind == OpKind::Xmm) { gen.cvtsd2si(ops[0].reg, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -673,12 +702,16 @@ static std::optional<std::vector<uint8_t>> asm_cv(const std::string& mnem, const
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.cvttpd2dq(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "cvttpd2pi") {
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Xmm) { gen.cvttpd2pi(ops[0].mmx, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.cvttpd2pi(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "cvttps2dq") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.cvttps2dq(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.cvttps2dq(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "cvttps2pi") {
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Xmm) { gen.cvttps2pi(ops[0].mmx, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.cvttps2pi(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "cvttsd2si") {
         if (n == 2 && ops[0].kind == OpKind::Reg && ops[1].kind == OpKind::Xmm) { gen.cvttsd2si(ops[0].reg, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -1441,6 +1474,7 @@ static std::optional<std::vector<uint8_t>> asm_ma(const std::string& mnem, const
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.maskmovdqu(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "maskmovq") {
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.maskmovq(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "maxpd") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.maxpd(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -1531,6 +1565,8 @@ static std::optional<std::vector<uint8_t>> asm_mo(const std::string& mnem, const
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.movddup(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "movdq2q") {
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Xmm) { gen.movdq2q(ops[0].mmx, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.movdq2q(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "movdqa") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.movdqa(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -1592,8 +1628,12 @@ static std::optional<std::vector<uint8_t>> asm_mo(const std::string& mnem, const
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.movq(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.movq(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Mem && ops[1].kind == OpKind::Xmm) { gen.movq(ops[0].mem, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.movq(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.movq(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "movq2dq") {
+        if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mmx) { gen.movq2dq(ops[0].xmm, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.movq2dq(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "movs") {
         if (n == 0) { gen.movs(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -1732,22 +1772,32 @@ static std::optional<std::vector<uint8_t>> asm_pa(const std::string& mnem, const
     if (mnem == "pabsb") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pabsb(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pabsb(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pabsb(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pabsb(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pabsd") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pabsd(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pabsd(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pabsd(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pabsd(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pabsw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pabsw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pabsw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pabsw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pabsw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "packssdw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.packssdw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.packssdw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.packssdw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.packssdw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "packsswb") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.packsswb(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.packsswb(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.packsswb(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.packsswb(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "packusdw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.packusdw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -1756,50 +1806,74 @@ static std::optional<std::vector<uint8_t>> asm_pa(const std::string& mnem, const
     else if (mnem == "packuswb") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.packuswb(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.packuswb(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.packuswb(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.packuswb(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "paddb") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.paddb(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.paddb(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.paddb(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.paddb(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "paddd") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.paddd(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.paddd(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.paddd(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.paddd(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "paddq") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.paddq(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.paddq(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.paddq(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.paddq(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "paddsb") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.paddsb(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.paddsb(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.paddsb(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.paddsb(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "paddsw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.paddsw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.paddsw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.paddsw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.paddsw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "paddusb") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.paddusb(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.paddusb(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.paddusb(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.paddusb(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "paddusw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.paddusw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.paddusw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.paddusw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.paddusw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "paddw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.paddw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.paddw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.paddw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.paddw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "palignr") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.palignr(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.palignr(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.palignr(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.palignr(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pand") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pand(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pand(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pand(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pand(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pandn") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pandn(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pandn(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pandn(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pandn(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pause") {
         if (n == 0) { gen.pause(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -1807,10 +1881,14 @@ static std::optional<std::vector<uint8_t>> asm_pa(const std::string& mnem, const
     else if (mnem == "pavgb") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pavgb(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pavgb(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pavgb(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pavgb(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pavgw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pavgw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pavgw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pavgw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pavgw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     return std::nullopt;
 }
@@ -1833,10 +1911,14 @@ static std::optional<std::vector<uint8_t>> asm_pc(const std::string& mnem, const
     if (mnem == "pcmpeqb") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pcmpeqb(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pcmpeqb(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pcmpeqb(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pcmpeqb(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pcmpeqd") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pcmpeqd(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pcmpeqd(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pcmpeqd(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pcmpeqd(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pcmpeqq") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pcmpeqq(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -1845,6 +1927,8 @@ static std::optional<std::vector<uint8_t>> asm_pc(const std::string& mnem, const
     else if (mnem == "pcmpeqw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pcmpeqw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pcmpeqw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pcmpeqw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pcmpeqw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pcmpestri") {
         if (n == 3 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm && ops[2].kind == OpKind::Imm) { gen.pcmpestri(ops[0].xmm, ops[1].xmm, (uint8_t)ops[2].imm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -1857,10 +1941,14 @@ static std::optional<std::vector<uint8_t>> asm_pc(const std::string& mnem, const
     else if (mnem == "pcmpgtb") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pcmpgtb(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pcmpgtb(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pcmpgtb(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pcmpgtb(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pcmpgtd") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pcmpgtd(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pcmpgtd(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pcmpgtd(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pcmpgtd(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pcmpgtq") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pcmpgtq(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -1869,6 +1957,8 @@ static std::optional<std::vector<uint8_t>> asm_pc(const std::string& mnem, const
     else if (mnem == "pcmpgtw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pcmpgtw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pcmpgtw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pcmpgtw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pcmpgtw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pcmpistri") {
         if (n == 3 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm && ops[2].kind == OpKind::Imm) { gen.pcmpistri(ops[0].xmm, ops[1].xmm, (uint8_t)ops[2].imm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -1901,14 +1991,20 @@ static std::optional<std::vector<uint8_t>> asm_ph(const std::string& mnem, const
     if (mnem == "phaddd") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.phaddd(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.phaddd(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.phaddd(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.phaddd(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "phaddsw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.phaddsw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.phaddsw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.phaddsw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.phaddsw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "phaddw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.phaddw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.phaddw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.phaddw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.phaddw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "phminposuw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.phminposuw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -1917,14 +2013,20 @@ static std::optional<std::vector<uint8_t>> asm_ph(const std::string& mnem, const
     else if (mnem == "phsubd") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.phsubd(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.phsubd(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.phsubd(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.phsubd(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "phsubsw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.phsubsw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.phsubsw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.phsubsw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.phsubsw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "phsubw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.phsubw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.phsubw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.phsubw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.phsubw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     return std::nullopt;
 }
@@ -1948,10 +2050,14 @@ static std::optional<std::vector<uint8_t>> asm_pm(const std::string& mnem, const
     if (mnem == "pmaddubsw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pmaddubsw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pmaddubsw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pmaddubsw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pmaddubsw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pmaddwd") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pmaddwd(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pmaddwd(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pmaddwd(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pmaddwd(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pmaxsb") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pmaxsb(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -1964,10 +2070,14 @@ static std::optional<std::vector<uint8_t>> asm_pm(const std::string& mnem, const
     else if (mnem == "pmaxsw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pmaxsw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pmaxsw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pmaxsw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pmaxsw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pmaxub") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pmaxub(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pmaxub(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pmaxub(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pmaxub(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pmaxud") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pmaxud(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -1988,10 +2098,14 @@ static std::optional<std::vector<uint8_t>> asm_pm(const std::string& mnem, const
     else if (mnem == "pminsw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pminsw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pminsw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pminsw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pminsw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pminub") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pminub(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pminub(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pminub(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pminub(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pminud") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pminud(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2047,14 +2161,20 @@ static std::optional<std::vector<uint8_t>> asm_pm(const std::string& mnem, const
     else if (mnem == "pmulhrsw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pmulhrsw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pmulhrsw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pmulhrsw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pmulhrsw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pmulhuw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pmulhuw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pmulhuw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pmulhuw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pmulhuw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pmulhw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pmulhw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pmulhw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pmulhw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pmulhw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pmulld") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pmulld(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2063,10 +2183,14 @@ static std::optional<std::vector<uint8_t>> asm_pm(const std::string& mnem, const
     else if (mnem == "pmullw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pmullw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pmullw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pmullw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pmullw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pmuludq") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pmuludq(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pmuludq(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pmuludq(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pmuludq(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     return std::nullopt;
 }
@@ -2096,6 +2220,8 @@ static std::optional<std::vector<uint8_t>> asm_po(const std::string& mnem, const
     else if (mnem == "por") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.por(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.por(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.por(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.por(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     return std::nullopt;
 }
@@ -2126,10 +2252,14 @@ static std::optional<std::vector<uint8_t>> asm_ps(const std::string& mnem, const
     if (mnem == "psadbw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.psadbw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.psadbw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.psadbw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.psadbw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pshufb") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pshufb(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pshufb(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pshufb(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pshufb(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pshufd") {
         if (n == 3 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm && ops[2].kind == OpKind::Imm) { gen.pshufd(ops[0].xmm, ops[1].xmm, (uint8_t)ops[2].imm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2144,22 +2274,31 @@ static std::optional<std::vector<uint8_t>> asm_ps(const std::string& mnem, const
         if (n == 3 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem && ops[2].kind == OpKind::Imm) { gen.pshuflw(ops[0].xmm, ops[1].mem, (uint8_t)ops[2].imm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pshufw") {
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pshufw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "psignb") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.psignb(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.psignb(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.psignb(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.psignb(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "psignd") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.psignd(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.psignd(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.psignd(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.psignd(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "psignw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.psignw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.psignw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.psignw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.psignw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pslld") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pslld(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pslld(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pslld(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pslld(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Imm) { gen.pslld(ops[0].xmm, (uint8_t)ops[1].imm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "pslldq") {
@@ -2168,26 +2307,36 @@ static std::optional<std::vector<uint8_t>> asm_ps(const std::string& mnem, const
     else if (mnem == "psllq") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.psllq(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.psllq(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.psllq(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.psllq(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Imm) { gen.psllq(ops[0].xmm, (uint8_t)ops[1].imm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "psllw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.psllw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.psllw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.psllw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.psllw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Imm) { gen.psllw(ops[0].xmm, (uint8_t)ops[1].imm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "psrad") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.psrad(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.psrad(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.psrad(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.psrad(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Imm) { gen.psrad(ops[0].xmm, (uint8_t)ops[1].imm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "psraw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.psraw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.psraw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.psraw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.psraw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Imm) { gen.psraw(ops[0].xmm, (uint8_t)ops[1].imm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "psrld") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.psrld(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.psrld(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.psrld(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.psrld(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Imm) { gen.psrld(ops[0].xmm, (uint8_t)ops[1].imm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "psrldq") {
@@ -2196,44 +2345,64 @@ static std::optional<std::vector<uint8_t>> asm_ps(const std::string& mnem, const
     else if (mnem == "psrlq") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.psrlq(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.psrlq(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.psrlq(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.psrlq(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Imm) { gen.psrlq(ops[0].xmm, (uint8_t)ops[1].imm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "psrlw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.psrlw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.psrlw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.psrlw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.psrlw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Imm) { gen.psrlw(ops[0].xmm, (uint8_t)ops[1].imm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "psubb") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.psubb(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.psubb(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.psubb(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.psubb(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "psubd") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.psubd(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.psubd(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.psubd(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.psubd(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "psubq") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.psubq(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.psubq(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.psubq(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.psubq(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "psubsb") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.psubsb(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.psubsb(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.psubsb(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.psubsb(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "psubsw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.psubsw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.psubsw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.psubsw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.psubsw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "psubusb") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.psubusb(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.psubusb(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.psubusb(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.psubusb(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "psubusw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.psubusw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.psubusw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.psubusw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.psubusw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "psubw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.psubw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.psubw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.psubw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.psubw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     return std::nullopt;
 }
@@ -2252,10 +2421,14 @@ static std::optional<std::vector<uint8_t>> asm_pu(const std::string& mnem, const
     if (mnem == "punpckhbw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.punpckhbw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.punpckhbw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.punpckhbw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.punpckhbw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "punpckhdq") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.punpckhdq(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.punpckhdq(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.punpckhdq(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.punpckhdq(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "punpckhqdq") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.punpckhqdq(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2264,14 +2437,20 @@ static std::optional<std::vector<uint8_t>> asm_pu(const std::string& mnem, const
     else if (mnem == "punpckhwd") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.punpckhwd(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.punpckhwd(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.punpckhwd(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.punpckhwd(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "punpcklbw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.punpcklbw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.punpcklbw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.punpcklbw(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.punpcklbw(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "punpckldq") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.punpckldq(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.punpckldq(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.punpckldq(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.punpckldq(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "punpcklqdq") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.punpcklqdq(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2280,6 +2459,8 @@ static std::optional<std::vector<uint8_t>> asm_pu(const std::string& mnem, const
     else if (mnem == "punpcklwd") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.punpcklwd(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.punpcklwd(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.punpcklwd(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.punpcklwd(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     else if (mnem == "push") {
         if (n == 1 && ops[0].kind == OpKind::Reg) { gen.push(ops[0].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2305,6 +2486,8 @@ static std::optional<std::vector<uint8_t>> asm_px(const std::string& mnem, const
     if (mnem == "pxor") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pxor(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pxor(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mmx) { gen.pxor(ops[0].mmx, ops[1].mmx); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (n == 2 && ops[0].kind == OpKind::Mmx && ops[1].kind == OpKind::Mem) { gen.pxor(ops[0].mmx, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
     return std::nullopt;
 }
@@ -2842,6 +3025,19 @@ std::optional<std::vector<uint8_t>> assemble(const std::string& text) {
         return std::vector<uint8_t>(gen.data(), gen.data() + gen.size());
     }
 
+    if (mnem == "times") {
+        size_t sp2 = rest.find_first_of(" \t");
+        if (sp2 == std::string::npos) return std::nullopt;
+        int64_t count; std::string cnt_s = trim(rest.substr(0, sp2));
+        if (!parse_imm(cnt_s, count) || count < 0) return std::nullopt;
+        std::string inner = trim(rest.substr(sp2));
+        auto one = assemble(inner);
+        if (!one) return std::nullopt;
+        std::vector<uint8_t> result;
+        for (int64_t i = 0; i < count; ++i) result.insert(result.end(), one->begin(), one->end());
+        return result;
+    }
+
     bool has_lock = false, has_rep = false, has_repe = false, has_repne = false;
     if (mnem == "lock" || mnem == "rep" || mnem == "repe" || mnem == "repz" || mnem == "repne" || mnem == "repnz") {
         if (mnem == "lock") has_lock = true;
@@ -3367,6 +3563,37 @@ std::vector<Stmt> parse_stmts(const std::string& text) {
 std::optional<std::vector<uint8_t>> assemble_block(const std::string& text) {
     auto stmts = parse_stmts(text);
     if (stmts.empty()) return std::vector<uint8_t>{};
+
+    std::unordered_map<std::string, std::string> equates;
+    std::vector<Stmt> filtered;
+    for (auto& s : stmts) {
+        if (!s.is_label) {
+            std::string low = s.text;
+            size_t equ_pos = low.find(" equ ");
+            if (equ_pos == std::string::npos) equ_pos = low.find(" EQU ");
+            if (equ_pos != std::string::npos) {
+                std::string name = trim(low.substr(0, equ_pos));
+                std::string value = trim(low.substr(equ_pos + 5));
+                if (!name.empty() && !value.empty()) { equates[name] = value; continue; }
+            }
+        }
+        filtered.push_back(s);
+    }
+    if (!equates.empty()) {
+        for (auto& s : filtered) {
+            if (s.is_label) continue;
+            for (auto& [name, value] : equates) {
+                size_t pos = 0;
+                while ((pos = s.text.find(name, pos)) != std::string::npos) {
+                    bool before_ok = (pos == 0 || !isalnum(s.text[pos-1]) && s.text[pos-1] != '_');
+                    bool after_ok = (pos + name.size() >= s.text.size() || !isalnum(s.text[pos+name.size()]) && s.text[pos+name.size()] != '_');
+                    if (before_ok && after_ok) { s.text.replace(pos, name.size(), value); pos += value.size(); }
+                    else pos += name.size();
+                }
+            }
+        }
+    }
+    stmts = std::move(filtered);
 
     bool has_labels = false;
     for (auto& s : stmts) if (s.is_label) { has_labels = true; break; }
