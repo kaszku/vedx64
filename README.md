@@ -170,6 +170,39 @@ if (sem) {
 }
 ```
 
+## Text Assembler
+
+Assemble x86-64 from Intel syntax text. 585 mnemonics with memory operands,
+labels, prefixes, segment overrides, and data directives.
+
+```cpp
+#include <vedx64/assembler.hpp>
+
+// Single instruction
+auto bytes = vedx64::assemble("mov rax, [rbx+rcx*4+8]");
+
+// Block with labels
+auto code = vedx64::assemble_block(R"(
+    xor eax, eax
+    cmp ecx, 0
+    je done
+loop:
+    add eax, 1
+    dec ecx
+    jnz loop
+done:
+    ret
+)");
+
+// Features: memory, segments, prefixes, data
+assemble("mov rax, fs:[rbx+8]");     // segment override
+assemble("lock add [rax], rcx");      // lock prefix
+assemble("rep movsb");                 // rep prefix
+assemble("lea rax, [rip+0x1000]");     // RIP-relative
+assemble("db 0x90, 0x90");             // raw bytes
+assemble("dd 0xDEADBEEF");             // 32-bit data
+```
+
 ## API Reference
 
 | Header | Description |
@@ -181,7 +214,7 @@ if (sem) {
 | `vedx64/instruction.hpp` | `Instruction` high-level wrapper with `from_decoded()`, `decode_instruction()`, typed operand vector |
 | `vedx64/encoding_id.hpp` | `EncodingId` typed enum (1396 unique encodings) |
 | `vedx64/codegen.hpp` | `CodeGen` assembler DSL with `Reg`, `Xmm`, `Mem` operand types and label support |
-| `vedx64/assembler.hpp` | `assemble()` and `assemble_block()` for text-to-bytes |
+| `vedx64/assembler.hpp` | `assemble()`, `assemble_block()` — text-to-bytes with 585 mnemonics, memory, labels, prefixes, data directives |
 | `vedx64/semantics.hpp` | `Semantics` struct, `get_semantics()`, flag/flow/category analysis, `is_branch()`, `is_call()`, `is_return()` |
 | `vedx64/ir.hpp` | `ir::Opcode` (47 opcodes), `VarNode` (GPR/XMM/Temp/RAM/Const), `Op`, `Lifted`, `lift()`, `execute()` |
 | `vedx64/emu.hpp` | `CpuState` (GPR, RFLAGS, XMM/YMM, x87, memory), `emu_init()`, `emu_step()`, `emu_run()`, `StepResult` |

@@ -9,25 +9,64 @@
 using namespace vedx64;
 int main() {
     printf("=== Text Assembler Example ===\n\n");
-    printf("--- Single instructions ---\n");
-    const char* insns[] = {"nop", "ret", "push rbp", "mov rbp, rsp", "sub rsp, 0x20",
-        "mov rax, rcx", "add rax, 42", "xor eax, eax", "int3",
-        "mov rax, [rbx]", "mov [rax], rcx", "add dword [rsp+8], 1",
-        "movaps xmm0, [rax]"};
-    for (auto text : insns) {
+    auto show = [](const char* text) {
         auto bytes = assemble(text);
         if (bytes) {
-            printf("  %-30s -> ", text);
+            printf("  %-35s -> ", text);
             for (auto b : *bytes) printf("%02X ", b);
 #ifdef VEDX64_STRINGS
             char dis[128]; disassemble(bytes->data(), bytes->size(), dis, sizeof(dis), 0);
             printf(" (%s)", dis);
 #endif
             printf("\n");
-        } else printf("  %-30s -> FAILED\n", text);
-    }
-    printf("\n--- Block assembly ---\n");
-    auto block = assemble_block("push rbp\nmov rbp, rsp\nsub rsp, 0x20\nmov rax, [rbp+16]\nadd rsp, 0x20\npop rbp\nret");
+        } else printf("  %-35s -> FAILED\n", text);
+    };
+
+    printf("--- Basic instructions ---\n");
+    show("nop");
+    show("ret");
+    show("push rbp");
+    show("mov rbp, rsp");
+    show("sub rsp, 0x20");
+    show("mov rax, rcx");
+    show("add rax, 42");
+    show("xor eax, eax");
+    show("int3");
+    printf("\n--- Memory operands ---\n");
+    show("mov rax, [rbx]");
+    show("mov rax, [rbx+8]");
+    show("mov rax, [rbx+rcx*4+16]");
+    show("mov [rax], rcx");
+    show("add dword [rsp+8], 1");
+    show("lea rax, [rip+0x1000]");
+    show("movaps xmm0, [rax]");
+    show("movaps [rbx], xmm1");
+    printf("\n--- Segment overrides ---\n");
+    show("mov rax, fs:[rbx]");
+    show("mov rax, gs:[0x28]");
+    printf("\n--- Prefixes ---\n");
+    show("lock add [rax], rcx");
+    show("lock cmpxchg [rax], rcx");
+    show("rep movsb");
+    show("rep stosq");
+    show("repe cmpsb");
+    printf("\n--- Data directives ---\n");
+    show("db 0x90");
+    show("db 0xCC, 0xCC, 0x90");
+    show("dw 0x1234");
+    show("dd 0xDEADBEEF");
+    printf("\n--- Block with labels ---\n");
+    auto block = assemble_block(
+        "    xor eax, eax\n"
+        "    cmp ecx, 0\n"
+        "    je done\n"
+        "loop:\n"
+        "    add eax, 1\n"
+        "    dec ecx\n"
+        "    jnz loop\n"
+        "done:\n"
+        "    ret\n"
+    );
     if (block) {
         printf("  %zu bytes: ", block->size());
         for (auto b : *block) printf("%02X ", b);

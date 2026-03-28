@@ -13,12 +13,18 @@
 
 namespace vedx64 {
 
-/// Assemble a single x86-64 instruction from text.
-/// Returns encoded bytes on success, std::nullopt on parse failure.
-/// Examples: "nop", "mov rax, rcx", "add rax, 42", "push rbp"
+/// Assemble a single x86-64 instruction from Intel-syntax text.
+/// Returns encoded bytes on success, std::nullopt on failure.
+///
+/// Supports 585 mnemonics, memory operands ([rax+rcx*4+8]),
+/// size hints (byte/word/dword/qword), segment overrides (fs:[rax]),
+/// RIP-relative ([rip+disp]), lock/rep prefixes, relative jumps/calls,
+/// data directives (db/dw/dd/dq), and mnemonic aliases (cmova, je, sete).
 std::optional<std::vector<uint8_t>> assemble(const std::string& text);
 
 /// Assemble multiple instructions separated by newlines or semicolons.
+/// Supports labels (name: or name: instr) with two-pass resolution
+/// for forward/backward jumps. Comments: # or //
 /// Returns concatenated bytes on success, std::nullopt if any line fails.
 std::optional<std::vector<uint8_t>> assemble_block(const std::string& text);
 
