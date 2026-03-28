@@ -337,6 +337,45 @@ int main() {
     CHECK(asm_ok("lea rax, [rip+0x1000]"), "lea rip");
     CHECK(asm_ok("cmp dword [rip+4], 0"), "cmp rip mi");
 
+    printf("  Data directives...\n");
+    {
+        auto d1 = vedx64::assemble("db 0x90");
+        CHECK(d1.has_value() && d1->size() == 1 && (*d1)[0] == 0x90, "db single");
+    }
+    {
+        auto d2 = vedx64::assemble("db 0xCC, 0xCC, 0x90");
+        CHECK(d2.has_value() && d2->size() == 3, "db multi");
+    }
+    {
+        auto d3 = vedx64::assemble("db \"ABC\"");
+        CHECK(d3.has_value() && d3->size() == 3 && (*d3)[0] == 'a' && (*d3)[1] == 'b' && (*d3)[2] == 'c', "db string");
+    }
+    {
+        auto d4 = vedx64::assemble("dw 0x1234");
+        CHECK(d4.has_value() && d4->size() == 2, "dw");
+        CHECK((*d4)[0] == 0x34 && (*d4)[1] == 0x12, "dw little-endian");
+    }
+    {
+        auto d5 = vedx64::assemble("dd 0xDEADBEEF");
+        CHECK(d5.has_value() && d5->size() == 4, "dd");
+    }
+    {
+        auto d6 = vedx64::assemble("dq 0x123456789ABCDEF0");
+        CHECK(d6.has_value() && d6->size() == 8, "dq");
+    }
+    {
+        auto d7 = vedx64::assemble("dd 1, 2, 3, 4");
+        CHECK(d7.has_value() && d7->size() == 16, "dd multi");
+    }
+    {
+        auto d8 = vedx64::assemble("db \"Hello\", 0");
+        CHECK(d8.has_value() && d8->size() == 6 && (*d8)[5] == 0, "db string+null");
+    }
+    {
+        auto d9 = vedx64::assemble_block("jmp skip\ndb 0xCC, 0xCC\nskip:\nnop\nret");
+        CHECK(d9.has_value(), "db in block with labels");
+    }
+
     printf("  Error cases...\n");
     CHECK(!vedx64::assemble("foobar").has_value(), "invalid mnem");
     CHECK(!vedx64::assemble("").has_value(), "empty string");

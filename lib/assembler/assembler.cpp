@@ -2742,6 +2742,26 @@ std::optional<std::vector<uint8_t>> assemble(const std::string& text) {
     size_t space = s.find_first_of(" \t");
     std::string mnem = (space == std::string::npos) ? s : s.substr(0, space);
     std::string rest = (space == std::string::npos) ? "" : trim(s.substr(space));
+    if (mnem == "db" || mnem == "dw" || mnem == "dd" || mnem == "dq") {
+        CodeGen gen;
+        auto vals = split_operands(rest);
+        for (auto& v : vals) {
+            std::string vt = trim(v);
+            if (vt.empty()) continue;
+            if (vt.size() >= 2 && vt.front() == '"' && vt.back() == '"') {
+                for (size_t ci = 1; ci < vt.size() - 1; ++ci) gen.db((uint8_t)vt[ci]);
+                continue;
+            }
+            int64_t imm; if (!parse_imm(vt, imm)) return std::nullopt;
+            if (mnem == "db") gen.db((uint8_t)imm);
+            else if (mnem == "dw") gen.dw((uint16_t)imm);
+            else if (mnem == "dd") gen.dd((uint32_t)imm);
+            else gen.dq((uint64_t)imm);
+        }
+        if (gen.size() == 0) return std::nullopt;
+        return std::vector<uint8_t>(gen.data(), gen.data() + gen.size());
+    }
+
     bool has_lock = false, has_rep = false, has_repe = false, has_repne = false;
     if (mnem == "lock" || mnem == "rep" || mnem == "repe" || mnem == "repz" || mnem == "repne" || mnem == "repnz") {
         if (mnem == "lock") has_lock = true;
