@@ -29,7 +29,7 @@ namespace nb = nanobind;
 using namespace vedx64;
 
 NB_MODULE(vedx64_py, m) {
-    m.doc() = "x86-64 encoder, decoder and disassembler";
+    m.doc() = "x86-64 instruction toolkit: decoder, encoder, disassembler, assembler, emulator, and more";
 
     nb::enum_<Mnemonic>(m, "Mnemonic")
         .value("INVALID", Mnemonic::INVALID)
