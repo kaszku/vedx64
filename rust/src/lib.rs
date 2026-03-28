@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Kevin Szkudlapski
-// Auto-generated — do not edit
 
 //! Rust bindings for the vedx64 x86-64 library.
 //!

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Kevin Szkudlapski
-// Auto-generated — do not edit
 
 #ifdef VEDX64_ASSEMBLER
 #include "vedx64/assembler.hpp"
@@ -3606,7 +3605,7 @@ std::optional<std::vector<uint8_t>> assemble(const std::string& text) {
 }
 
 namespace {
-struct Stmt { std::string text; bool is_label; std::string label_name; };
+struct Stmt { std::string text; bool is_label; std::string label_name; int align; };
 std::vector<Stmt> parse_stmts(const std::string& text) {
     std::vector<Stmt> stmts;
     std::istringstream stream(text);
@@ -3623,20 +3622,24 @@ std::vector<Stmt> parse_stmts(const std::string& text) {
             if (t.empty()) continue;
             if (t.back() == ':') {
                 std::string name = trim(t.substr(0, t.size() - 1));
-                if (!name.empty()) { stmts.push_back({t, true, to_lower(name)}); continue; }
+                if (!name.empty()) { stmts.push_back({t, true, to_lower(name), 0}); continue; }
             }
             size_t colon = t.find(':');
             if (colon != std::string::npos && colon > 0 && t[colon-1] != ']') {
                 std::string before = trim(t.substr(0, colon));
                 bool valid_label = !before.empty() && before.find(' ') == std::string::npos && before.find('[') == std::string::npos;
                 if (valid_label) {
-                    stmts.push_back({t, true, to_lower(before)});
+                    stmts.push_back({t, true, to_lower(before), 0});
                     std::string after = trim(t.substr(colon + 1));
-                    if (!after.empty()) stmts.push_back({after, false, ""});
+                    if (!after.empty()) stmts.push_back({after, false, "", 0});
                     continue;
                 }
             }
-            stmts.push_back({t, false, ""});
+            if (t.substr(0, 6) == "align " || t.substr(0, 6) == "ALIGN ") {
+                int a = atoi(t.substr(6).c_str());
+                if (a > 0) { stmts.push_back({t, false, "", a}); continue; }
+            }
+            stmts.push_back({t, false, "", 0});
         }
     }
     return stmts;
@@ -3711,6 +3714,10 @@ std::optional<std::vector<uint8_t>> assemble_block(const std::string& text) {
     if (!has_labels) {
         std::vector<uint8_t> result;
         for (auto& s : stmts) {
+            if (s.align > 0) {
+                while (result.size() % s.align != 0) result.push_back(0x90);
+                continue;
+            }
             auto bytes = assemble(s.text);
             if (!bytes) return std::nullopt;
             result.insert(result.end(), bytes->begin(), bytes->end());
@@ -3729,6 +3736,15 @@ std::optional<std::vector<uint8_t>> assemble_block(const std::string& text) {
             labels[stmts[i].label_name] = offset;
             insn_idx.push_back(-1);
             needs_resolve.push_back(false);
+            continue;
+        }
+        if (stmts[i].align > 0) {
+            std::vector<uint8_t> pad;
+            while ((offset + (int32_t)pad.size()) % stmts[i].align != 0) pad.push_back(0x90);
+            insn_idx.push_back((int)insn_bytes.size());
+            needs_resolve.push_back(false);
+            offset += (int32_t)pad.size();
+            insn_bytes.push_back(std::move(pad));
             continue;
         }
         auto bytes = assemble(stmts[i].text);

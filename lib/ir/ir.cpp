@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Kevin Szkudlapski
-// Auto-generated — do not edit
 
 #ifdef VEDX64_IR
 #include "vedx64/ir.hpp"

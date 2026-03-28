@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Kevin Szkudlapski
-// Auto-generated — do not edit
 
 #ifdef VEDX64_ASSEMBLER
 #include "vedx64/assembler.hpp"
@@ -502,6 +501,23 @@ int main() {
     CHECK(asm_bytes("neg al", {0xF6, 0xD8}), "neg al = F6 D8");
     CHECK(asm_bytes("not eax", {0xF7, 0xD0}), "not eax = F7 D0");
     CHECK(asm_bytes("not al", {0xF6, 0xD0}), "not al = F6 D0");
+
+    printf("  Align directive...\n");
+    {
+        auto a1 = vedx64::assemble_block("nop\nalign 4\nnop");
+        CHECK(a1.has_value(), "align 4");
+        CHECK(a1->size() == 5, "align 4: 1 nop + 3 pad + 1 nop = 5");
+    }
+    {
+        auto a2 = vedx64::assemble_block("align 16\nnop");
+        CHECK(a2.has_value(), "align 16 at start");
+        CHECK(a2->size() == 1, "align 16 at start: already aligned, just nop");
+    }
+    {
+        auto a3 = vedx64::assemble_block("db 0xCC\nalign 8\nret");
+        CHECK(a3.has_value(), "align 8 after db");
+        CHECK(a3->size() == 9, "align 8: 1 + 7 pad + 1 ret = 9");
+    }
 
     printf("  Error cases...\n");
     CHECK(!vedx64::assemble("foobar").has_value(), "invalid mnem");

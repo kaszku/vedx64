@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Kevin Szkudlapski
-# Auto-generated — do not edit
 
 """Tests for vedx64 Python bindings."""
 import vedx64_py as v

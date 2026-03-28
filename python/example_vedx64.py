@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Kevin Szkudlapski
-# Auto-generated — do not edit
 
 #!/usr/bin/env python3
 """vedx64 Python bindings example.

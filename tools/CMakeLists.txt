@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Kevin Szkudlapski
-# Auto-generated — do not edit
 
 cmake_minimum_required(VERSION 3.15)
 project(vedx64_tools LANGUAGES CXX)

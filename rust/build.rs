@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Kevin Szkudlapski
-// Auto-generated — do not edit
 
 fn main() {
     // Link vedx64 static library.

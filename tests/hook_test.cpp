@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Kevin Szkudlapski
-// Auto-generated — do not edit
 
 #ifdef _MSC_VER
 #pragma warning(disable: 4996) // getenv

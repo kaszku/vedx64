@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Kevin Szkudlapski
-// Auto-generated — do not edit
 
 #include "vedx64/instruction.hpp"
 #include "vedx64/encoding_id.hpp"

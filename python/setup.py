@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Kevin Szkudlapski
-# Auto-generated — do not edit
 
 import os
 from pathlib import Path
