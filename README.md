@@ -44,7 +44,7 @@ and language bindings for Python and Rust.
 | Text assembler mnemonics | 585 |
 | IR lifter handlers | 831 mnemonics |
 | Emulator handlers | 638 mnemonics |
-| Test suites | 12 (1,200+ assertions) |
+| Test suites | 12 (4,500+ assertions) |
 
 ## Quick Start
 
