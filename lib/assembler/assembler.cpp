@@ -131,14 +131,52 @@ const XmmInfo g_mmx_table[] = {
     {"mm7", 7},
 };
 
-enum class OpKind { Reg, Xmm, Mmx, Mem, Imm };
+const XmmInfo g_zmm_table[] = {
+    {"zmm0", 0},
+    {"zmm1", 1},
+    {"zmm2", 2},
+    {"zmm3", 3},
+    {"zmm4", 4},
+    {"zmm5", 5},
+    {"zmm6", 6},
+    {"zmm7", 7},
+    {"zmm8", 8},
+    {"zmm9", 9},
+    {"zmm10", 10},
+    {"zmm11", 11},
+    {"zmm12", 12},
+    {"zmm13", 13},
+    {"zmm14", 14},
+    {"zmm15", 15},
+    {"zmm16", 16},
+    {"zmm17", 17},
+    {"zmm18", 18},
+    {"zmm19", 19},
+    {"zmm20", 20},
+    {"zmm21", 21},
+    {"zmm22", 22},
+    {"zmm23", 23},
+    {"zmm24", 24},
+    {"zmm25", 25},
+    {"zmm26", 26},
+    {"zmm27", 27},
+    {"zmm28", 28},
+    {"zmm29", 29},
+    {"zmm30", 30},
+    {"zmm31", 31},
+};
+
+enum class OpKind { Reg, Xmm, Zmm, Mmx, Mem, Imm };
 struct ParsedOp {
     OpKind kind;
     Reg reg;
     Xmm xmm;
+    Zmm zmm;
     Mmx mmx;
     Mem mem;
     int64_t imm;
+    uint8_t mask_k;   // 0 = no mask, 1-7 = k1-k7
+    bool zeroing;     // {z} decorator
 };
 
 bool parse_gpr(const std::string& s, Reg& out) {
@@ -151,6 +189,13 @@ bool parse_gpr(const std::string& s, Reg& out) {
 bool parse_xmm(const std::string& s, Xmm& out) {
     for (auto& x : g_xmm_table) {
         if (s == x.name) { out = Xmm{x.id}; return true; }
+    }
+    return false;
+}
+
+bool parse_zmm(const std::string& s, Zmm& out) {
+    for (auto& x : g_zmm_table) {
+        if (s == x.name) { out = Zmm{x.id}; return true; }
     }
     return false;
 }
@@ -268,19 +313,30 @@ bool parse_mem(const std::string& s, Mem& out) {
 }
 
 bool parse_operand(const std::string& s, ParsedOp& out) {
-    // Try register first
-    Reg r; Xmm x; Mem m; int64_t imm;
-    if (parse_gpr(s, r)) { out.kind = OpKind::Reg; out.reg = r; return true; }
-    if (parse_xmm(s, x)) { out.kind = OpKind::Xmm; out.xmm = x; return true; }
-    Mmx mm;
-    if (parse_mmx(s, mm)) { out.kind = OpKind::Mmx; out.mmx = mm; return true; }
-    // Try memory (contains [ or starts with size prefix)
-    if (s.find('[') != std::string::npos || s.substr(0,4) == "byte" ||
-        s.substr(0,4) == "word" || s.substr(0,5) == "dword" || s.substr(0,5) == "qword") {
-        if (parse_mem(s, m)) { out.kind = OpKind::Mem; out.mem = m; return true; }
+    out.mask_k = 0; out.zeroing = false;
+    std::string clean = s;
+    for (;;) {
+        size_t brace = clean.find('{');
+        if (brace == std::string::npos) break;
+        size_t end = clean.find('}', brace);
+        if (end == std::string::npos) break;
+        std::string dec = trim(clean.substr(brace + 1, end - brace - 1));
+        if (dec == "z") out.zeroing = true;
+        else if (dec.size() == 2 && dec[0] == 'k' && dec[1] >= '1' && dec[1] <= '7') out.mask_k = dec[1] - '0';
+        clean = trim(clean.substr(0, brace) + clean.substr(end + 1));
     }
-    // Try immediate
-    if (parse_imm(s, imm)) { out.kind = OpKind::Imm; out.imm = imm; return true; }
+    clean = trim(clean);
+
+    Reg r; Xmm x; Zmm z; Mmx mm; Mem m; int64_t imm;
+    if (parse_gpr(clean, r)) { out.kind = OpKind::Reg; out.reg = r; return true; }
+    if (parse_zmm(clean, z)) { out.kind = OpKind::Zmm; out.zmm = z; return true; }
+    if (parse_xmm(clean, x)) { out.kind = OpKind::Xmm; out.xmm = x; return true; }
+    if (parse_mmx(clean, mm)) { out.kind = OpKind::Mmx; out.mmx = mm; return true; }
+    if (clean.find('[') != std::string::npos || clean.substr(0,4) == "byte" ||
+        clean.substr(0,4) == "word" || clean.substr(0,5) == "dword" || clean.substr(0,5) == "qword") {
+        if (parse_mem(clean, m)) { out.kind = OpKind::Mem; out.mem = m; return true; }
+    }
+    if (parse_imm(clean, imm)) { out.kind = OpKind::Imm; out.imm = imm; return true; }
     return false;
 }
 
@@ -3160,6 +3216,33 @@ std::optional<std::vector<uint8_t>> assemble(const std::string& text) {
     if (n == 1 && ops[0].kind == OpKind::Mem) {
         if (mnem == "call") { gen.call(ops[0].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (mnem == "jmp") { gen.jmp(ops[0].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+    }
+
+    uint8_t mask_k = 0; bool zeroing = false;
+    for (auto& op : ops) { if (op.mask_k) mask_k = op.mask_k; if (op.zeroing) zeroing = true; }
+    if (mask_k > 0) {
+        auto ok = [&]() { return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); };
+        if (mnem == "vpxord" && n == 3 && ops[0].kind == OpKind::Zmm && ops[1].kind == OpKind::Zmm && ops[2].kind == OpKind::Zmm) {
+            gen.vpxord_k(ops[0].zmm, ops[1].zmm, ops[2].zmm, mask_k, zeroing); return ok();
+        }
+        if (mnem == "vpxorq" && n == 3 && ops[0].kind == OpKind::Zmm && ops[1].kind == OpKind::Zmm && ops[2].kind == OpKind::Zmm) {
+            gen.vpxorq_k(ops[0].zmm, ops[1].zmm, ops[2].zmm, mask_k, zeroing); return ok();
+        }
+        if (mnem == "vpandd" && n == 3 && ops[0].kind == OpKind::Zmm && ops[1].kind == OpKind::Zmm && ops[2].kind == OpKind::Zmm) {
+            gen.vpandd_k(ops[0].zmm, ops[1].zmm, ops[2].zmm, mask_k, zeroing); return ok();
+        }
+        if (mnem == "vpandq" && n == 3 && ops[0].kind == OpKind::Zmm && ops[1].kind == OpKind::Zmm && ops[2].kind == OpKind::Zmm) {
+            gen.vpandq_k(ops[0].zmm, ops[1].zmm, ops[2].zmm, mask_k, zeroing); return ok();
+        }
+        if (mnem == "vpord" && n == 3 && ops[0].kind == OpKind::Zmm && ops[1].kind == OpKind::Zmm && ops[2].kind == OpKind::Zmm) {
+            gen.vpord_k(ops[0].zmm, ops[1].zmm, ops[2].zmm, mask_k, zeroing); return ok();
+        }
+        if (mnem == "vporq" && n == 3 && ops[0].kind == OpKind::Zmm && ops[1].kind == OpKind::Zmm && ops[2].kind == OpKind::Zmm) {
+            gen.vporq_k(ops[0].zmm, ops[1].zmm, ops[2].zmm, mask_k, zeroing); return ok();
+        }
+        if (mnem == "vpternlogd" && n == 4 && ops[0].kind == OpKind::Zmm && ops[1].kind == OpKind::Zmm && ops[2].kind == OpKind::Zmm && ops[3].kind == OpKind::Imm) {
+            gen.vpternlogd_k(ops[0].zmm, ops[1].zmm, ops[2].zmm, (uint8_t)ops[3].imm, mask_k, zeroing); return ok();
+        }
     }
 
     if (mnem.empty()) return std::nullopt;

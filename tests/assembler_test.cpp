@@ -413,6 +413,14 @@ int main() {
         CHECK(e2.has_value(), "equ in mov");
     }
 
+    printf("  AVX-512 / ZMM / masking...\n");
+    CHECK(asm_ok("vpxord zmm0 {k1}, zmm1, zmm2"), "vpxord masked");
+    CHECK(asm_ok("vpxord zmm0 {k1} {z}, zmm1, zmm2"), "vpxord masked+zeroing");
+    CHECK(asm_ok("vpandd zmm0 {k2}, zmm1, zmm2"), "vpandd masked k2");
+    CHECK(asm_ok("vpord zmm0 {k3}, zmm1, zmm2"), "vpord masked k3");
+    CHECK(asm_ok("vpternlogd zmm0 {k1}, zmm1, zmm2, 0xFF"), "vpternlogd masked");
+    CHECK(asm_ok("vpternlogd zmm0 {k1} {z}, zmm1, zmm2, 0xFF"), "vpternlogd masked+z");
+
     printf("  Error cases...\n");
     CHECK(!vedx64::assemble("foobar").has_value(), "invalid mnem");
     CHECK(!vedx64::assemble("").has_value(), "empty string");
