@@ -193,7 +193,6 @@ bool parse_mem(const std::string& s, Mem& out) {
     while (pos < t.size()) {
         while (pos < t.size() && t[pos] == ' ') pos++;
         if (pos >= t.size()) break;
-        size_t start = pos;
         bool is_neg = (t[pos] == '-');
         if (t[pos] == '+' || t[pos] == '-') pos++;
         while (pos < t.size() && t[pos] == ' ') pos++;
@@ -283,6 +282,7 @@ std::vector<std::string> split_operands(const std::string& s) {
 } // anonymous namespace
 
 static std::optional<std::vector<uint8_t>> asm_a(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "aaa") {
         if (n == 0) { gen.aaa(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -366,6 +366,7 @@ static std::optional<std::vector<uint8_t>> asm_a(const std::string& mnem, const 
 }
 
 static std::optional<std::vector<uint8_t>> asm_b(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "blendpd") {
         if (n == 3 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm && ops[2].kind == OpKind::Imm) { gen.blendpd(ops[0].xmm, ops[1].xmm, (uint8_t)ops[2].imm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 3 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem && ops[2].kind == OpKind::Imm) { gen.blendpd(ops[0].xmm, ops[1].mem, (uint8_t)ops[2].imm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -424,6 +425,7 @@ static std::optional<std::vector<uint8_t>> asm_b(const std::string& mnem, const 
 }
 
 static std::optional<std::vector<uint8_t>> asm_ca(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "call") {
         if (n == 1 && ops[0].kind == OpKind::Reg) { gen.call(ops[0].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 1 && ops[0].kind == OpKind::Mem) { gen.call(ops[0].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -436,6 +438,7 @@ static std::optional<std::vector<uint8_t>> asm_ca(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_cb(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "cbw") {
         if (n == 0) { gen.cbw(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -443,6 +446,7 @@ static std::optional<std::vector<uint8_t>> asm_cb(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_cd(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "cdq") {
         if (n == 0) { gen.cdq(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -450,6 +454,7 @@ static std::optional<std::vector<uint8_t>> asm_cd(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_cl(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "clc") {
         if (n == 0) { gen.clc(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -470,6 +475,7 @@ static std::optional<std::vector<uint8_t>> asm_cl(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_cm(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "cmc") {
         if (n == 0) { gen.cmc(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -575,6 +581,7 @@ static std::optional<std::vector<uint8_t>> asm_cm(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_co(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "comisd") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.comisd(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.comisd(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -587,6 +594,7 @@ static std::optional<std::vector<uint8_t>> asm_co(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_cp(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "cpuid") {
         if (n == 0) { gen.cpuid(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -594,6 +602,7 @@ static std::optional<std::vector<uint8_t>> asm_cp(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_cr(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "crc32") {
         if (n == 2 && ops[0].kind == OpKind::Reg && ops[1].kind == OpKind::Reg) { gen.crc32(ops[0].reg, ops[1].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Reg && ops[1].kind == OpKind::Mem) { gen.crc32(ops[0].reg, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -602,6 +611,7 @@ static std::optional<std::vector<uint8_t>> asm_cr(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_cv(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "cvtdq2pd") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.cvtdq2pd(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.cvtdq2pd(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -682,6 +692,7 @@ static std::optional<std::vector<uint8_t>> asm_cv(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_cw(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "cwd") {
         if (n == 0) { gen.cwd(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -692,6 +703,7 @@ static std::optional<std::vector<uint8_t>> asm_cw(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_d(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "daa") {
         if (n == 0) { gen.daa(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -734,6 +746,7 @@ static std::optional<std::vector<uint8_t>> asm_d(const std::string& mnem, const 
 }
 
 static std::optional<std::vector<uint8_t>> asm_e(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "emms") {
         if (n == 0) { gen.emms(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -747,6 +760,7 @@ static std::optional<std::vector<uint8_t>> asm_e(const std::string& mnem, const 
 }
 
 static std::optional<std::vector<uint8_t>> asm_f2(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "f2xm1") {
         if (n == 0) { gen.f2xm1(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -754,6 +768,7 @@ static std::optional<std::vector<uint8_t>> asm_f2(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_fa(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "fabs") {
         if (n == 0) { gen.fabs(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -768,6 +783,7 @@ static std::optional<std::vector<uint8_t>> asm_fa(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_fb(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "fbld") {
         if (n == 1 && ops[0].kind == OpKind::Reg) { gen.fbld(ops[0].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 1 && ops[0].kind == OpKind::Mem) { gen.fbld(ops[0].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -780,6 +796,7 @@ static std::optional<std::vector<uint8_t>> asm_fb(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_fc(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "fchs") {
         if (n == 0) { gen.fchs(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -845,6 +862,7 @@ static std::optional<std::vector<uint8_t>> asm_fc(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_fd(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "fdecstp") {
         if (n == 0) { gen.fdecstp(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -869,6 +887,7 @@ static std::optional<std::vector<uint8_t>> asm_fd(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_fe(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "feni") {
         if (n == 0) { gen.feni(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -876,6 +895,7 @@ static std::optional<std::vector<uint8_t>> asm_fe(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_ff(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "ffree") {
         if (n == 0) { gen.ffree(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -886,6 +906,7 @@ static std::optional<std::vector<uint8_t>> asm_ff(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_fi(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "fiadd") {
         if (n == 1 && ops[0].kind == OpKind::Reg) { gen.fiadd(ops[0].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 1 && ops[0].kind == OpKind::Mem) { gen.fiadd(ops[0].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -944,6 +965,7 @@ static std::optional<std::vector<uint8_t>> asm_fi(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_fl(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "fld") {
         if (n == 1 && ops[0].kind == OpKind::Reg) { gen.fld(ops[0].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 1 && ops[0].kind == OpKind::Mem) { gen.fld(ops[0].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -981,6 +1003,7 @@ static std::optional<std::vector<uint8_t>> asm_fl(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_fm(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "fmul") {
         if (n == 1 && ops[0].kind == OpKind::Reg) { gen.fmul(ops[0].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 1 && ops[0].kind == OpKind::Mem) { gen.fmul(ops[0].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -992,6 +1015,7 @@ static std::optional<std::vector<uint8_t>> asm_fm(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_fn(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "fnclex") {
         if (n == 0) { gen.fnclex(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -1030,6 +1054,7 @@ static std::optional<std::vector<uint8_t>> asm_fn(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_fp(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "fpatan") {
         if (n == 0) { gen.fpatan(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -1046,6 +1071,7 @@ static std::optional<std::vector<uint8_t>> asm_fp(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_fr(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "frndint") {
         if (n == 0) { gen.frndint(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -1057,6 +1083,7 @@ static std::optional<std::vector<uint8_t>> asm_fr(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_fs(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "fsave") {
         if (n == 1 && ops[0].kind == OpKind::Reg) { gen.fsave(ops[0].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 1 && ops[0].kind == OpKind::Mem) { gen.fsave(ops[0].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -1123,6 +1150,7 @@ static std::optional<std::vector<uint8_t>> asm_fs(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_ft(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "ftst") {
         if (n == 0) { gen.ftst(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -1130,6 +1158,7 @@ static std::optional<std::vector<uint8_t>> asm_ft(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_fu(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "fucom") {
         if (n == 0) { gen.fucom(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -1149,6 +1178,7 @@ static std::optional<std::vector<uint8_t>> asm_fu(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_fx(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "fxam") {
         if (n == 0) { gen.fxam(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -1176,6 +1206,7 @@ static std::optional<std::vector<uint8_t>> asm_fx(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_fy(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "fyl2x") {
         if (n == 0) { gen.fyl2x(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -1186,6 +1217,7 @@ static std::optional<std::vector<uint8_t>> asm_fy(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_g(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "getsec") {
         if (n == 0) { gen.getsec(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -1193,6 +1225,7 @@ static std::optional<std::vector<uint8_t>> asm_g(const std::string& mnem, const 
 }
 
 static std::optional<std::vector<uint8_t>> asm_h(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "haddpd") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.haddpd(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.haddpd(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -1220,6 +1253,7 @@ static std::optional<std::vector<uint8_t>> asm_h(const std::string& mnem, const 
 }
 
 static std::optional<std::vector<uint8_t>> asm_i(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "idiv") {
         if (n == 1 && ops[0].kind == OpKind::Reg) { gen.idiv(ops[0].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 1 && ops[0].kind == OpKind::Mem) { gen.idiv(ops[0].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -1276,6 +1310,7 @@ static std::optional<std::vector<uint8_t>> asm_i(const std::string& mnem, const 
 }
 
 static std::optional<std::vector<uint8_t>> asm_j(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "jb") {
     }
     else if (mnem == "jbe") {
@@ -1327,6 +1362,7 @@ static std::optional<std::vector<uint8_t>> asm_j(const std::string& mnem, const 
 }
 
 static std::optional<std::vector<uint8_t>> asm_l(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "lahf") {
         if (n == 0) { gen.lahf(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -1400,6 +1436,7 @@ static std::optional<std::vector<uint8_t>> asm_l(const std::string& mnem, const 
 }
 
 static std::optional<std::vector<uint8_t>> asm_ma(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "maskmovdqu") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.maskmovdqu(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -1425,6 +1462,7 @@ static std::optional<std::vector<uint8_t>> asm_ma(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_mf(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "mfence") {
         if (n == 0) { gen.mfence(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -1432,6 +1470,7 @@ static std::optional<std::vector<uint8_t>> asm_mf(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_mi(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "minpd") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.minpd(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.minpd(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -1452,6 +1491,7 @@ static std::optional<std::vector<uint8_t>> asm_mi(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_mo(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "monitor") {
         if (n == 0) { gen.monitor(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -1602,6 +1642,7 @@ static std::optional<std::vector<uint8_t>> asm_mo(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_mp(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "mpsadbw") {
         if (n == 3 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm && ops[2].kind == OpKind::Imm) { gen.mpsadbw(ops[0].xmm, ops[1].xmm, (uint8_t)ops[2].imm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 3 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem && ops[2].kind == OpKind::Imm) { gen.mpsadbw(ops[0].xmm, ops[1].mem, (uint8_t)ops[2].imm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -1610,6 +1651,7 @@ static std::optional<std::vector<uint8_t>> asm_mp(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_mu(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "mul") {
         if (n == 1 && ops[0].kind == OpKind::Reg) { gen.mul(ops[0].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 1 && ops[0].kind == OpKind::Mem) { gen.mul(ops[0].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -1634,6 +1676,7 @@ static std::optional<std::vector<uint8_t>> asm_mu(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_mw(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "mwait") {
         if (n == 0) { gen.mwait(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -1641,6 +1684,7 @@ static std::optional<std::vector<uint8_t>> asm_mw(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_n(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "neg") {
         if (n == 1 && ops[0].kind == OpKind::Reg) { gen.neg(ops[0].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 1 && ops[0].kind == OpKind::Mem) { gen.neg(ops[0].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -1658,6 +1702,7 @@ static std::optional<std::vector<uint8_t>> asm_n(const std::string& mnem, const 
 }
 
 static std::optional<std::vector<uint8_t>> asm_o(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "or") {
         if (n == 2 && ops[0].kind == OpKind::Reg && ops[1].kind == OpKind::Reg) { gen.or_(ops[0].reg, ops[1].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Reg && ops[1].kind == OpKind::Mem) { gen.or_(ops[0].reg, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -1683,6 +1728,7 @@ static std::optional<std::vector<uint8_t>> asm_o(const std::string& mnem, const 
 }
 
 static std::optional<std::vector<uint8_t>> asm_pa(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "pabsb") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pabsb(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pabsb(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -1770,6 +1816,7 @@ static std::optional<std::vector<uint8_t>> asm_pa(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_pb(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "pblendvb") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pblendvb(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pblendvb(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -1782,6 +1829,7 @@ static std::optional<std::vector<uint8_t>> asm_pb(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_pc(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "pcmpeqb") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pcmpeqb(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pcmpeqb(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -1834,6 +1882,7 @@ static std::optional<std::vector<uint8_t>> asm_pc(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_pe(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "pextrb") {
         if (n == 3 && ops[0].kind == OpKind::Reg && ops[1].kind == OpKind::Xmm && ops[2].kind == OpKind::Imm) { gen.pextrb(ops[0].reg, ops[1].xmm, (uint8_t)ops[2].imm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -1848,6 +1897,7 @@ static std::optional<std::vector<uint8_t>> asm_pe(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_ph(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "phaddd") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.phaddd(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.phaddd(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -1880,6 +1930,7 @@ static std::optional<std::vector<uint8_t>> asm_ph(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_pi(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "pinsrb") {
         if (n == 3 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Reg && ops[2].kind == OpKind::Imm) { gen.pinsrb(ops[0].xmm, ops[1].reg, (uint8_t)ops[2].imm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -1893,6 +1944,7 @@ static std::optional<std::vector<uint8_t>> asm_pi(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_pm(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "pmaddubsw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pmaddubsw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pmaddubsw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2020,6 +2072,7 @@ static std::optional<std::vector<uint8_t>> asm_pm(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_po(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "pop") {
         if (n == 1 && ops[0].kind == OpKind::Reg) { gen.pop(ops[0].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 1 && ops[0].kind == OpKind::Reg) { gen.pop(ops[0].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2048,6 +2101,7 @@ static std::optional<std::vector<uint8_t>> asm_po(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_pr(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "prefetchnta") {
         if (n == 1 && ops[0].kind == OpKind::Reg) { gen.prefetchnta(ops[0].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 1 && ops[0].kind == OpKind::Mem) { gen.prefetchnta(ops[0].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2068,6 +2122,7 @@ static std::optional<std::vector<uint8_t>> asm_pr(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_ps(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "psadbw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.psadbw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.psadbw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2184,6 +2239,7 @@ static std::optional<std::vector<uint8_t>> asm_ps(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_pt(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "ptest") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.ptest(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.ptest(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2192,6 +2248,7 @@ static std::optional<std::vector<uint8_t>> asm_pt(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_pu(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "punpckhbw") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.punpckhbw(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.punpckhbw(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2244,6 +2301,7 @@ static std::optional<std::vector<uint8_t>> asm_pu(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_px(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "pxor") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.pxor(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.pxor(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2252,6 +2310,7 @@ static std::optional<std::vector<uint8_t>> asm_px(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_r(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "rcl") {
         if (n == 2 && ops[0].kind == OpKind::Reg && ops[1].kind == OpKind::Imm) { gen.rcl(ops[0].reg, (int32_t)ops[1].imm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Mem && ops[1].kind == OpKind::Imm) { gen.rcl(ops[0].mem, (int32_t)ops[1].imm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2325,6 +2384,7 @@ static std::optional<std::vector<uint8_t>> asm_r(const std::string& mnem, const 
 }
 
 static std::optional<std::vector<uint8_t>> asm_sa(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "sahf") {
         if (n == 0) { gen.sahf(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -2343,6 +2403,7 @@ static std::optional<std::vector<uint8_t>> asm_sa(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_sb(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "sbb") {
         if (n == 2 && ops[0].kind == OpKind::Reg && ops[1].kind == OpKind::Reg) { gen.sbb(ops[0].reg, ops[1].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Reg && ops[1].kind == OpKind::Mem) { gen.sbb(ops[0].reg, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2354,6 +2415,7 @@ static std::optional<std::vector<uint8_t>> asm_sb(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_sc(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "scas") {
         if (n == 0) { gen.scas(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -2361,6 +2423,7 @@ static std::optional<std::vector<uint8_t>> asm_sc(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_se(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "setb") {
         if (n == 1 && ops[0].kind == OpKind::Reg) { gen.setb(ops[0].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 1 && ops[0].kind == OpKind::Mem) { gen.setb(ops[0].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2429,6 +2492,7 @@ static std::optional<std::vector<uint8_t>> asm_se(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_sf(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "sfence") {
         if (n == 0) { gen.sfence(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -2436,6 +2500,7 @@ static std::optional<std::vector<uint8_t>> asm_sf(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_sg(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "sgdt") {
         if (n == 1 && ops[0].kind == OpKind::Reg) { gen.sgdt(ops[0].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 1 && ops[0].kind == OpKind::Mem) { gen.sgdt(ops[0].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2444,6 +2509,7 @@ static std::optional<std::vector<uint8_t>> asm_sg(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_sh(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "shl") {
         if (n == 2 && ops[0].kind == OpKind::Reg && ops[1].kind == OpKind::Imm) { gen.shl(ops[0].reg, (int32_t)ops[1].imm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Mem && ops[1].kind == OpKind::Imm) { gen.shl(ops[0].mem, (int32_t)ops[1].imm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2470,6 +2536,7 @@ static std::optional<std::vector<uint8_t>> asm_sh(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_si(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "sidt") {
         if (n == 1 && ops[0].kind == OpKind::Reg) { gen.sidt(ops[0].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 1 && ops[0].kind == OpKind::Mem) { gen.sidt(ops[0].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2478,6 +2545,7 @@ static std::optional<std::vector<uint8_t>> asm_si(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_sl(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "sldt") {
         if (n == 1 && ops[0].kind == OpKind::Reg) { gen.sldt(ops[0].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 1 && ops[0].kind == OpKind::Mem) { gen.sldt(ops[0].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2486,6 +2554,7 @@ static std::optional<std::vector<uint8_t>> asm_sl(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_sm(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "smsw") {
         if (n == 1 && ops[0].kind == OpKind::Reg) { gen.smsw(ops[0].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 1 && ops[0].kind == OpKind::Mem) { gen.smsw(ops[0].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2494,6 +2563,7 @@ static std::optional<std::vector<uint8_t>> asm_sm(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_sq(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "sqrtpd") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.sqrtpd(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.sqrtpd(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2514,6 +2584,7 @@ static std::optional<std::vector<uint8_t>> asm_sq(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_st(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "stc") {
         if (n == 0) { gen.stc(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -2538,6 +2609,7 @@ static std::optional<std::vector<uint8_t>> asm_st(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_su(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "sub") {
         if (n == 2 && ops[0].kind == OpKind::Reg && ops[1].kind == OpKind::Reg) { gen.sub(ops[0].reg, ops[1].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Reg && ops[1].kind == OpKind::Mem) { gen.sub(ops[0].reg, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2565,6 +2637,7 @@ static std::optional<std::vector<uint8_t>> asm_su(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_sw(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "swapgs") {
         if (n == 0) { gen.swapgs(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -2572,6 +2645,7 @@ static std::optional<std::vector<uint8_t>> asm_sw(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_sy(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "syscall") {
         if (n == 0) { gen.syscall(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -2588,6 +2662,7 @@ static std::optional<std::vector<uint8_t>> asm_sy(const std::string& mnem, const
 }
 
 static std::optional<std::vector<uint8_t>> asm_t(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "test") {
         if (n == 2 && ops[0].kind == OpKind::Reg && ops[1].kind == OpKind::Reg) { gen.test(ops[0].reg, ops[1].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Mem && ops[1].kind == OpKind::Reg) { gen.test(ops[0].mem, ops[1].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2598,6 +2673,7 @@ static std::optional<std::vector<uint8_t>> asm_t(const std::string& mnem, const 
 }
 
 static std::optional<std::vector<uint8_t>> asm_u(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "ucomisd") {
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Xmm) { gen.ucomisd(ops[0].xmm, ops[1].xmm); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Xmm && ops[1].kind == OpKind::Mem) { gen.ucomisd(ops[0].xmm, ops[1].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2633,6 +2709,7 @@ static std::optional<std::vector<uint8_t>> asm_u(const std::string& mnem, const 
 }
 
 static std::optional<std::vector<uint8_t>> asm_v(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "verr") {
         if (n == 1 && ops[0].kind == OpKind::Reg) { gen.verr(ops[0].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 1 && ops[0].kind == OpKind::Mem) { gen.verr(ops[0].mem); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -2681,6 +2758,7 @@ static std::optional<std::vector<uint8_t>> asm_v(const std::string& mnem, const 
 }
 
 static std::optional<std::vector<uint8_t>> asm_w(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "wbinvd") {
         if (n == 0) { gen.wbinvd(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
     }
@@ -2691,6 +2769,7 @@ static std::optional<std::vector<uint8_t>> asm_w(const std::string& mnem, const 
 }
 
 static std::optional<std::vector<uint8_t>> asm_x(const std::string& mnem, const std::vector<ParsedOp>& ops, size_t n, CodeGen& gen) {
+    (void)ops; (void)n; (void)gen;
     if (mnem == "xadd") {
         if (n == 2 && ops[0].kind == OpKind::Reg && ops[1].kind == OpKind::Reg) { gen.xadd(ops[0].reg, ops[1].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (n == 2 && ops[0].kind == OpKind::Mem && ops[1].kind == OpKind::Reg) { gen.xadd(ops[0].mem, ops[1].reg); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -3323,9 +3402,9 @@ std::optional<std::vector<uint8_t>> assemble_block(const std::string& text) {
             insn_bytes.push_back(std::move(*bytes));
         } else {
             std::string low = to_lower(stmts[i].text);
-            size_t sp = low.find_first_of(" \t");
-            if (sp == std::string::npos) return std::nullopt;
-            std::string mnem_s = trim(low.substr(0, sp));
+            size_t spc = low.find_first_of(" \t");
+            if (spc == std::string::npos) return std::nullopt;
+            std::string mnem_s = trim(low.substr(0, spc));
             std::string placeholder = mnem_s + " 0";
             auto pbytes = assemble(placeholder);
             if (!pbytes) return std::nullopt;
@@ -3342,13 +3421,13 @@ std::optional<std::vector<uint8_t>> assemble_block(const std::string& text) {
         int idx = insn_idx[i];
         if (needs_resolve[i]) {
             std::string low = to_lower(stmts[i].text);
-            size_t sp = low.find_first_of(" \t");
-            std::string operand = trim(low.substr(sp));
+            size_t spc = low.find_first_of(" \t");
+            std::string operand = trim(low.substr(spc));
             auto it = labels.find(operand);
             if (it != labels.end()) {
                 int32_t insn_end = offset + (int32_t)insn_bytes[idx].size();
                 int32_t rel = it->second - insn_end;
-                std::string mnem_s = trim(low.substr(0, sp));
+                std::string mnem_s = trim(low.substr(0, spc));
                 std::string resolved = mnem_s + " " + std::to_string(rel);
                 auto bytes = assemble(resolved);
                 if (bytes) insn_bytes[idx] = std::move(*bytes);

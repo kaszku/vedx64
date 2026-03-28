@@ -91,7 +91,7 @@ struct Operand {
         struct {
             RegisterClass reg_class;
             uint8_t reg_id;     ///< 0-15 (or 0-7 for legacy)
-            uint8_t size_bits;  ///< 8, 16, 32, 64, 128
+            uint16_t size_bits;  ///< 8, 16, 32, 64, 128, 256, 512
         } reg;
 
         struct {
@@ -118,7 +118,7 @@ struct Operand {
         } rel;
     };
 
-    static Operand make_reg(RegisterClass cls, uint8_t id, uint8_t size_bits) {
+    static Operand make_reg(RegisterClass cls, uint8_t id, uint16_t size_bits) {
         Operand op{};
         op.type = OperandType::Register;
         op.reg.reg_class = cls;

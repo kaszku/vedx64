@@ -109,6 +109,7 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
     Mnemonic m = di.desc->mnemonic;
     uint8_t mod_ = di.modrm >> 6;
     bool is_mem = di.desc->has_modrm && mod_ != 3;
+    (void)is_mem;
 
     if (m == Mnemonic::NOP || m == Mnemonic::HINT_NOP) {
         l.ops.push_back({Opcode::NOP});

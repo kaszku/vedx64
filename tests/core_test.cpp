@@ -692,7 +692,6 @@ void test_decode_displacement_imm() {
 
 void test_operand_count() {
     DecodedInstr di;
-    size_t n;
     { uint8_t c[] = {0x90}; decode(c, 1, di); }
     TEST_ASSERT(di.desc->num_operands <= 2, "NOP operands <= 2");
     { uint8_t c[] = {0xC3}; decode(c, 1, di); }

@@ -2,6 +2,9 @@
 // Copyright (c) 2026 Kevin Szkudlapski
 // Auto-generated — do not edit
 
+#ifdef _MSC_VER
+#pragma warning(disable: 4996) // getenv
+#endif
 #include "vedx64/hook.hpp"
 #include "vedx64/core.hpp"
 #include <cstdio>
