@@ -22,6 +22,10 @@ namespace vedx64 {
 /// data directives (db/dw/dd/dq), and mnemonic aliases (cmova, je, sete).
 std::optional<std::vector<uint8_t>> assemble(const std::string& text);
 
+/// Assemble a single instruction with error reporting.
+/// On failure, error is set to a description of what went wrong.
+std::optional<std::vector<uint8_t>> assemble(const std::string& text, std::string& error);
+
 /// Assemble multiple instructions separated by newlines or semicolons.
 /// Supports labels (name: or name: instr) with two-pass resolution
 /// for forward/backward jumps. Comments: # or //

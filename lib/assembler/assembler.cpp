@@ -3643,6 +3643,33 @@ std::vector<Stmt> parse_stmts(const std::string& text) {
 }
 } // anon ns
 
+std::optional<std::vector<uint8_t>> assemble(const std::string& text, std::string& error) {
+    if (text.empty() || trim(text).empty()) { error = "empty input"; return std::nullopt; }
+    std::string s = trim(text);
+    { bool in_quote = false; for (auto& c : s) { if (c == '"') in_quote = !in_quote; else if (!in_quote) c = (char)std::tolower((unsigned char)c); } }
+    size_t space = s.find_first_of(" \t");
+    std::string mnem = (space == std::string::npos) ? s : s.substr(0, space);
+    std::string rest = (space == std::string::npos) ? "" : trim(s.substr(space));
+    auto result = assemble(text);
+    if (result) return result;
+    // Diagnose failure
+    if (rest.empty()) {
+        error = "unknown instruction: " + mnem;
+        return std::nullopt;
+    }
+    auto raw_ops = split_operands(rest);
+    if (raw_ops.size() == 1 && raw_ops[0].empty()) raw_ops.clear();
+    for (size_t i = 0; i < raw_ops.size(); ++i) {
+        ParsedOp p{};
+        if (!parse_operand(raw_ops[i], p)) {
+            error = "invalid operand " + std::to_string(i + 1) + ": " + raw_ops[i];
+            return std::nullopt;
+        }
+    }
+    error = "unsupported operand combination for: " + mnem;
+    return std::nullopt;
+}
+
 std::optional<std::vector<uint8_t>> assemble_block(const std::string& text) {
     auto stmts = parse_stmts(text);
     if (stmts.empty()) return std::vector<uint8_t>{};

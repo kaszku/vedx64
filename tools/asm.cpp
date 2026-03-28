@@ -65,9 +65,12 @@ int main(int argc, char** argv) {
     else if (input_file) text = read_file(input_file);
     else text = read_stdin();
 
-    auto result = single_mode ? assemble(text) : assemble_block(text);
+    std::string error;
+    std::optional<std::vector<uint8_t>> result;
+    if (single_mode) { result = assemble(text, error); }
+    else { result = assemble_block(text); if (!result) error = "block assembly failed"; }
     if (!result) {
-        fprintf(stderr, "Assembly failed\n");
+        fprintf(stderr, "Error: %s\n", error.c_str());
         return 1;
     }
 
