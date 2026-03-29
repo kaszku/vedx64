@@ -529,6 +529,84 @@ int main() {
     CHECK(asm_ok("imul eax, ecx"), "imul eax, ecx");
     CHECK(asm_ok("imul rax, rcx, 42"), "imul rax, rcx, 42");
 
+    printf("  xchg/movsxd/leave...\n");
+    CHECK(asm_bytes("xchg eax, ecx", {0x91}), "xchg eax,ecx short");
+    CHECK(asm_bytes("xchg ecx, eax", {0x91}), "xchg ecx,eax short");
+    CHECK(asm_bytes("xchg rax, r8", {0x49, 0x90}), "xchg rax,r8 short");
+    CHECK(asm_bytes("movsxd rax, ecx", {0x48, 0x63, 0xC1}), "movsxd rax,ecx");
+    CHECK(asm_bytes("movsx rax, ecx", {0x48, 0x63, 0xC1}), "movsx rax,ecx -> movsxd");
+    CHECK(asm_bytes("leave", {0xC9}), "leave = C9");
+    CHECK(asm_ok("movzx eax, cl"), "movzx eax,cl");
+    CHECK(asm_ok("movsx eax, cl"), "movsx eax,cl");
+
+    printf("  Systematic roundtrip audit...\n");
+    const char* audit[] = {
+        // ALU reg,reg
+        "add rax, rcx", "sub rax, rcx", "xor rax, rcx", "and rax, rcx",
+        "or rax, rcx", "adc rax, rcx", "sbb rax, rcx", "cmp rax, rcx", "test rax, rcx",
+        // ALU reg,imm
+        "add eax, 1", "sub eax, 1", "xor eax, 0xFF", "and eax, 0x0F",
+        "cmp rax, 0", "test eax, 0xFF",
+        // MOV variants
+        "mov rax, rcx", "mov eax, ecx", "mov al, cl",
+        "mov rax, 0x12345678", "mov eax, 42",
+        // Memory
+        "mov rax, [rbx]", "mov [rax], rcx", "mov rax, [rbx+8]",
+        "mov rax, [rbx+rcx*4]", "mov rax, [rbx+rcx*8+16]",
+        "mov eax, [rsp]", "mov rax, [rbp+0]",
+        "add dword [rax], 1", "cmp byte [rcx], 0",
+        // Shifts
+        "shl eax, 4", "shr rax, 1", "sar ecx, 8",
+        "shl rax, cl", "shr ecx, cl", "sar rdx, cl",
+        "rol eax, cl", "ror rax, cl",
+        // Stack
+        "push rax", "push rbp", "push r12", "pop rax", "pop rbp",
+        // Single-operand
+        "inc rax", "inc eax", "inc al", "dec rax", "dec ecx",
+        "neg rax", "not eax", "bswap eax", "bswap rcx",
+        // Control flow
+        "nop", "ret", "int3", "hlt", "leave",
+        "call [rax]", "jmp [rbx]",
+        // Conditional
+        "cmovb eax, ecx", "cmovl eax, ecx",
+        "setz al", "setnz al",
+        // IMUL
+        "imul rax, rcx", "imul eax, ecx, 42",
+        // Exchange
+        "xchg eax, ecx", "xchg rax, r8",
+        // Extension
+        "movzx eax, cl", "movsx eax, cl", "movsxd rax, ecx",
+        // Bit operations
+        "bt eax, ecx", "bts eax, ecx", "btr eax, ecx",
+        "bsf eax, ecx", "bsr eax, ecx",
+        // Segments, prefixes
+        "mov rax, fs:[rbx]", "mov rax, gs:[0x28]",
+        "lock add [rax], rcx", "rep movsb",
+        // RIP-relative
+        "mov rax, [rip+0x100]", "lea rax, [rip+0]",
+        // SSE
+        "movaps xmm0, xmm1", "addps xmm0, xmm1",
+        "xorps xmm0, xmm0", "movaps xmm0, [rax]",
+        // Cross-type
+        "movd xmm0, eax", "cvtsi2ss xmm0, eax",
+        // MMX
+        "movq mm0, mm1", "pxor mm0, mm1",
+        // System
+        "syscall", "cpuid", "rdtsc",
+        // Misc
+        "cmpxchg [rax], rcx", "xadd [rax], rcx",
+        "prefetcht0 [rax]", "clflush [rax]",
+        "lfence", "sfence", "mfence", "pause",
+    };
+    int audit_pass = 0, audit_total = 0;
+    for (auto text : audit) {
+        audit_total++;
+        if (asm_ok(text)) audit_pass++;
+        else printf("    AUDIT FAIL: %s\n", text);
+    }
+    printf("    Audit: %d/%d\n", audit_pass, audit_total);
+    CHECK(audit_pass == audit_total, "systematic audit");
+
     printf("  Error cases...\n");
     CHECK(!vedx64::assemble("foobar").has_value(), "invalid mnem");
     CHECK(!vedx64::assemble("").has_value(), "empty string");

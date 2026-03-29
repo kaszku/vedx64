@@ -3131,6 +3131,8 @@ std::optional<std::vector<uint8_t>> assemble(const std::string& text) {
         if (mnem == "cdqe") { gen.cdqe(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (mnem == "pushfq") { gen.pushfq(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (mnem == "popfq") { gen.popfq(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "leave") { gen.leave(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+        if (mnem == "xlat") { gen.xlat(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (mnem == "movsb") { gen.movsb(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (mnem == "movsw") { gen.movsw(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (mnem == "movsq") { gen.movsq(); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
@@ -3210,6 +3212,31 @@ std::optional<std::vector<uint8_t>> assemble(const std::string& text) {
         if (mnem == "jnl") { gen.db(0x0F); gen.db(0x8D); gen.dd((uint32_t)rel); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (mnem == "jle") { gen.db(0x0F); gen.db(0x8E); gen.dd((uint32_t)rel); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
         if (mnem == "jnle") { gen.db(0x0F); gen.db(0x8F); gen.dd((uint32_t)rel); return std::vector<uint8_t>(gen.data(), gen.data() + gen.size()); }
+    }
+
+    if (mnem == "xchg" && n == 2 && ops[0].kind == OpKind::Reg && ops[1].kind == OpKind::Reg) {
+        auto& r1 = ops[0].reg; auto& r2 = ops[1].reg;
+        if (r1.bits >= 32 && r2.bits >= 32 && (r1.id == 0 || r2.id == 0)) {
+            uint8_t other = (r1.id == 0) ? r2.id : r1.id;
+            if (r1.bits == 16 || r2.bits == 16) gen.db(0x66);
+            if (r1.bits == 64 || r2.bits == 64 || other >= 8) gen.db(0x40 | ((r1.bits==64||r2.bits==64)?8:0) | (other>=8?1:0));
+            gen.db(0x90 + (other & 7));
+            return std::vector<uint8_t>(gen.data(), gen.data() + gen.size());
+        }
+    }
+
+    if (mnem == "movsxd" && n == 2 && ops[0].kind == OpKind::Reg && ops[1].kind == OpKind::Reg && ops[0].reg.bits == 64 && ops[1].reg.bits == 32) {
+        gen.db(0x48 | (ops[0].reg.id >= 8 ? 4 : 0) | (ops[1].reg.id >= 8 ? 1 : 0));
+        gen.db(0x63);
+        gen.db(0xC0 | ((ops[0].reg.id & 7) << 3) | (ops[1].reg.id & 7));
+        return std::vector<uint8_t>(gen.data(), gen.data() + gen.size());
+    }
+
+    if (mnem == "movsx" && n == 2 && ops[0].kind == OpKind::Reg && ops[1].kind == OpKind::Reg && ops[0].reg.bits == 64 && ops[1].reg.bits == 32) {
+        gen.db(0x48 | (ops[0].reg.id >= 8 ? 4 : 0) | (ops[1].reg.id >= 8 ? 1 : 0));
+        gen.db(0x63);
+        gen.db(0xC0 | ((ops[0].reg.id & 7) << 3) | (ops[1].reg.id & 7));
+        return std::vector<uint8_t>(gen.data(), gen.data() + gen.size());
     }
 
     if (n == 2 && ops[1].kind == OpKind::Reg && ops[1].reg.id == 1 && ops[1].reg.bits == 8) {
