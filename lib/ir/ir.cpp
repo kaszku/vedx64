@@ -759,9 +759,8 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
             VarNode ea = compute_ea(l, di);
             l.ops.push_back(make_op3(Opcode::LOAD, src, ea, VarNode::ram(sz)));
         }
-        // BSF = count trailing zeros, BSR = bits-1 - count leading zeros
-        // Approximate: just compute position into dst
-        l.ops.push_back(make_op2(Opcode::COPY, dst, src)); // simplified
+        // BSF = count trailing zeros, BSR = bit_width-1 - count leading zeros
+        l.ops.push_back(make_op2(m == Mnemonic::BSF ? Opcode::CTZ : Opcode::CLZ, dst, src));
         l.ops.push_back(make_op3(Opcode::AND_FLAGS, VarNode::flags(), src, src)); // ZF set if src==0
         return true;
     }
@@ -773,7 +772,8 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
             VarNode ea = compute_ea(l, di);
             l.ops.push_back(make_op3(Opcode::LOAD, src, ea, VarNode::ram(sz)));
         }
-        l.ops.push_back(make_op2(Opcode::COPY, dst, src)); // placeholder for actual count
+        Opcode cnt_opc = (m == Mnemonic::POPCNT) ? Opcode::POPCNT : (m == Mnemonic::TZCNT) ? Opcode::CTZ : Opcode::CLZ;
+        l.ops.push_back(make_op2(cnt_opc, dst, src));
         l.ops.push_back(make_op3(Opcode::AND_FLAGS, VarNode::flags(), dst, dst));
         return true;
     }
@@ -1419,6 +1419,206 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
             l.ops.push_back(make_op3(Opcode::LOAD, tmp, ea, VarNode::ram(vsz)));
             l.ops.push_back(make_op2(Opcode::COPY, dst, tmp));
         }
+        return true;
+    }
+
+    if (m == Mnemonic::MOVS || m == Mnemonic::MOVSB || m == Mnemonic::MOVSW || m == Mnemonic::MOVSD || m == Mnemonic::MOVSQ) {
+        uint8_t ssz = 1;
+        if (m == Mnemonic::MOVSW) ssz = 2;
+        else if (m == Mnemonic::MOVSD || m == Mnemonic::MOVS) ssz = 4;
+        else if (m == Mnemonic::MOVSQ) ssz = 8;
+        if (has_66 && m == Mnemonic::MOVS) ssz = 2;
+        if (rex_w && m == Mnemonic::MOVS) ssz = 8;
+        VarNode rsi = VarNode::gpr(6, 8), rdi = VarNode::gpr(7, 8);
+        VarNode tmp = VarNode::temp(14, ssz);
+        VarNode step = VarNode::constant(ssz, 8);
+        l.ops.push_back(make_op3(Opcode::LOAD, tmp, rsi, VarNode::ram(ssz)));
+        l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(ssz), rdi, tmp));
+        l.ops.push_back(make_op3(Opcode::ADD, rsi, rsi, step));
+        l.ops.push_back(make_op3(Opcode::ADD, rdi, rdi, step));
+        return true;
+    }
+
+    if (m == Mnemonic::STOS || m == Mnemonic::STOSB || m == Mnemonic::STOSW || m == Mnemonic::STOSD || m == Mnemonic::STOSQ) {
+        uint8_t ssz = 1;
+        if (m == Mnemonic::STOSW) ssz = 2;
+        else if (m == Mnemonic::STOSD || m == Mnemonic::STOS) ssz = 4;
+        else if (m == Mnemonic::STOSQ) ssz = 8;
+        if (has_66 && m == Mnemonic::STOS) ssz = 2;
+        if (rex_w && m == Mnemonic::STOS) ssz = 8;
+        VarNode rax = VarNode::gpr(0, ssz), rdi = VarNode::gpr(7, 8);
+        VarNode step = VarNode::constant(ssz, 8);
+        l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(ssz), rdi, rax));
+        l.ops.push_back(make_op3(Opcode::ADD, rdi, rdi, step));
+        return true;
+    }
+
+    if (m == Mnemonic::LODS || m == Mnemonic::LODSB || m == Mnemonic::LODSW || m == Mnemonic::LODSD || m == Mnemonic::LODSQ) {
+        uint8_t ssz = 1;
+        if (m == Mnemonic::LODSW) ssz = 2;
+        else if (m == Mnemonic::LODSD || m == Mnemonic::LODS) ssz = 4;
+        else if (m == Mnemonic::LODSQ) ssz = 8;
+        VarNode rax = VarNode::gpr(0, ssz), rsi = VarNode::gpr(6, 8);
+        VarNode step = VarNode::constant(ssz, 8);
+        l.ops.push_back(make_op3(Opcode::LOAD, rax, rsi, VarNode::ram(ssz)));
+        l.ops.push_back(make_op3(Opcode::ADD, rsi, rsi, step));
+        return true;
+    }
+
+    if (m == Mnemonic::CMPS || m == Mnemonic::CMPSB || m == Mnemonic::CMPSW || m == Mnemonic::CMPSD || m == Mnemonic::CMPSQ) {
+        uint8_t ssz = 1;
+        if (m == Mnemonic::CMPSW) ssz = 2;
+        else if (m == Mnemonic::CMPSD || m == Mnemonic::CMPS) ssz = 4;
+        else if (m == Mnemonic::CMPSQ) ssz = 8;
+        VarNode rsi = VarNode::gpr(6, 8), rdi = VarNode::gpr(7, 8);
+        VarNode t1 = VarNode::temp(14, ssz), t2 = VarNode::temp(15, ssz);
+        VarNode step = VarNode::constant(ssz, 8);
+        l.ops.push_back(make_op3(Opcode::LOAD, t1, rsi, VarNode::ram(ssz)));
+        l.ops.push_back(make_op3(Opcode::LOAD, t2, rdi, VarNode::ram(ssz)));
+        l.ops.push_back(make_op3(Opcode::SUB_FLAGS, VarNode::flags(), t1, t2));
+        l.ops.push_back(make_op3(Opcode::ADD, rsi, rsi, step));
+        l.ops.push_back(make_op3(Opcode::ADD, rdi, rdi, step));
+        return true;
+    }
+
+    if (m == Mnemonic::SCAS || m == Mnemonic::SCASB || m == Mnemonic::SCASW || m == Mnemonic::SCASD || m == Mnemonic::SCASQ) {
+        uint8_t ssz = 1;
+        if (m == Mnemonic::SCASW) ssz = 2;
+        else if (m == Mnemonic::SCASD || m == Mnemonic::SCAS) ssz = 4;
+        else if (m == Mnemonic::SCASQ) ssz = 8;
+        VarNode rax = VarNode::gpr(0, ssz), rdi = VarNode::gpr(7, 8);
+        VarNode tmp = VarNode::temp(14, ssz);
+        VarNode step = VarNode::constant(ssz, 8);
+        l.ops.push_back(make_op3(Opcode::LOAD, tmp, rdi, VarNode::ram(ssz)));
+        l.ops.push_back(make_op3(Opcode::SUB_FLAGS, VarNode::flags(), rax, tmp));
+        l.ops.push_back(make_op3(Opcode::ADD, rdi, rdi, step));
+        return true;
+    }
+
+    if ((m == Mnemonic::MOVAPS || m == Mnemonic::MOVUPS || m == Mnemonic::MOVAPD || m == Mnemonic::MOVUPD ||
+         m == Mnemonic::MOVDQA || m == Mnemonic::MOVDQU) && di.desc->has_modrm) {
+        uint8_t xsz = 16;
+        if (mod_ == 3) {
+            VarNode dst = VarNode::xmm((((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0)), xsz);
+            VarNode src = VarNode::xmm(((di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0)), xsz);
+            // Direction depends on opcode
+            bool store_dir = (di.desc->opcode == 0x29 || di.desc->opcode == 0x7F);
+            if (store_dir) l.ops.push_back(make_op2(Opcode::COPY, src, dst));
+            else l.ops.push_back(make_op2(Opcode::COPY, dst, src));
+        } else {
+            VarNode ea = compute_ea(l, di);
+            VarNode xmm = VarNode::xmm((((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0)), xsz);
+            bool store_dir = (di.desc->opcode == 0x29 || di.desc->opcode == 0x7F);
+            if (store_dir) l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(xsz), ea, xmm));
+            else l.ops.push_back(make_op3(Opcode::LOAD, xmm, ea, VarNode::ram(xsz)));
+        }
+        return true;
+    }
+
+    if ((m == Mnemonic::ADDPS || m == Mnemonic::ADDPD || m == Mnemonic::ADDSS || m == Mnemonic::ADDSD ||
+         m == Mnemonic::SUBPS || m == Mnemonic::SUBPD || m == Mnemonic::SUBSS || m == Mnemonic::SUBSD ||
+         m == Mnemonic::MULPS || m == Mnemonic::MULPD || m == Mnemonic::MULSS || m == Mnemonic::MULSD ||
+         m == Mnemonic::DIVPS || m == Mnemonic::DIVPD || m == Mnemonic::DIVSS || m == Mnemonic::DIVSD ||
+         m == Mnemonic::SQRTPS || m == Mnemonic::SQRTPD || m == Mnemonic::SQRTSS || m == Mnemonic::SQRTSD ||
+         m == Mnemonic::MINPS || m == Mnemonic::MINPD || m == Mnemonic::MINSS || m == Mnemonic::MINSD ||
+         m == Mnemonic::MAXPS || m == Mnemonic::MAXPD || m == Mnemonic::MAXSS || m == Mnemonic::MAXSD) &&
+        di.desc->has_modrm) {
+        uint8_t xsz = 16;
+        VarNode dst = VarNode::xmm((((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0)), xsz);
+        VarNode src = (mod_ == 3) ? VarNode::xmm(((di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0)), xsz) : VarNode::temp(14, xsz);
+        if (mod_ != 3) {
+            VarNode ea = compute_ea(l, di);
+            l.ops.push_back(make_op3(Opcode::LOAD, src, ea, VarNode::ram(xsz)));
+        }
+        Opcode opc = Opcode::FADD;
+        if (m == Mnemonic::SUBPS || m == Mnemonic::SUBPD || m == Mnemonic::SUBSS || m == Mnemonic::SUBSD) opc = Opcode::FSUB;
+        else if (m == Mnemonic::MULPS || m == Mnemonic::MULPD || m == Mnemonic::MULSS || m == Mnemonic::MULSD) opc = Opcode::FMUL;
+        else if (m == Mnemonic::DIVPS || m == Mnemonic::DIVPD || m == Mnemonic::DIVSS || m == Mnemonic::DIVSD) opc = Opcode::FDIV;
+        else if (m == Mnemonic::SQRTPS || m == Mnemonic::SQRTPD || m == Mnemonic::SQRTSS || m == Mnemonic::SQRTSD) opc = Opcode::FSQRT;
+        else if (m == Mnemonic::MINPS || m == Mnemonic::MINPD || m == Mnemonic::MINSS || m == Mnemonic::MINSD) opc = Opcode::FMIN;
+        else if (m == Mnemonic::MAXPS || m == Mnemonic::MAXPD || m == Mnemonic::MAXSS || m == Mnemonic::MAXSD) opc = Opcode::FMAX;
+        if (opc == Opcode::FSQRT) l.ops.push_back(make_op2(opc, dst, src));
+        else l.ops.push_back(make_op3(opc, dst, dst, src));
+        return true;
+    }
+
+    if ((m == Mnemonic::XORPS || m == Mnemonic::XORPD || m == Mnemonic::ANDPS || m == Mnemonic::ANDPD ||
+         m == Mnemonic::ORPS || m == Mnemonic::ORPD || m == Mnemonic::ANDNPS || m == Mnemonic::ANDNPD) &&
+        di.desc->has_modrm) {
+        uint8_t xsz = 16;
+        VarNode dst = VarNode::xmm((((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0)), xsz);
+        VarNode src = (mod_ == 3) ? VarNode::xmm(((di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0)), xsz) : VarNode::temp(14, xsz);
+        if (mod_ != 3) {
+            VarNode ea = compute_ea(l, di);
+            l.ops.push_back(make_op3(Opcode::LOAD, src, ea, VarNode::ram(xsz)));
+        }
+        if (m == Mnemonic::XORPS || m == Mnemonic::XORPD) l.ops.push_back(make_op3(Opcode::XOR, dst, dst, src));
+        else if (m == Mnemonic::ANDPS || m == Mnemonic::ANDPD) l.ops.push_back(make_op3(Opcode::AND, dst, dst, src));
+        else if (m == Mnemonic::ORPS || m == Mnemonic::ORPD) l.ops.push_back(make_op3(Opcode::OR, dst, dst, src));
+        else { // ANDNPS/ANDNPD: dst = ~dst & src
+            l.ops.push_back(make_op2(Opcode::NOT, dst, dst));
+            l.ops.push_back(make_op3(Opcode::AND, dst, dst, src));
+        }
+        return true;
+    }
+
+    if ((m == Mnemonic::MOVD || m == Mnemonic::MOVQ) && di.desc->has_modrm) {
+        uint8_t gsz = (m == Mnemonic::MOVQ || rex_w) ? 8 : 4;
+        if (mod_ == 3) {
+            bool to_xmm = (di.desc->opcode == 0x6E);
+            if (to_xmm) l.ops.push_back(make_op2(Opcode::COPY, VarNode::xmm((((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0)), gsz), VarNode::gpr(((di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0)), gsz)));
+            else l.ops.push_back(make_op2(Opcode::COPY, VarNode::gpr(((di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0)), gsz), VarNode::xmm((((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0)), gsz)));
+        } else {
+            VarNode ea = compute_ea(l, di);
+            bool to_xmm = (di.desc->opcode == 0x6E);
+            if (to_xmm) l.ops.push_back(make_op3(Opcode::LOAD, VarNode::xmm((((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0)), gsz), ea, VarNode::ram(gsz)));
+            else l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(gsz), ea, VarNode::xmm((((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0)), gsz)));
+        }
+        return true;
+    }
+
+    if ((m == Mnemonic::PADDB || m == Mnemonic::PADDW || m == Mnemonic::PADDD || m == Mnemonic::PADDQ ||
+         m == Mnemonic::PSUBB || m == Mnemonic::PSUBW || m == Mnemonic::PSUBD || m == Mnemonic::PSUBQ ||
+         m == Mnemonic::PAND || m == Mnemonic::PANDN || m == Mnemonic::POR || m == Mnemonic::PXOR) &&
+        di.desc->has_modrm) {
+        uint8_t xsz = 16;
+        VarNode dst = VarNode::xmm((((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0)), xsz);
+        VarNode src = (mod_ == 3) ? VarNode::xmm(((di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0)), xsz) : VarNode::temp(14, xsz);
+        if (mod_ != 3) {
+            VarNode ea = compute_ea(l, di);
+            l.ops.push_back(make_op3(Opcode::LOAD, src, ea, VarNode::ram(xsz)));
+        }
+        if (m == Mnemonic::PADDB || m == Mnemonic::PADDW || m == Mnemonic::PADDD || m == Mnemonic::PADDQ) l.ops.push_back(make_op3(Opcode::ADD, dst, dst, src));
+        else if (m == Mnemonic::PSUBB || m == Mnemonic::PSUBW || m == Mnemonic::PSUBD || m == Mnemonic::PSUBQ) l.ops.push_back(make_op3(Opcode::SUB, dst, dst, src));
+        else if (m == Mnemonic::PAND) l.ops.push_back(make_op3(Opcode::AND, dst, dst, src));
+        else if (m == Mnemonic::POR) l.ops.push_back(make_op3(Opcode::OR, dst, dst, src));
+        else if (m == Mnemonic::PXOR) l.ops.push_back(make_op3(Opcode::XOR, dst, dst, src));
+        else { // PANDN: dst = ~dst & src
+            l.ops.push_back(make_op2(Opcode::NOT, dst, dst));
+            l.ops.push_back(make_op3(Opcode::AND, dst, dst, src));
+        }
+        return true;
+    }
+
+    if ((m == Mnemonic::CVTSI2SS || m == Mnemonic::CVTSI2SD) && di.desc->has_modrm) {
+        VarNode dst = VarNode::xmm((((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0)), 16);
+        VarNode src = (mod_ == 3) ? reg_from_modrm_rm(di, sz) : VarNode::temp(14, sz);
+        if (mod_ != 3) {
+            VarNode ea = compute_ea(l, di);
+            l.ops.push_back(make_op3(Opcode::LOAD, src, ea, VarNode::ram(sz)));
+        }
+        l.ops.push_back(make_op2(Opcode::COPY, dst, src)); // int->float conversion
+        return true;
+    }
+
+    if ((m == Mnemonic::CVTSS2SI || m == Mnemonic::CVTTSS2SI || m == Mnemonic::CVTSD2SI || m == Mnemonic::CVTTSD2SI) && di.desc->has_modrm) {
+        VarNode dst = reg_from_modrm_reg(di, sz);
+        VarNode src = (mod_ == 3) ? VarNode::xmm(((di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0)), 16) : VarNode::temp(14, sz);
+        if (mod_ != 3) {
+            VarNode ea = compute_ea(l, di);
+            l.ops.push_back(make_op3(Opcode::LOAD, src, ea, VarNode::ram(sz)));
+        }
+        l.ops.push_back(make_op2(Opcode::COPY, dst, src)); // float->int conversion
         return true;
     }
 

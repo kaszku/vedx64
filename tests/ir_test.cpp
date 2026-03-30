@@ -76,9 +76,23 @@ int main() {
     { uint8_t c[] = {0xCC}; lift_ok(c, sizeof(c)); }
     { uint8_t c[] = {0x55}; lift_ok(c, sizeof(c)); }
     { uint8_t c[] = {0x5D}; lift_ok(c, sizeof(c)); }
+    { uint8_t c[] = {0xA4}; lift_ok(c, sizeof(c)); }
+    { uint8_t c[] = {0xA5}; lift_ok(c, sizeof(c)); }
+    { uint8_t c[] = {0xAA}; lift_ok(c, sizeof(c)); }
+    { uint8_t c[] = {0xAC}; lift_ok(c, sizeof(c)); }
+    { uint8_t c[] = {0xA6}; lift_ok(c, sizeof(c)); }
+    { uint8_t c[] = {0xAE}; lift_ok(c, sizeof(c)); }
+    { uint8_t c[] = {0x0F,0x28,0xC1}; lift_ok(c, sizeof(c)); }
     { uint8_t c[] = {0x0F,0x57,0xC0}; lift_ok(c, sizeof(c)); }
     { uint8_t c[] = {0x0F,0x58,0xC1}; lift_ok(c, sizeof(c)); }
+    { uint8_t c[] = {0x0F,0x5C,0xC1}; lift_ok(c, sizeof(c)); }
+    { uint8_t c[] = {0x0F,0x59,0xC1}; lift_ok(c, sizeof(c)); }
+    { uint8_t c[] = {0x0F,0x5E,0xC1}; lift_ok(c, sizeof(c)); }
     { uint8_t c[] = {0xF3,0x0F,0x58,0xC1}; lift_ok(c, sizeof(c)); }
+    { uint8_t c[] = {0x66,0x0F,0xFE,0xC1}; lift_ok(c, sizeof(c)); }
+    { uint8_t c[] = {0x66,0x0F,0xFA,0xC1}; lift_ok(c, sizeof(c)); }
+    { uint8_t c[] = {0x66,0x0F,0xEF,0xC1}; lift_ok(c, sizeof(c)); }
+    { uint8_t c[] = {0x66,0x0F,0xDB,0xC1}; lift_ok(c, sizeof(c)); }
     printf("    Lift: %d/%d\n", lift_pass, lift_total);
     CHECK(lift_pass == lift_total, "all lifts pass");
 
