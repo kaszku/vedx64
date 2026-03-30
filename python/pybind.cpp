@@ -5,8 +5,6 @@
 #include "vedx64/operand.hpp"
 #include "vedx64/instruction.hpp"
 #include "vedx64/encoding_id.hpp"
-#ifdef VEDX64_SEMANTICS
-#include "vedx64/semantics.hpp"
 #endif
 #ifdef VEDX64_EMU
 #include "vedx64/emu.hpp"
@@ -949,74 +947,6 @@ NB_MODULE(vedx64_py, m) {
         size_t len = data.size();
         return vedx64::classify_flow(ptr, len, rip);
     }, nb::arg("data"), nb::arg("rip") = 0, "Classify the control flow of an instruction");
-
-#ifdef VEDX64_SEMANTICS
-    // Semantics subsystem
-    m.attr("FLAG_CF") = (uint8_t)FLAG_CF;
-    m.attr("FLAG_PF") = (uint8_t)FLAG_PF;
-    m.attr("FLAG_AF") = (uint8_t)FLAG_AF;
-    m.attr("FLAG_ZF") = (uint8_t)FLAG_ZF;
-    m.attr("FLAG_SF") = (uint8_t)FLAG_SF;
-    m.attr("FLAG_OF") = (uint8_t)FLAG_OF;
-    m.attr("FLAG_DF") = (uint8_t)FLAG_DF;
-
-    nb::enum_<Category>(m, "Category")
-        .value("Unknown", Category::Unknown)
-        .value("Arithmetic", Category::Arithmetic)
-        .value("Logic", Category::Logic)
-        .value("Shift", Category::Shift)
-        .value("DataMove", Category::DataMove)
-        .value("Compare", Category::Compare)
-        .value("Branch", Category::Branch)
-        .value("Call", Category::Call)
-        .value("Stack", Category::Stack)
-        .value("String", Category::String)
-        .value("IO", Category::IO)
-        .value("Flag", Category::Flag)
-        .value("System", Category::System)
-        .value("Nop", Category::Nop)
-        .value("Bit", Category::Bit)
-        .value("Convert", Category::Convert)
-        .value("SimdArith", Category::SimdArith)
-        .value("SimdLogic", Category::SimdLogic)
-        .value("SimdMove", Category::SimdMove)
-        .value("SimdCompare", Category::SimdCompare)
-        .value("SimdConvert", Category::SimdConvert)
-        .value("SimdShuffle", Category::SimdShuffle)
-        .value("SimdOther", Category::SimdOther)
-        .value("Crypto", Category::Crypto)
-        .value("FPU", Category::FPU)
-        .value("VMX", Category::VMX)
-        .value("Sync", Category::Sync)
-        .export_values();
-
-    nb::enum_<Access>(m, "Access")
-        .value("None", Access::None)
-        .value("Read", Access::Read)
-        .value("Write", Access::Write)
-        .value("ReadWrite", Access::ReadWrite)
-        .export_values();
-
-    nb::class_<Semantics>(m, "Semantics")
-        .def_ro("flags_read", &Semantics::flags_read)
-        .def_ro("flags_written", &Semantics::flags_written)
-        .def_ro("flags_undefined", &Semantics::flags_undefined)
-        .def_ro("flow", &Semantics::flow)
-        .def_ro("category", &Semantics::category)
-        .def_ro("ring", &Semantics::ring)
-        .def_ro("lock_valid", &Semantics::lock_valid)
-        .def_ro("is_privileged", &Semantics::is_privileged);
-
-    m.def("get_semantics", [](nb::bytes data) -> nb::object {
-        const uint8_t* ptr = (const uint8_t*)data.c_str();
-        size_t len = data.size();
-        DecodedInstr di;
-        if (vedx64::decode(ptr, len, di) == 0) return nb::none();
-        auto s = get_semantics(di);
-        if (!s) return nb::none();
-        return nb::cast(*s);
-    }, nb::arg("data"), "Get semantics info for an instruction");
-#endif // VEDX64_SEMANTICS
 
 #ifdef VEDX64_EMU
     // Emulator subsystem

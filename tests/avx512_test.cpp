@@ -3,7 +3,6 @@
 
 #include "vedx64/core.hpp"
 #include "vedx64/instruction.hpp"
-#include "vedx64/semantics.hpp"
 #include <cstdio>
 #include <cstring>
 using namespace vedx64;
@@ -117,16 +116,6 @@ int main() {
         CHECK(strstr(buf, "{z}") != nullptr, "disasm {z}");
     }
 #endif
-
-    printf("--- Semantics coverage ---\n");
-    {
-        size_t valid = 0;
-        for (size_t i = 0; i < g_instr_table_size; ++i) {
-            const auto& s = g_semantics_table[i];
-            if ((int)s.category >= 0 && (int)s.flow >= 0) valid++;
-        }
-        CHECK(valid == g_instr_table_size, "all entries have semantics");
-    }
 
     printf("\n%d/%d avx512 tests passed\n", g_pass, g_pass+g_fail);
     return g_fail > 0 ? 1 : 0;

@@ -29,4 +29,4 @@
 ### Changed
 - CMake options default to OFF (was inconsistent)
 - README updated with full assembler documentation
-- Test count: 4,500+ assertions across 12 suites
+- Test count: 4,500+ assertions across 11 suites

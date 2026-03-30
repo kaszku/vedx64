@@ -13,9 +13,6 @@
 #ifdef VEDX64_CODEGEN
 #include "vedx64/codegen.hpp"
 #endif
-#ifdef VEDX64_SEMANTICS
-#include "vedx64/semantics.hpp"
-#endif
 #ifdef VEDX64_EMU
 #include "vedx64/emu.hpp"
 #endif

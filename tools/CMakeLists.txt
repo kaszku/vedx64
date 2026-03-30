@@ -12,7 +12,6 @@ add_library(vedx64_core STATIC
     ../lib/core/decode.cpp
     ../lib/core/encode.cpp
     ../lib/core/disasm.cpp
-    ../lib/semantics/semantics.cpp
     ../lib/assembler/assembler.cpp
 )
 target_include_directories(vedx64_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../include)

@@ -3,7 +3,6 @@
 
 #include "vedx64/core.hpp"
 #ifdef VEDX64_SEMANTICS
-#include "vedx64/semantics.hpp"
 #endif
 #include <cstdio>
 #include <cstring>
@@ -701,7 +700,7 @@ void test_operand_count() {
     TEST_ASSERT(di.desc->num_operands >= 2, "IMUL 3-op has >= 2 operands");
 }
 
-#ifdef VEDX64_SEMANTICS
+#if 0 // removed: semantics module
 void test_semantics_operand_access() {
     DecodedInstr di;
     uint8_t add[] = {0x01, 0xC8};
@@ -785,7 +784,7 @@ void test_semantics_operand_access() {
     TEST_ASSERT(s->flow == FlowType::Branch, "JZ is Branch");
     TEST_ASSERT(s->flags_read != 0, "JZ reads flags");
 }
-#endif // VEDX64_SEMANTICS
+#endif // removed semantics
 
 void test_roundtrip_advanced() {
     DecodedInstr di;
@@ -914,8 +913,7 @@ int main() {
     test_decode_x87();
     test_decode_rex_operand_size();
 #ifdef VEDX64_SEMANTICS
-    test_semantics_operand_access();
-#endif // VEDX64_SEMANTICS
+#endif // removed semantics
     test_roundtrip_advanced();
     test_decode_displacement_imm();
     test_operand_count();

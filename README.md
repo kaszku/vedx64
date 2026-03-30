@@ -22,13 +22,12 @@ and language bindings for Python and Rust.
 | **IR Lifter** | Lift instructions to a flat SSA-style intermediate representation with 47 IR opcodes. 831 mnemonic handlers covering ALU, SSE/AVX, BMI, AES-NI, SHA, x87, and system instructions |
 | **Assembler DSL** | Chainable `CodeGen` class: `e.mov(rax, 42).add(rax, rcx).ret();` with label support |
 | **Text Assembler** | Assemble Intel-syntax text to machine code: 585 mnemonics, memory/SIB, labels, prefixes, segments, XMM/ZMM/MMX, AVX-512 masking, directives (db/dw/dd/dq/times/align/equ), error reporting |
-| **Semantics** | Per-instruction classification: flag reads/writes, operand access, flow type, category, privilege level |
 | **Inline Hooking** | Handle-based API to install, enable, disable, and remove function hooks with trampoline generation (Windows + Linux) |
 | **Relocation** | Relocate RIP-relative, branch, and call instructions to new addresses. Stolen-byte calculation for hook trampolines |
 | **Branch Following** | Classify control flow, build basic blocks, walk CFGs, and resolve forwarding stubs |
 | **Operand API** | High-level typed operand representation (register, memory, immediate, relative offset) with `Instruction` wrapper |
 | **Encoding ID** | Unique typed enum for each instruction encoding, enabling O(1) table lookups |
-| **Python Bindings** | nanobind module exposing decode/encode/disassemble, semantics, emulator, IR lifter, relocation, and branch analysis |
+| **Python Bindings** | nanobind module exposing decode/encode/disassemble, assemble, emulator, IR lifter, relocation, and branch analysis |
 | **Rust Bindings** | `cxx`-bridge crate for direct C++ interop with safe Rust wrappers |
 | **Syscall Module** | NT API wrappers for executable memory allocation, thread suspension, and protection changes (Windows) |
 
@@ -147,18 +146,6 @@ vedx64::hook::enable(h);
 // target_fn now calls my_detour; original points to the trampoline
 ```
 
-## Semantics Example
-
-```cpp
-#include <vedx64/semantics.hpp>
-
-auto* sem = vedx64::get_semantics(di);
-if (sem) {
-    bool touches_carry = vedx64::reads_flag(*sem, vedx64::FLAG_CF);
-    bool is_branch     = vedx64::is_control_flow(*sem);
-}
-```
-
 ## Text Assembler
 
 Assemble x86-64 from Intel-syntax text. 585 mnemonics with full addressing
@@ -231,7 +218,6 @@ loop:
 | `vedx64/encoding_id.hpp` | `EncodingId` typed enum (1396 unique encodings) |
 | `vedx64/codegen.hpp` | `CodeGen` assembler DSL with `Reg`, `Xmm`, `Mem` operand types and label support |
 | `vedx64/assembler.hpp` | `assemble()`, `assemble_block()` — 585 mnemonics, memory/SIB, labels, XMM/ZMM/MMX, AVX-512 `{k}{z}`, directives, error reporting |
-| `vedx64/semantics.hpp` | `Semantics` struct, `get_semantics()`, flag/flow/category analysis, `is_branch()`, `is_call()`, `is_return()` |
 | `vedx64/ir.hpp` | `ir::Opcode` (47 opcodes), `VarNode` (GPR/XMM/Temp/RAM/Const), `Op`, `Lifted`, `lift()`, `execute()` |
 | `vedx64/emu.hpp` | `CpuState` (GPR, RFLAGS, XMM/YMM, x87, memory), `emu_init()`, `emu_step()`, `emu_run()`, `StepResult` |
 | `vedx64/relocation.hpp` | `can_relocate()`, `is_rip_relative()`, `relocate_instruction()`, `relocate_block()`, `calc_stolen_bytes()` |
@@ -262,7 +248,6 @@ ctest --test-dir build -C Release --output-on-failure
 | Option | Default | Description |
 |--------|---------|-------------|
 | `VEDX64_STRINGS` | `OFF` | Enable string functions (`disassemble`, `mnemonic_name`). ~31% smaller binary when off |
-| `VEDX64_SEMANTICS` | `OFF` | Instruction semantics (flag/flow/category analysis) |
 | `VEDX64_EMU` | `OFF` | CPU emulator |
 | `VEDX64_IR` | `OFF` | IR lifter |
 | `VEDX64_HOOK` | `OFF` | Inline hooking |
@@ -292,7 +277,7 @@ assert encoded == b'\x48\x89\xc1'
 for addr, text, length in v.disassemble_all(code, rip=0x401000):
     print(f'{addr:#x}: {text}')
 
-# Semantics, emulator, IR, relocation, branch analysis also available
+# Emulator, IR, relocation, branch analysis also available
 ```
 
 ## Rust Bindings
@@ -355,7 +340,7 @@ including extensions:
 ```
 include/vedx64/       C++ headers (public API)
 lib/                  C++ implementation files
-tests/                Test executables (12 suites)
+tests/                Test executables (11 suites)
 examples/             Example programs (10 examples)
 python/               Python nanobind binding
 rust/                 Rust cxx binding crate

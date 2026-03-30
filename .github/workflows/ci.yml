@@ -31,7 +31,6 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release
           -DVEDX64_STRINGS=ON
           -DVEDX64_CODEGEN=ON
-          -DVEDX64_SEMANTICS=ON
           -DVEDX64_EMU=ON
           -DVEDX64_HOOK=ON
           -DVEDX64_TESTS=ON
