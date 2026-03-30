@@ -162,6 +162,75 @@ int main() {
         CHECK(ctx.gpr[0] == 0xFFFFFFFFFFFFFFFFULL, "not 0 -> all 1s");
     }
 
+    printf("  Semantic verification...\n");
+    int sem_pass = 0, sem_total = 0;
+    auto sem_ok = [&](const char* name, const uint8_t* code, size_t len,
+                      uint64_t init_rax, uint64_t init_rcx, uint64_t init_rdx,
+                      uint64_t expect_rax, int expect_zf = -1) -> bool {
+        sem_total++;
+        auto lifted = ir::lift(code, len);
+        if (!lifted) { printf("    FAIL %s: lift failed\n", name); return false; }
+        ir::Context ctx;
+        ctx.gpr[0] = init_rax; ctx.gpr[1] = init_rcx; ctx.gpr[2] = init_rdx;
+        ir::execute(ctx, *lifted);
+        if (ctx.gpr[0] != expect_rax) {
+            printf("    FAIL %s: RAX=%llu expected %llu\n", name,
+                   (unsigned long long)ctx.gpr[0], (unsigned long long)expect_rax);
+            return false;
+        }
+        if (expect_zf >= 0 && ctx.flags[2] != (uint8_t)expect_zf) {
+            printf("    FAIL %s: ZF=%d expected %d\n", name, ctx.flags[2], expect_zf);
+            return false;
+        }
+        sem_pass++; return true;
+    };
+
+    { uint8_t c[] = {0x48,0x01,0xC8}; sem_ok("add rax,rcx", c, sizeof(c), 10, 32, 0, 42); }
+    { uint8_t c[] = {0x48,0x29,0xC8}; sem_ok("sub rax,rcx", c, sizeof(c), 100, 58, 0, 42); }
+    { uint8_t c[] = {0x48,0x21,0xC8}; sem_ok("and rax,rcx", c, sizeof(c), 0xFF, 0x0F, 0, 0x0F); }
+    { uint8_t c[] = {0x48,0x09,0xC8}; sem_ok("or rax,rcx", c, sizeof(c), 0xF0, 0x0F, 0, 0xFF); }
+    { uint8_t c[] = {0x48,0x31,0xC8}; sem_ok("xor rax,rcx", c, sizeof(c), 0xFF, 0xFF, 0, 0, 1); }
+    { uint8_t c[] = {0x31,0xC0}; sem_ok("xor eax,eax", c, sizeof(c), 0xDEAD, 0, 0, 0, 1); }
+    { uint8_t c[] = {0x48,0xFF,0xC0}; sem_ok("inc rax", c, sizeof(c), 41, 0, 0, 42); }
+    { uint8_t c[] = {0x48,0xFF,0xC8}; sem_ok("dec rax", c, sizeof(c), 43, 0, 0, 42); }
+    { uint8_t c[] = {0x48,0xFF,0xC0}; sem_ok("inc 0->1", c, sizeof(c), 0, 0, 0, 1, 0); }
+    { uint8_t c[] = {0x48,0xF7,0xD8}; sem_ok("neg rax", c, sizeof(c), 42, 0, 0, (uint64_t)-42LL); }
+    { uint8_t c[] = {0x48,0xF7,0xD0}; sem_ok("not rax", c, sizeof(c), 0, 0, 0, ~0ULL); }
+    { uint8_t c[] = {0x48,0xC1,0xE0,0x04}; sem_ok("shl rax,4", c, sizeof(c), 1, 0, 0, 16); }
+    { uint8_t c[] = {0x48,0xC1,0xE8,0x04}; sem_ok("shr rax,4", c, sizeof(c), 0x100, 0, 0, 0x10); }
+    { uint8_t c[] = {0x48,0xC1,0xF8,0x04}; sem_ok("sar rax,4", c, sizeof(c), (uint64_t)-16LL, 0, 0, (uint64_t)-1LL); }
+    { uint8_t c[] = {0x48,0x89,0xC8}; sem_ok("mov rax,rcx", c, sizeof(c), 0, 42, 0, 42); }
+    { uint8_t c[] = {0x48,0x39,0xC8};
+       sem_ok("cmp rax,rcx (eq)", c, sizeof(c), 42, 42, 0, 42, 1); }
+    { uint8_t c[] = {0x48,0x39,0xC8};
+       sem_ok("cmp rax,rcx (ne)", c, sizeof(c), 42, 43, 0, 42, 0); }
+    { uint8_t c[] = {0x48,0x0F,0xAF,0xC1}; sem_ok("imul rax,rcx", c, sizeof(c), 6, 7, 0, 42); }
+    { uint8_t c[] = {0x55}; // push rbp
+       auto l = ir::lift(c, sizeof(c));
+       ir::Context ctx; uint8_t mem[256] = {};
+       ctx.memory = mem; ctx.memory_size = sizeof(mem);
+       ctx.gpr[4] = 128; ctx.gpr[5] = 0xBEEF;
+       if (l) ir::execute(ctx, *l);
+       sem_total++;
+       if (ctx.gpr[4] == 120) sem_pass++; else printf("    FAIL push RSP=%llu\n", (unsigned long long)ctx.gpr[4]);
+    }
+    {
+        uint8_t mem[256] = {};
+        uint8_t stos_code[] = {0xAA}; // stosb
+        auto stos_l = ir::lift(stos_code, sizeof(stos_code));
+        ir::Context ctx;
+        ctx.memory = mem; ctx.memory_size = sizeof(mem);
+        ctx.gpr[0] = 0x41; // AL = 'A'
+        ctx.gpr[7] = 100;  // RDI = 100
+        if (stos_l) ir::execute(ctx, *stos_l);
+        sem_total++;
+        if (mem[100] == 0x41) { sem_pass++; } else printf("    FAIL stosb: [100]=%d\n", mem[100]);
+        sem_total++;
+        if (ctx.gpr[7] == 101) { sem_pass++; } else printf("    FAIL stosb: RDI=%llu\n", (unsigned long long)ctx.gpr[7]);
+    }
+    printf("    Semantic: %d/%d\n", sem_pass, sem_total);
+    CHECK(sem_pass == sem_total, "all semantic checks pass");
+
     printf("All IR tests passed!\n");
     return 0;
 }

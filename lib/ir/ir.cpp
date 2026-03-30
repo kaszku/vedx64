@@ -1314,12 +1314,11 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
     }
 
     if (m == Mnemonic::MOVS || m == Mnemonic::MOVSB || m == Mnemonic::MOVSW || m == Mnemonic::MOVSD || m == Mnemonic::MOVSQ) {
-        uint8_t ssz = 1;
-        if (m == Mnemonic::MOVSW) ssz = 2;
-        else if (m == Mnemonic::MOVSD || m == Mnemonic::MOVS) ssz = 4;
+        uint8_t ssz = sz;
+        if (m == Mnemonic::MOVSB) ssz = 1;
+        else if (m == Mnemonic::MOVSW) ssz = 2;
+        else if (m == Mnemonic::MOVSD) ssz = 4;
         else if (m == Mnemonic::MOVSQ) ssz = 8;
-        if (has_66 && m == Mnemonic::MOVS) ssz = 2;
-        if (rex_w && m == Mnemonic::MOVS) ssz = 8;
         VarNode rsi = VarNode::gpr(6, 8), rdi = VarNode::gpr(7, 8);
         VarNode tmp = VarNode::temp(14, ssz);
         VarNode step = VarNode::constant(ssz, 8);
@@ -1331,12 +1330,11 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
     }
 
     if (m == Mnemonic::STOS || m == Mnemonic::STOSB || m == Mnemonic::STOSW || m == Mnemonic::STOSD || m == Mnemonic::STOSQ) {
-        uint8_t ssz = 1;
-        if (m == Mnemonic::STOSW) ssz = 2;
-        else if (m == Mnemonic::STOSD || m == Mnemonic::STOS) ssz = 4;
+        uint8_t ssz = sz; // use decoded operand size
+        if (m == Mnemonic::STOSB) ssz = 1;
+        else if (m == Mnemonic::STOSW) ssz = 2;
+        else if (m == Mnemonic::STOSD) ssz = 4;
         else if (m == Mnemonic::STOSQ) ssz = 8;
-        if (has_66 && m == Mnemonic::STOS) ssz = 2;
-        if (rex_w && m == Mnemonic::STOS) ssz = 8;
         VarNode rax = VarNode::gpr(0, ssz), rdi = VarNode::gpr(7, 8);
         VarNode step = VarNode::constant(ssz, 8);
         l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(ssz), rdi, rax));
@@ -1345,9 +1343,10 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
     }
 
     if (m == Mnemonic::LODS || m == Mnemonic::LODSB || m == Mnemonic::LODSW || m == Mnemonic::LODSD || m == Mnemonic::LODSQ) {
-        uint8_t ssz = 1;
-        if (m == Mnemonic::LODSW) ssz = 2;
-        else if (m == Mnemonic::LODSD || m == Mnemonic::LODS) ssz = 4;
+        uint8_t ssz = sz;
+        if (m == Mnemonic::LODSB) ssz = 1;
+        else if (m == Mnemonic::LODSW) ssz = 2;
+        else if (m == Mnemonic::LODSD) ssz = 4;
         else if (m == Mnemonic::LODSQ) ssz = 8;
         VarNode rax = VarNode::gpr(0, ssz), rsi = VarNode::gpr(6, 8);
         VarNode step = VarNode::constant(ssz, 8);
@@ -1357,9 +1356,10 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
     }
 
     if (m == Mnemonic::CMPS || m == Mnemonic::CMPSB || m == Mnemonic::CMPSW || m == Mnemonic::CMPSD || m == Mnemonic::CMPSQ) {
-        uint8_t ssz = 1;
-        if (m == Mnemonic::CMPSW) ssz = 2;
-        else if (m == Mnemonic::CMPSD || m == Mnemonic::CMPS) ssz = 4;
+        uint8_t ssz = sz;
+        if (m == Mnemonic::CMPSB) ssz = 1;
+        else if (m == Mnemonic::CMPSW) ssz = 2;
+        else if (m == Mnemonic::CMPSD) ssz = 4;
         else if (m == Mnemonic::CMPSQ) ssz = 8;
         VarNode rsi = VarNode::gpr(6, 8), rdi = VarNode::gpr(7, 8);
         VarNode t1 = VarNode::temp(14, ssz), t2 = VarNode::temp(15, ssz);
@@ -1373,9 +1373,10 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
     }
 
     if (m == Mnemonic::SCAS || m == Mnemonic::SCASB || m == Mnemonic::SCASW || m == Mnemonic::SCASD || m == Mnemonic::SCASQ) {
-        uint8_t ssz = 1;
-        if (m == Mnemonic::SCASW) ssz = 2;
-        else if (m == Mnemonic::SCASD || m == Mnemonic::SCAS) ssz = 4;
+        uint8_t ssz = sz;
+        if (m == Mnemonic::SCASB) ssz = 1;
+        else if (m == Mnemonic::SCASW) ssz = 2;
+        else if (m == Mnemonic::SCASD) ssz = 4;
         else if (m == Mnemonic::SCASQ) ssz = 8;
         VarNode rax = VarNode::gpr(0, ssz), rdi = VarNode::gpr(7, 8);
         VarNode tmp = VarNode::temp(14, ssz);
@@ -2234,67 +2235,135 @@ std::optional<Lifted> lift(const uint8_t* code, size_t len, uint64_t address) {
 }
 
 void execute(Context& ctx, const Lifted& lifted) {
+    uint64_t temps[32] = {};
+
     auto read_var = [&](const VarNode& v) -> uint64_t {
         switch (v.space) {
         case Space::Const: return (uint64_t)v.value;
-        case Space::GPR: return ctx.gpr[v.offset & 15];
-        case Space::Flags: return ctx.flags[0]; // simplified
+        case Space::GPR: {
+            uint64_t full = ctx.gpr[v.offset & 15];
+            if (v.size == 1) return full & 0xFF;
+            if (v.size == 2) return full & 0xFFFF;
+            if (v.size == 4) return full & 0xFFFFFFFF;
+            return full;
+        }
+        case Space::Temp: return temps[v.offset & 31];
+        case Space::Flags: return ctx.flags[0];
+        case Space::XMM: { uint64_t val = 0; memcpy(&val, &ctx.xmm[v.offset & 15][0], v.size < 8 ? v.size : 8); return val; }
         default: return 0;
         }
     };
 
     auto write_var = [&](const VarNode& v, uint64_t val) {
         switch (v.space) {
-        case Space::GPR: ctx.gpr[v.offset & 15] = val; break;
+        case Space::GPR: {
+            if (v.size == 1) ctx.gpr[v.offset & 15] = (ctx.gpr[v.offset & 15] & ~0xFFULL) | (val & 0xFF);
+            else if (v.size == 2) ctx.gpr[v.offset & 15] = (ctx.gpr[v.offset & 15] & ~0xFFFFULL) | (val & 0xFFFF);
+            else if (v.size == 4) ctx.gpr[v.offset & 15] = val & 0xFFFFFFFF; // 32-bit writes zero-extend
+            else ctx.gpr[v.offset & 15] = val;
+            break;
+        }
+        case Space::Temp: temps[v.offset & 31] = val; break;
         case Space::Flags: ctx.flags[0] = (uint8_t)val; break;
+        case Space::XMM: memcpy(&ctx.xmm[v.offset & 15][0], &val, v.size < 8 ? v.size : 8); break;
         default: break;
         }
     };
 
+    auto popcnt64 = [](uint64_t x) -> uint64_t { uint64_t c = 0; while (x) { c += x & 1; x >>= 1; } return c; };
+    auto ctz64 = [](uint64_t x) -> uint64_t { if (!x) return 64; uint64_t c = 0; while (!(x & 1)) { c++; x >>= 1; } return c; };
+    auto clz64 = [](uint64_t x) -> uint64_t { if (!x) return 64; uint64_t c = 0; uint64_t m = 1ULL << 63; while (!(x & m)) { c++; m >>= 1; } return c; };
+
     for (const auto& op : lifted.ops) {
+        uint64_t a = read_var(op.inputs[0]);
+        uint64_t b = (op.num_inputs >= 2) ? read_var(op.inputs[1]) : 0;
         switch (op.opcode) {
-        case Opcode::NOP: break;
-        case Opcode::COPY: write_var(op.output, read_var(op.inputs[0])); break;
-        case Opcode::ADD: write_var(op.output, read_var(op.inputs[0]) + read_var(op.inputs[1])); break;
-        case Opcode::SUB: write_var(op.output, read_var(op.inputs[0]) - read_var(op.inputs[1])); break;
-        case Opcode::AND: write_var(op.output, read_var(op.inputs[0]) & read_var(op.inputs[1])); break;
-        case Opcode::OR:  write_var(op.output, read_var(op.inputs[0]) | read_var(op.inputs[1])); break;
-        case Opcode::XOR: write_var(op.output, read_var(op.inputs[0]) ^ read_var(op.inputs[1])); break;
-        case Opcode::NOT: write_var(op.output, ~read_var(op.inputs[0])); break;
-        case Opcode::NEG: write_var(op.output, (uint64_t)(-(int64_t)read_var(op.inputs[0]))); break;
-        case Opcode::SHL: write_var(op.output, read_var(op.inputs[0]) << (read_var(op.inputs[1]) & 63)); break;
-        case Opcode::SHR: write_var(op.output, read_var(op.inputs[0]) >> (read_var(op.inputs[1]) & 63)); break;
-        case Opcode::SAR: write_var(op.output, (uint64_t)((int64_t)read_var(op.inputs[0]) >> (read_var(op.inputs[1]) & 63))); break;
+        case Opcode::NOP: case Opcode::BARRIER: case Opcode::UNDEF: break;
+        case Opcode::COPY: write_var(op.output, a); break;
+        case Opcode::ADD: write_var(op.output, a + b); break;
+        case Opcode::SUB: write_var(op.output, a - b); break;
+        case Opcode::MUL: write_var(op.output, a * b); break;
+        case Opcode::IMUL: write_var(op.output, (uint64_t)((int64_t)a * (int64_t)b)); break;
+        case Opcode::DIV: write_var(op.output, b ? a / b : 0); break;
+        case Opcode::IDIV: write_var(op.output, b ? (uint64_t)((int64_t)a / (int64_t)b) : 0); break;
+        case Opcode::NEG: write_var(op.output, (uint64_t)(-(int64_t)a)); break;
+        case Opcode::AND: write_var(op.output, a & b); break;
+        case Opcode::OR:  write_var(op.output, a | b); break;
+        case Opcode::XOR: write_var(op.output, a ^ b); break;
+        case Opcode::NOT: write_var(op.output, ~a); break;
+        case Opcode::SHL: write_var(op.output, a << (b & 63)); break;
+        case Opcode::SHR: write_var(op.output, a >> (b & 63)); break;
+        case Opcode::SAR: write_var(op.output, (uint64_t)((int64_t)a >> (b & 63))); break;
+        case Opcode::ROL: { uint8_t s = b & 63; write_var(op.output, (a << s) | (a >> (64 - s))); break; }
+        case Opcode::ROR: { uint8_t s = b & 63; write_var(op.output, (a >> s) | (a << (64 - s))); break; }
+        case Opcode::ZEXT: write_var(op.output, a); break;
+        case Opcode::SEXT: {
+            uint8_t src_sz = op.inputs[0].size;
+            if (src_sz == 1) write_var(op.output, (uint64_t)(int64_t)(int8_t)a);
+            else if (src_sz == 2) write_var(op.output, (uint64_t)(int64_t)(int16_t)a);
+            else if (src_sz == 4) write_var(op.output, (uint64_t)(int64_t)(int32_t)a);
+            else write_var(op.output, a);
+            break;
+        }
+        case Opcode::TRUNC: write_var(op.output, a); break;
+        case Opcode::POPCNT: write_var(op.output, popcnt64(a)); break;
+        case Opcode::CTZ: write_var(op.output, ctz64(a)); break;
+        case Opcode::CLZ: write_var(op.output, clz64(a)); break;
+        case Opcode::ADD_FLAGS: case Opcode::SUB_FLAGS: case Opcode::AND_FLAGS: {
+            uint64_t res = (op.opcode == Opcode::SUB_FLAGS) ? a - b :
+                           (op.opcode == Opcode::AND_FLAGS) ? a & b : a + b;
+            ctx.flags[0] = (op.opcode == Opcode::SUB_FLAGS) ? (a < b ? 1 : 0) :
+                           (op.opcode == Opcode::ADD_FLAGS) ? (res < a ? 1 : 0) : 0; // CF
+            ctx.flags[1] = (uint8_t)(popcnt64(res & 0xFF) % 2 == 0 ? 1 : 0); // PF
+            ctx.flags[2] = (res == 0) ? 1 : 0; // ZF
+            ctx.flags[3] = (res >> 63) ? 1 : 0; // SF
+            if (op.opcode == Opcode::SUB_FLAGS) ctx.flags[4] = (((a ^ b) & (a ^ res)) >> 63) ? 1 : 0; // OF
+            else if (op.opcode == Opcode::ADD_FLAGS) ctx.flags[4] = (((~(a ^ b)) & (a ^ res)) >> 63) ? 1 : 0;
+            else ctx.flags[4] = 0;
+            break;
+        }
+        case Opcode::GET_CF: write_var(op.output, ctx.flags[0]); break;
+        case Opcode::GET_ZF: write_var(op.output, ctx.flags[2]); break;
+        case Opcode::GET_SF: write_var(op.output, ctx.flags[3]); break;
+        case Opcode::GET_OF: write_var(op.output, ctx.flags[4]); break;
+        case Opcode::GET_PF: write_var(op.output, ctx.flags[1]); break;
+        case Opcode::SET_CF: ctx.flags[0] = (uint8_t)(a & 1); break;
+        case Opcode::SET_ZF: ctx.flags[2] = (uint8_t)(a & 1); break;
+        case Opcode::SET_SF: ctx.flags[3] = (uint8_t)(a & 1); break;
+        case Opcode::SET_OF: ctx.flags[4] = (uint8_t)(a & 1); break;
+        case Opcode::SET_PF: ctx.flags[1] = (uint8_t)(a & 1); break;
         case Opcode::LOAD:
             if (ctx.memory) {
-                uint64_t addr = read_var(op.inputs[0]);
+                uint64_t addr = a;
                 if (addr + op.output.size <= ctx.memory_size) {
                     uint64_t val = 0;
-                    memcpy(&val, ctx.memory + addr, op.output.size);
+                    memcpy(&val, ctx.memory + addr, op.output.size < 8 ? op.output.size : 8);
                     write_var(op.output, val);
                 }
             }
             break;
         case Opcode::STORE:
             if (ctx.memory) {
-                uint64_t addr = read_var(op.inputs[0]);
-                uint64_t val = read_var(op.inputs[1]);
-                if (addr + op.output.size <= ctx.memory_size)
-                    memcpy(ctx.memory + addr, &val, op.output.size);
+                uint64_t addr = a;
+                uint64_t val = b;
+                uint8_t sz = op.output.size < 8 ? op.output.size : 8;
+                if (addr + sz <= ctx.memory_size)
+                    memcpy(ctx.memory + addr, &val, sz);
             }
             break;
-        case Opcode::BRANCH: ctx.rip = read_var(op.inputs[0]); return;
-        case Opcode::RET: ctx.rip = read_var(op.inputs[0]); return;
-        case Opcode::CALL: ctx.rip = read_var(op.inputs[0]); return;
-        case Opcode::ADD_FLAGS: case Opcode::SUB_FLAGS: case Opcode::AND_FLAGS:
-            // Simplified flag computation
-            { uint64_t res = (op.opcode == Opcode::SUB_FLAGS)
-                ? read_var(op.inputs[0]) - read_var(op.inputs[1])
-                : read_var(op.inputs[0]) + read_var(op.inputs[1]);
-              ctx.flags[2] = (res == 0) ? 1 : 0; // ZF
-              ctx.flags[3] = (res >> 63) ? 1 : 0; // SF
-            }
-            break;
+        case Opcode::BRANCH: ctx.rip = a; return;
+        case Opcode::RET: ctx.rip = a; return;
+        case Opcode::CALL: ctx.rip = a; return;
+        case Opcode::CBRANCH: if (a) { ctx.rip = b; return; } break;
+        case Opcode::FADD: case Opcode::FSUB: case Opcode::FMUL: case Opcode::FDIV:
+        case Opcode::FSQRT: case Opcode::FMIN: case Opcode::FMAX:
+            write_var(op.output, a); break; // placeholder for float ops
+        case Opcode::CMP_EQ: write_var(op.output, a == b ? 1 : 0); break;
+        case Opcode::CMP_NE: write_var(op.output, a != b ? 1 : 0); break;
+        case Opcode::CMP_ULT: write_var(op.output, a < b ? 1 : 0); break;
+        case Opcode::CMP_SLT: write_var(op.output, (int64_t)a < (int64_t)b ? 1 : 0); break;
+        case Opcode::CMP_ULE: write_var(op.output, a <= b ? 1 : 0); break;
+        case Opcode::CMP_SLE: write_var(op.output, (int64_t)a <= (int64_t)b ? 1 : 0); break;
         default: break;
         }
     }
