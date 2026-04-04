@@ -10,9 +10,6 @@
 #include "vedx64/core.hpp"
 #include "vedx64/relocation.hpp"
 #include "vedx64/branch_follow.hpp"
-#ifdef VEDX64_SEMANTICS
-#include "vedx64/semantics.hpp"
-#endif
 #ifdef VEDX64_EMU
 #include "vedx64/emu.hpp"
 #endif
