@@ -52,7 +52,7 @@ Instruction Instruction::from_decoded(const DecodedInstr& di, const uint8_t* cod
     instr.mnemonic = di.desc->mnemonic;
     instr.length = di.length;
     instr.address = addr;
-    (void)code;
+    if (code && di.length > 0) instr.raw_bytes.assign(code, code + di.length);
 
     ptrdiff_t idx = di.desc - g_instr_table;
     if (idx >= 0 && static_cast<size_t>(idx) < g_instr_table_size)

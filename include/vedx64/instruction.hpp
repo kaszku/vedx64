@@ -46,6 +46,7 @@ struct Instruction {
     uint8_t length = 0;                       ///< Instruction length (1-15)
     uint8_t prefixes = PFX_NONE;              ///< Legacy prefix bitfield
     uint64_t address = 0;                     ///< Instruction address
+    std::vector<uint8_t> raw_bytes;           ///< Raw instruction bytes
     std::vector<Operand> operands;            ///< Typed operand list
 
     /// Build an Instruction from a low-level DecodedInstr.
@@ -75,8 +76,14 @@ struct Instruction {
     bool has_segment() const { return segment() != 0; }
 
 #ifdef VEDX64_STRINGS
-    /// Format instruction as disassembly text.
+    /// Get mnemonic name as string.
     const char* mnemonic_str() const { return mnemonic_name(mnemonic); }
+
+    /// Format instruction as disassembly text (e.g. "mov rax, rcx").
+    std::string to_string() const {
+        if (length == 0 || raw_bytes.empty()) return "";
+        return vedx64::disassemble(raw_bytes.data(), raw_bytes.size(), address);
+    }
 #endif
 };
 

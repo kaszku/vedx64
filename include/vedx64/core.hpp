@@ -4,6 +4,7 @@
 #pragma once
 #include <cstdint>
 #include <cstddef>
+#include <string>
 #include "vedx64/mnemonic.hpp"
 
 namespace vedx64 {
@@ -122,6 +123,14 @@ size_t encode(const DecodedInstr& instr, uint8_t* out, size_t max_len);
 // Disassemble a single instruction into a text buffer.
 // Returns number of bytes consumed, or 0 on failure.
 size_t disassemble(const uint8_t* code, size_t len, char* buf, size_t buf_len, uint64_t rip);
+
+/// Disassemble a single instruction, returning the text as std::string.
+/// Returns empty string on failure.
+inline std::string disassemble(const uint8_t* code, size_t len, uint64_t rip = 0) {
+    char buf[256];
+    size_t n = disassemble(code, len, buf, sizeof(buf), rip);
+    return n > 0 ? std::string(buf) : std::string();
+}
 
 const char* mnemonic_name(Mnemonic m);
 #endif // VEDX64_STRINGS
