@@ -133,5 +133,20 @@ struct Context {
 /// Execute a single lifted instruction on the given context.
 void execute(Context& ctx, const Lifted& lifted);
 
+#ifdef VEDX64_STRINGS
+#include <string>
+/// Return human-readable name for an IR opcode.
+const char* opcode_name(Opcode opc);
+
+/// Format a VarNode as a human-readable string (e.g. "RAX:8", "t0:4", "#42").
+std::string varnode_str(const VarNode& v);
+
+/// Format a single IR Op as a human-readable string.
+std::string op_str(const Op& op);
+
+/// Dump all ops in a Lifted to stdout.
+void dump(const Lifted& lifted);
+#endif // VEDX64_STRINGS
+
 } // namespace ir
 } // namespace vedx64

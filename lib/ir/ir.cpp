@@ -213,9 +213,17 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         VarNode rsp = VarNode::gpr(4, 8); // RSP
         VarNode eight = VarNode::constant(8, 8);
         l.ops.push_back(make_op3(Opcode::SUB, rsp, rsp, eight));
-        if (di.desc->operands[0].addr == AddrMode::OpcodeReg) {
-            uint8_t id = di.opcode_reg | ((di.rex & 0x01) ? 8 : 0);
-            l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(8), rsp, VarNode::gpr(id, 8)));
+        bool found_opcreg = false;
+        for (uint8_t i = 0; i < di.desc->num_operands; ++i) {
+            if (di.desc->operands[i].addr == AddrMode::OpcodeReg) {
+                uint8_t id = di.opcode_reg | ((di.rex & 0x01) ? 8 : 0);
+                l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(8), rsp, VarNode::gpr(id, 8)));
+                found_opcreg = true; break;
+            }
+        }
+        if (!found_opcreg && di.desc->has_modrm && mod_ == 3) {
+            VarNode reg = reg_from_modrm_rm(di, 8);
+            l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(8), rsp, reg));
         }
         return true;
     }
@@ -223,9 +231,17 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
     if (m == Mnemonic::POP && di.desc->num_operands >= 1) {
         VarNode rsp = VarNode::gpr(4, 8);
         VarNode eight = VarNode::constant(8, 8);
-        if (di.desc->operands[0].addr == AddrMode::OpcodeReg) {
-            uint8_t id = di.opcode_reg | ((di.rex & 0x01) ? 8 : 0);
-            l.ops.push_back(make_op3(Opcode::LOAD, VarNode::gpr(id, 8), rsp, VarNode::ram(8)));
+        bool found_opcreg = false;
+        for (uint8_t i = 0; i < di.desc->num_operands; ++i) {
+            if (di.desc->operands[i].addr == AddrMode::OpcodeReg) {
+                uint8_t id = di.opcode_reg | ((di.rex & 0x01) ? 8 : 0);
+                l.ops.push_back(make_op3(Opcode::LOAD, VarNode::gpr(id, 8), rsp, VarNode::ram(8)));
+                found_opcreg = true; break;
+            }
+        }
+        if (!found_opcreg && di.desc->has_modrm && mod_ == 3) {
+            VarNode reg = reg_from_modrm_rm(di, 8);
+            l.ops.push_back(make_op3(Opcode::LOAD, reg, rsp, VarNode::ram(8)));
         }
         l.ops.push_back(make_op3(Opcode::ADD, rsp, rsp, eight));
         return true;
@@ -2442,6 +2458,112 @@ void execute(Context& ctx, const Lifted& lifted) {
     }
     ctx.rip = lifted.address + lifted.length;
 }
+
+#ifdef VEDX64_STRINGS
+#include <string>
+#include <cstdio>
+
+const char* opcode_name(Opcode opc) {
+    switch (opc) {
+    case Opcode::COPY: return "COPY";
+    case Opcode::LOAD: return "LOAD";
+    case Opcode::STORE: return "STORE";
+    case Opcode::ADD: return "ADD";
+    case Opcode::SUB: return "SUB";
+    case Opcode::MUL: return "MUL";
+    case Opcode::IMUL: return "IMUL";
+    case Opcode::DIV: return "DIV";
+    case Opcode::IDIV: return "IDIV";
+    case Opcode::NEG: return "NEG";
+    case Opcode::AND: return "AND";
+    case Opcode::OR: return "OR";
+    case Opcode::XOR: return "XOR";
+    case Opcode::NOT: return "NOT";
+    case Opcode::SHL: return "SHL";
+    case Opcode::SHR: return "SHR";
+    case Opcode::SAR: return "SAR";
+    case Opcode::ROL: return "ROL";
+    case Opcode::ROR: return "ROR";
+    case Opcode::CMP_EQ: return "CMP_EQ";
+    case Opcode::CMP_NE: return "CMP_NE";
+    case Opcode::CMP_SLT: return "CMP_SLT";
+    case Opcode::CMP_ULT: return "CMP_ULT";
+    case Opcode::CMP_SLE: return "CMP_SLE";
+    case Opcode::CMP_ULE: return "CMP_ULE";
+    case Opcode::ZEXT: return "ZEXT";
+    case Opcode::SEXT: return "SEXT";
+    case Opcode::TRUNC: return "TRUNC";
+    case Opcode::ADD_FLAGS: return "ADD_FLAGS";
+    case Opcode::SUB_FLAGS: return "SUB_FLAGS";
+    case Opcode::AND_FLAGS: return "AND_FLAGS";
+    case Opcode::GET_CF: return "GET_CF";
+    case Opcode::GET_ZF: return "GET_ZF";
+    case Opcode::GET_SF: return "GET_SF";
+    case Opcode::GET_OF: return "GET_OF";
+    case Opcode::GET_PF: return "GET_PF";
+    case Opcode::SET_CF: return "SET_CF";
+    case Opcode::SET_ZF: return "SET_ZF";
+    case Opcode::SET_SF: return "SET_SF";
+    case Opcode::SET_OF: return "SET_OF";
+    case Opcode::SET_PF: return "SET_PF";
+    case Opcode::BRANCH: return "BRANCH";
+    case Opcode::CBRANCH: return "CBRANCH";
+    case Opcode::CALL: return "CALL";
+    case Opcode::RET: return "RET";
+    case Opcode::POPCNT: return "POPCNT";
+    case Opcode::CTZ: return "CTZ";
+    case Opcode::CLZ: return "CLZ";
+    case Opcode::FADD: return "FADD";
+    case Opcode::FSUB: return "FSUB";
+    case Opcode::FMUL: return "FMUL";
+    case Opcode::FDIV: return "FDIV";
+    case Opcode::FSQRT: return "FSQRT";
+    case Opcode::FMIN: return "FMIN";
+    case Opcode::FMAX: return "FMAX";
+    case Opcode::NOP: return "NOP";
+    case Opcode::UNDEF: return "UNDEF";
+    case Opcode::BARRIER: return "BARRIER";
+    default: return "???";
+    }
+}
+
+std::string varnode_str(const VarNode& v) {
+    char buf[64];
+    switch (v.space) {
+    case Space::Const: snprintf(buf, sizeof(buf), "#%lld", (long long)v.value); return buf;
+    case Space::Temp: snprintf(buf, sizeof(buf), "t%d:%d", v.offset, v.size); return buf;
+    case Space::GPR: {
+        static const char* names[] = {"RAX","RCX","RDX","RBX","RSP","RBP","RSI","RDI","R8","R9","R10","R11","R12","R13","R14","R15"};
+        const char* name = (v.offset < 16) ? names[v.offset] : "R??";
+        if (v.size == 8) return name;
+        snprintf(buf, sizeof(buf), "%s:%d", name, v.size); return buf;
+    }
+    case Space::Flags: return "FLAGS";
+    case Space::XMM: snprintf(buf, sizeof(buf), "XMM%d:%d", v.offset, v.size); return buf;
+    case Space::MMX: snprintf(buf, sizeof(buf), "MMX%d", v.offset); return buf;
+    case Space::Seg: snprintf(buf, sizeof(buf), "SEG%d", v.offset); return buf;
+    case Space::RAM: snprintf(buf, sizeof(buf), "[%d]", v.size); return buf;
+    default: return "???";
+    }
+}
+
+std::string op_str(const Op& op) {
+    std::string s = opcode_name(op.opcode);
+    // For ops with output (most ops)
+    bool has_output = (op.output.space != Space::Const || op.output.size != 0);
+    if (has_output) s += " " + varnode_str(op.output);
+    for (uint8_t i = 0; i < op.num_inputs; i++) {
+        s += (has_output || i > 0) ? ", " : " ";
+        s += varnode_str(op.inputs[i]);
+    }
+    return s;
+}
+
+void dump(const Lifted& lifted) {
+    for (size_t i = 0; i < lifted.ops.size(); i++)
+        printf("    %s\n", op_str(lifted.ops[i]).c_str());
+}
+#endif // VEDX64_STRINGS
 
 } // namespace ir
 } // namespace vedx64
