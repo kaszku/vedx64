@@ -1330,7 +1330,7 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
     }
 
     if (m == Mnemonic::MOVS || m == Mnemonic::MOVSB || m == Mnemonic::MOVSW || m == Mnemonic::MOVSD || m == Mnemonic::MOVSQ) {
-        uint8_t ssz = sz;
+        uint8_t ssz = ((di.desc->opcode & 1) == 0) ? 1 : (rex_w ? 8 : (has_66 ? 2 : 4));
         if (m == Mnemonic::MOVSB) ssz = 1;
         else if (m == Mnemonic::MOVSW) ssz = 2;
         else if (m == Mnemonic::MOVSD) ssz = 4;
@@ -1346,7 +1346,7 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
     }
 
     if (m == Mnemonic::STOS || m == Mnemonic::STOSB || m == Mnemonic::STOSW || m == Mnemonic::STOSD || m == Mnemonic::STOSQ) {
-        uint8_t ssz = sz; // use decoded operand size
+        uint8_t ssz = ((di.desc->opcode & 1) == 0) ? 1 : (rex_w ? 8 : (has_66 ? 2 : 4));
         if (m == Mnemonic::STOSB) ssz = 1;
         else if (m == Mnemonic::STOSW) ssz = 2;
         else if (m == Mnemonic::STOSD) ssz = 4;
@@ -1359,7 +1359,7 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
     }
 
     if (m == Mnemonic::LODS || m == Mnemonic::LODSB || m == Mnemonic::LODSW || m == Mnemonic::LODSD || m == Mnemonic::LODSQ) {
-        uint8_t ssz = sz;
+        uint8_t ssz = ((di.desc->opcode & 1) == 0) ? 1 : (rex_w ? 8 : (has_66 ? 2 : 4));
         if (m == Mnemonic::LODSB) ssz = 1;
         else if (m == Mnemonic::LODSW) ssz = 2;
         else if (m == Mnemonic::LODSD) ssz = 4;
@@ -1372,7 +1372,7 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
     }
 
     if (m == Mnemonic::CMPS || m == Mnemonic::CMPSB || m == Mnemonic::CMPSW || m == Mnemonic::CMPSD || m == Mnemonic::CMPSQ) {
-        uint8_t ssz = sz;
+        uint8_t ssz = ((di.desc->opcode & 1) == 0) ? 1 : (rex_w ? 8 : (has_66 ? 2 : 4));
         if (m == Mnemonic::CMPSB) ssz = 1;
         else if (m == Mnemonic::CMPSW) ssz = 2;
         else if (m == Mnemonic::CMPSD) ssz = 4;
@@ -1389,7 +1389,7 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
     }
 
     if (m == Mnemonic::SCAS || m == Mnemonic::SCASB || m == Mnemonic::SCASW || m == Mnemonic::SCASD || m == Mnemonic::SCASQ) {
-        uint8_t ssz = sz;
+        uint8_t ssz = ((di.desc->opcode & 1) == 0) ? 1 : (rex_w ? 8 : (has_66 ? 2 : 4));
         if (m == Mnemonic::SCASB) ssz = 1;
         else if (m == Mnemonic::SCASW) ssz = 2;
         else if (m == Mnemonic::SCASD) ssz = 4;

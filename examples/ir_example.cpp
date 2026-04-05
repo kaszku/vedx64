@@ -64,8 +64,17 @@ int main() {
     { uint8_t c[] = {0xA4}; show("movsb", c, 1); }
     { uint8_t c[] = {0xA6}; show("cmpsb", c, 1); }
     { uint8_t c[] = {0xAE}; show("scasb", c, 1); }
+    printf("--- REP String Ops ---\n");
+    { uint8_t c[] = {0xF3,0xAA}; show("rep stosb", c, 2); }
+    { uint8_t c[] = {0xF3,0xA4}; show("rep movsb", c, 2); }
+    { uint8_t c[] = {0xF3,0xAC}; show("rep lodsb", c, 2); }
+    { uint8_t c[] = {0xF3,0xA6}; show("repz cmpsb", c, 2); }
+    { uint8_t c[] = {0xF2,0xAE}; show("repnz scasb", c, 2); }
+    { uint8_t c[] = {0xF3,0x48,0xAB}; show("rep stosq", c, 3); }
+    { uint8_t c[] = {0xF3,0x48,0xA5}; show("rep movsq", c, 3); }
     printf("--- Stack Frame ---\n");
     { uint8_t c[] = {0xC8,0x20,0x00,0x00}; show("enter 0x20, 0", c, 4); }
+    { uint8_t c[] = {0xC8,0x10,0x00,0x01}; show("enter 0x10, 1", c, 4); }
     { uint8_t c[] = {0xC9}; show("leave", c, 1); }
     { uint8_t c[] = {0x9C}; show("pushfq", c, 1); }
     { uint8_t c[] = {0x9D}; show("popfq", c, 1); }
@@ -94,6 +103,30 @@ int main() {
     { uint8_t c[]={0xAA}; auto l=ir::lift(c,1);
       printf("  IR decomposition:\n"); if(l) { ir::dump(*l); ir::execute(ctx,*l); }
       printf("  Result: mem[100]=0x%02X RDI=%llu\n\n", mem[100], (unsigned long long)ctx.gpr[7]); }
+    printf("--- REP STOSB: fill 5 bytes at mem[50] with 0xBB ---\n");
+    ctx.gpr[0] = 0xBB; ctx.gpr[7] = 50; ctx.gpr[1] = 5; // AL=0xBB, RDI=50, RCX=5
+    { uint8_t c[]={0xF3,0xAA}; auto l=ir::lift(c,2);
+      printf("  IR per iteration (single-step semantic):\n"); if(l) ir::dump(*l);
+      printf("  Executing 5 iterations...\n");
+      if(l) for (int i = 0; i < 5; i++) ir::execute(ctx, *l);
+      printf("  Result: mem[50..54] = %02X %02X %02X %02X %02X, RDI=%llu\n\n",
+             mem[50], mem[51], mem[52], mem[53], mem[54], (unsigned long long)ctx.gpr[7]); }
+    printf("--- REP MOVSB: copy 5 bytes from mem[50] to mem[80] ---\n");
+    ctx.gpr[6] = 50; ctx.gpr[7] = 80; ctx.gpr[1] = 5; // RSI=50, RDI=80, RCX=5
+    { uint8_t c[]={0xF3,0xA4}; auto l=ir::lift(c,2);
+      printf("  IR per iteration:\n"); if(l) ir::dump(*l);
+      if(l) for (int i = 0; i < 5; i++) ir::execute(ctx, *l);
+      printf("  Result: mem[80..84] = %02X %02X %02X %02X %02X\n\n",
+             mem[80], mem[81], mem[82], mem[83], mem[84]); }
+    printf("--- REPNZ SCASB: scan for 0xBB in mem[80..89] ---\n");
+    mem[85] = 0; mem[86] = 0; // clear bytes after copy
+    ctx.gpr[0] = 0xBB; ctx.gpr[7] = 80; ctx.gpr[1] = 10;
+    { uint8_t c[]={0xF2,0xAE}; auto l=ir::lift(c,2);
+      printf("  IR per iteration:\n"); if(l) ir::dump(*l);
+      printf("  Scanning (execute until ZF=1)...\n");
+      if(l) { int steps = 0; while (steps < 10) { ir::execute(ctx, *l); steps++; if (ctx.flags[2]) break; } 
+        printf("  Found after %d iterations, RDI=%llu\n\n", steps, (unsigned long long)ctx.gpr[7]); }
+    }
     printf("--- Push/Pop roundtrip ---\n");
     ctx.gpr[5] = 0xDEADBEEF; ctx.gpr[4] = 128;
     { uint8_t c[]={0x55}; auto l=ir::lift(c,1);
@@ -109,6 +142,20 @@ int main() {
     printf("  CMP RAX(42), RCX(42): ZF=%d CF=%d SF=%d OF=%d\n", ctx.flags[2], ctx.flags[0], ctx.flags[3], ctx.flags[4]);
     { uint8_t c[]={0x0F,0x94,0xC0}; auto l=ir::lift(c,3); if(l) ir::execute(ctx,*l); }
     printf("  SETE AL: AL=%d\n\n", (int)(ctx.gpr[0] & 0xFF));
+    printf("--- ENTER with nesting levels ---\n");
+    { ir::Context c; c.gpr[4] = 200; c.gpr[5] = 0xAAAA; c.memory = mem; c.memory_size = sizeof(mem);
+      uint8_t c1[]={0xC8,0x20,0x00,0x00}; // enter 0x20, 0
+      auto l = ir::lift(c1, 4);
+      printf("  ENTER 0x20, 0 (RSP=200, RBP=0xAAAA):\n"); if(l) ir::dump(*l);
+      if(l) ir::execute(c, *l);
+      printf("  RSP=%llu RBP=%llu\n", (unsigned long long)c.gpr[4], (unsigned long long)c.gpr[5]); }
+
+    { ir::Context c; c.gpr[4] = 200; c.gpr[5] = 0xAAAA; c.memory = mem; c.memory_size = sizeof(mem);
+      uint8_t c2[]={0xC8,0x10,0x00,0x01}; // enter 0x10, 1
+      auto l = ir::lift(c2, 4);
+      printf("  ENTER 0x10, 1 (RSP=200, RBP=0xAAAA):\n"); if(l) ir::dump(*l);
+      if(l) ir::execute(c, *l);
+      printf("  RSP=%llu RBP=%llu\n\n", (unsigned long long)c.gpr[4], (unsigned long long)c.gpr[5]); }
     printf("--- Bit manipulation: POPCNT ---\n");
     ctx.gpr[1] = 0xFF00FF; // 16 bits set
     { uint8_t c[]={0xF3,0x48,0x0F,0xB8,0xC1}; auto l=ir::lift(c,5);
