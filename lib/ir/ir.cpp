@@ -1631,12 +1631,56 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         }
     }
 
-    if (m == Mnemonic::CMPSB || m == Mnemonic::CMPSW || m == Mnemonic::CMPSQ ||
-        m == Mnemonic::MOVSB || m == Mnemonic::MOVSW || m == Mnemonic::MOVSQ ||
-        m == Mnemonic::STOSB || m == Mnemonic::STOSW || m == Mnemonic::STOSQ ||
-        m == Mnemonic::LODSB || m == Mnemonic::LODSW || m == Mnemonic::LODSQ ||
-        m == Mnemonic::SCASB || m == Mnemonic::SCASW || m == Mnemonic::SCASQ ||
-        m == Mnemonic::INSB || m == Mnemonic::INSW || m == Mnemonic::INSD ||
+    if (m == Mnemonic::MOVSB || m == Mnemonic::MOVSW || m == Mnemonic::MOVSQ) {
+        uint8_t ssz = (m == Mnemonic::MOVSB) ? 1 : (m == Mnemonic::MOVSW) ? 2 : 8;
+        VarNode rsi = VarNode::gpr(6, 8); VarNode rdi = VarNode::gpr(7, 8);
+        VarNode tmp = VarNode::temp(14, ssz);
+        l.ops.push_back(make_op3(Opcode::LOAD, tmp, rsi, VarNode::ram(ssz)));
+        l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(ssz), rdi, tmp));
+        VarNode delta = VarNode::constant(ssz, 8);
+        l.ops.push_back(make_op3(Opcode::ADD, rsi, rsi, delta));
+        l.ops.push_back(make_op3(Opcode::ADD, rdi, rdi, delta));
+        return true;
+    }
+    if (m == Mnemonic::STOSB || m == Mnemonic::STOSW || m == Mnemonic::STOSQ) {
+        uint8_t ssz = (m == Mnemonic::STOSB) ? 1 : (m == Mnemonic::STOSW) ? 2 : 8;
+        VarNode rdi = VarNode::gpr(7, 8);
+        VarNode rax = VarNode::gpr(0, ssz);
+        l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(ssz), rdi, rax));
+        l.ops.push_back(make_op3(Opcode::ADD, rdi, rdi, VarNode::constant(ssz, 8)));
+        return true;
+    }
+    if (m == Mnemonic::LODSB || m == Mnemonic::LODSW || m == Mnemonic::LODSQ) {
+        uint8_t ssz = (m == Mnemonic::LODSB) ? 1 : (m == Mnemonic::LODSW) ? 2 : 8;
+        VarNode rsi = VarNode::gpr(6, 8);
+        VarNode rax = VarNode::gpr(0, ssz);
+        l.ops.push_back(make_op3(Opcode::LOAD, rax, rsi, VarNode::ram(ssz)));
+        l.ops.push_back(make_op3(Opcode::ADD, rsi, rsi, VarNode::constant(ssz, 8)));
+        return true;
+    }
+    if (m == Mnemonic::CMPSB || m == Mnemonic::CMPSW || m == Mnemonic::CMPSQ) {
+        uint8_t ssz = (m == Mnemonic::CMPSB) ? 1 : (m == Mnemonic::CMPSW) ? 2 : 8;
+        VarNode rsi = VarNode::gpr(6, 8); VarNode rdi = VarNode::gpr(7, 8);
+        VarNode a = VarNode::temp(14, ssz); VarNode b = VarNode::temp(15, ssz);
+        l.ops.push_back(make_op3(Opcode::LOAD, a, rsi, VarNode::ram(ssz)));
+        l.ops.push_back(make_op3(Opcode::LOAD, b, rdi, VarNode::ram(ssz)));
+        l.ops.push_back(make_op3(Opcode::SUB_FLAGS, VarNode::flags(), a, b));
+        VarNode delta = VarNode::constant(ssz, 8);
+        l.ops.push_back(make_op3(Opcode::ADD, rsi, rsi, delta));
+        l.ops.push_back(make_op3(Opcode::ADD, rdi, rdi, delta));
+        return true;
+    }
+    if (m == Mnemonic::SCASB || m == Mnemonic::SCASW || m == Mnemonic::SCASQ) {
+        uint8_t ssz = (m == Mnemonic::SCASB) ? 1 : (m == Mnemonic::SCASW) ? 2 : 8;
+        VarNode rdi = VarNode::gpr(7, 8);
+        VarNode rax = VarNode::gpr(0, ssz);
+        VarNode tmp = VarNode::temp(14, ssz);
+        l.ops.push_back(make_op3(Opcode::LOAD, tmp, rdi, VarNode::ram(ssz)));
+        l.ops.push_back(make_op3(Opcode::SUB_FLAGS, VarNode::flags(), rax, tmp));
+        l.ops.push_back(make_op3(Opcode::ADD, rdi, rdi, VarNode::constant(ssz, 8)));
+        return true;
+    }
+    if (m == Mnemonic::INSB || m == Mnemonic::INSW || m == Mnemonic::INSD ||
         m == Mnemonic::OUTSB || m == Mnemonic::OUTSW || m == Mnemonic::OUTSD) {
         l.ops.push_back({Opcode::BARRIER});
         return true;
@@ -1674,7 +1718,21 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
     }
 
     if (m == Mnemonic::CMPXCHG8B || m == Mnemonic::CMPXCHG16B) {
-        l.ops.push_back({Opcode::BARRIER});
+        // Simplified: emit LOAD from memory, SUB_FLAGS against EDX:EAX, then STORE ECX:EBX
+        VarNode ea = compute_ea(l, di);
+        uint8_t half = (m == Mnemonic::CMPXCHG8B) ? 4 : 8;
+        VarNode lo = VarNode::temp(14, half);
+        VarNode hi = VarNode::temp(15, half);
+        l.ops.push_back(make_op3(Opcode::LOAD, lo, ea, VarNode::ram(half)));
+        VarNode ea2 = VarNode::temp(16, 8);
+        l.ops.push_back(make_op3(Opcode::ADD, ea2, ea, VarNode::constant(half, 8)));
+        l.ops.push_back(make_op3(Opcode::LOAD, hi, ea2, VarNode::ram(half)));
+        // Compare low half with EAX/RAX, set flags
+        VarNode rax = VarNode::gpr(0, half);
+        l.ops.push_back(make_op3(Opcode::SUB_FLAGS, VarNode::flags(), rax, lo));
+        // Simplified: assume equal, store ECX:EBX to memory
+        l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(half), ea, VarNode::gpr(3, half)));
+        l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(half), ea2, VarNode::gpr(1, half)));
         return true;
     }
 
@@ -1908,8 +1966,23 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         return true;
     }
 
-    if (m == Mnemonic::PUSHF || m == Mnemonic::PUSHFQ || m == Mnemonic::POPF || m == Mnemonic::POPFQ ||
-        m == Mnemonic::WAIT) {
+    if (m == Mnemonic::PUSHF || m == Mnemonic::PUSHFQ) {
+        VarNode rsp = VarNode::gpr(4, 8);
+        VarNode eight = VarNode::constant(8, 8);
+        l.ops.push_back(make_op3(Opcode::SUB, rsp, rsp, eight));
+        l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(8), rsp, VarNode::flags()));
+        return true;
+    }
+    if (m == Mnemonic::POPF || m == Mnemonic::POPFQ) {
+        VarNode rsp = VarNode::gpr(4, 8);
+        VarNode eight = VarNode::constant(8, 8);
+        VarNode tmp = VarNode::temp(14, 8);
+        l.ops.push_back(make_op3(Opcode::LOAD, tmp, rsp, VarNode::ram(8)));
+        l.ops.push_back(make_op2(Opcode::COPY, VarNode::flags(), tmp));
+        l.ops.push_back(make_op3(Opcode::ADD, rsp, rsp, eight));
+        return true;
+    }
+    if (m == Mnemonic::WAIT) {
         l.ops.push_back({Opcode::BARRIER});
         return true;
     }

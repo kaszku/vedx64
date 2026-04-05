@@ -318,38 +318,52 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
 
     bool is_rep = has_prefix(di, 0xF3);
     bool is_repnz = has_prefix(di, 0xF2);
-    bool is_string_op = (mn == Mnemonic::STOS || mn == Mnemonic::LODS || mn == Mnemonic::MOVS || mn == Mnemonic::SCAS || mn == Mnemonic::CMPS);
-    bool is_scan_cmp = (mn == Mnemonic::SCAS || mn == Mnemonic::CMPS);
+    bool is_string_op = (mn == Mnemonic::STOS || mn == Mnemonic::STOSB || mn == Mnemonic::STOSW || mn == Mnemonic::STOSD || mn == Mnemonic::STOSQ ||
+                         mn == Mnemonic::LODS || mn == Mnemonic::LODSB || mn == Mnemonic::LODSW || mn == Mnemonic::LODSD || mn == Mnemonic::LODSQ ||
+                         mn == Mnemonic::MOVS || mn == Mnemonic::MOVSB || mn == Mnemonic::MOVSW || mn == Mnemonic::MOVSQ ||
+                         mn == Mnemonic::SCAS || mn == Mnemonic::SCASB || mn == Mnemonic::SCASW || mn == Mnemonic::SCASD || mn == Mnemonic::SCASQ ||
+                         mn == Mnemonic::CMPS || mn == Mnemonic::CMPSB || mn == Mnemonic::CMPSW || mn == Mnemonic::CMPSQ);
+    bool is_scan_cmp = (mn == Mnemonic::SCAS || mn == Mnemonic::SCASB || mn == Mnemonic::SCASW || mn == Mnemonic::SCASD || mn == Mnemonic::SCASQ ||
+                        mn == Mnemonic::CMPS || mn == Mnemonic::CMPSB || mn == Mnemonic::CMPSW || mn == Mnemonic::CMPSQ);
+    Mnemonic base_mn = mn;
+    int forced_str_sz = 0;
+    if (mn == Mnemonic::STOSB || mn == Mnemonic::MOVSB || mn == Mnemonic::LODSB || mn == Mnemonic::SCASB || mn == Mnemonic::CMPSB) { base_mn = (mn == Mnemonic::STOSB ? Mnemonic::STOS : mn == Mnemonic::MOVSB ? Mnemonic::MOVS : mn == Mnemonic::LODSB ? Mnemonic::LODS : mn == Mnemonic::SCASB ? Mnemonic::SCAS : Mnemonic::CMPS); forced_str_sz = 1; }
+    if (mn == Mnemonic::STOSW || mn == Mnemonic::MOVSW || mn == Mnemonic::LODSW || mn == Mnemonic::SCASW || mn == Mnemonic::CMPSW) { base_mn = (mn == Mnemonic::STOSW ? Mnemonic::STOS : mn == Mnemonic::MOVSW ? Mnemonic::MOVS : mn == Mnemonic::LODSW ? Mnemonic::LODS : mn == Mnemonic::SCASW ? Mnemonic::SCAS : Mnemonic::CMPS); forced_str_sz = 2; }
+    if (mn == Mnemonic::STOSD || mn == Mnemonic::LODSD || mn == Mnemonic::SCASD) { base_mn = (mn == Mnemonic::STOSD ? Mnemonic::STOS : mn == Mnemonic::LODSD ? Mnemonic::LODS : Mnemonic::SCAS); forced_str_sz = 4; }
+    if (mn == Mnemonic::STOSQ || mn == Mnemonic::MOVSQ || mn == Mnemonic::LODSQ || mn == Mnemonic::SCASQ || mn == Mnemonic::CMPSQ) { base_mn = (mn == Mnemonic::STOSQ ? Mnemonic::STOS : mn == Mnemonic::MOVSQ ? Mnemonic::MOVS : mn == Mnemonic::LODSQ ? Mnemonic::LODS : mn == Mnemonic::SCASQ ? Mnemonic::SCAS : Mnemonic::CMPS); forced_str_sz = 8; }
 
     if ((is_rep || is_repnz) && is_string_op) {
         int str_sz;
-        uint8_t base_op = opcode & 0xFF;
-        if ((base_op & 1) == 0) str_sz = 1; // byte variant
-        else { str_sz = 4; if (di.rex & 0x08) str_sz = 8; for (int i=0;i<di.num_prefixes;i++) if(di.legacy_prefix[i]==0x66) str_sz=2; }
+        if (forced_str_sz > 0) str_sz = forced_str_sz;
+        else {
+            uint8_t base_op = opcode & 0xFF;
+            if ((base_op & 1) == 0) str_sz = 1;
+            else { str_sz = 4; if (di.rex & 0x08) str_sz = 8; for (int i=0;i<di.num_prefixes;i++) if(di.legacy_prefix[i]==0x66) str_sz=2; }
+        }
         while (cpu.gpr[1] != 0) {
             int64_t delta = (cpu.rflags & RFLAG_DF) ? -str_sz : str_sz;
-            if (mn == Mnemonic::STOS) {
+            if (base_mn == Mnemonic::STOS) {
                 if (!mem_check(cpu, cpu.gpr[7], str_sz)) return StepResult::MemFault;
                 mem_write(cpu, cpu.gpr[7], cpu.gpr[0], str_sz);
                 cpu.gpr[7] += delta;
-            } else if (mn == Mnemonic::LODS) {
+            } else if (base_mn == Mnemonic::LODS) {
                 if (!mem_check(cpu, cpu.gpr[6], str_sz)) return StepResult::MemFault;
                 uint64_t val = mem_read(cpu, cpu.gpr[6], str_sz);
                 if (str_sz == 4) cpu.gpr[0] = val & 0xFFFFFFFF;
                 else if (str_sz == 8) cpu.gpr[0] = val;
                 else cpu.gpr[0] = (cpu.gpr[0] & ~mask(str_sz*8)) | val;
                 cpu.gpr[6] += delta;
-            } else if (mn == Mnemonic::MOVS) {
+            } else if (base_mn == Mnemonic::MOVS) {
                 if (!mem_check(cpu, cpu.gpr[6], str_sz) || !mem_check(cpu, cpu.gpr[7], str_sz)) return StepResult::MemFault;
                 mem_write(cpu, cpu.gpr[7], mem_read(cpu, cpu.gpr[6], str_sz), str_sz);
                 cpu.gpr[6] += delta; cpu.gpr[7] += delta;
-            } else if (mn == Mnemonic::SCAS) {
+            } else if (base_mn == Mnemonic::SCAS) {
                 if (!mem_check(cpu, cpu.gpr[7], str_sz)) return StepResult::MemFault;
                 uint64_t a = cpu.gpr[0] & mask(str_sz*8);
                 uint64_t b = mem_read(cpu, cpu.gpr[7], str_sz);
                 update_flags_sub(cpu, a, b, (a - b) & mask(str_sz*8), str_sz*8);
                 cpu.gpr[7] += delta;
-            } else if (mn == Mnemonic::CMPS) {
+            } else if (base_mn == Mnemonic::CMPS) {
                 if (!mem_check(cpu, cpu.gpr[6], str_sz) || !mem_check(cpu, cpu.gpr[7], str_sz)) return StepResult::MemFault;
                 uint64_t a = mem_read(cpu, cpu.gpr[6], str_sz);
                 uint64_t b = mem_read(cpu, cpu.gpr[7], str_sz);
@@ -4699,18 +4713,139 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         break;
     }
     case Mnemonic::WBNOINVD: break;
-    case Mnemonic::CMPPS: case Mnemonic::CMPPD:
-    case Mnemonic::CMPSS: case Mnemonic::CMPSD:
-        return StepResult::Unsupported;
+    case Mnemonic::CMPPS: case Mnemonic::CMPPD: case Mnemonic::CMPSS: case Mnemonic::CMPSD: {
+        bool is_pd = (mn == Mnemonic::CMPPD);
+        bool is_scalar = (mn == Mnemonic::CMPSS || mn == Mnemonic::CMPSD);
+        bool is_double = (mn == Mnemonic::CMPPD || mn == Mnemonic::CMPSD);
+        int dst_r = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int src_r = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        uint8_t pred = (uint8_t)(di.immediate & 7);
+        int count = is_scalar ? 1 : (is_double ? 2 : 4);
+        for (int i = 0; i < count; i++) {
+            double a, b;
+            if (is_double) { a = cpu.zmm[dst_r][i]; b = cpu.zmm[src_r][i]; }
+            else {
+                float fa, fb;
+                memcpy(&fa, (char*)&cpu.zmm[dst_r][i/2] + (i%2)*4, 4);
+                memcpy(&fb, (char*)&cpu.zmm[src_r][i/2] + (i%2)*4, 4);
+                a = fa; b = fb;
+            }
+            bool result = false;
+            switch (pred) {
+                case 0: result = (a == b); break; // EQ
+                case 1: result = (a < b); break;  // LT
+                case 2: result = (a <= b); break; // LE
+                case 3: result = (a != a || b != b); break; // UNORD
+                case 4: result = (a != b); break; // NEQ
+                case 5: result = !(a < b); break; // NLT
+                case 6: result = !(a <= b); break; // NLE
+                case 7: result = (a == a && b == b); break; // ORD
+            }
+            if (is_double) {
+                uint64_t v = result ? ~0ULL : 0ULL;
+                memcpy(&cpu.zmm[dst_r][i], &v, 8);
+            } else {
+                uint32_t v = result ? ~0U : 0U;
+                memcpy((char*)&cpu.zmm[dst_r][i/2] + (i%2)*4, &v, 4);
+            }
+        }
+        break;
+    }
+    case Mnemonic::BLENDPS: {
+        int dst_r = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int src_r = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        uint8_t imm = (uint8_t)(di.immediate & 0xF);
+        for (int i = 0; i < 4; i++) {
+            if (imm & (1 << i)) {
+                float f; memcpy(&f, (char*)&cpu.zmm[src_r][i/2] + (i%2)*4, 4);
+                memcpy((char*)&cpu.zmm[dst_r][i/2] + (i%2)*4, &f, 4);
+            }
+        }
+        break;
+    }
+    case Mnemonic::BLENDPD: {
+        int dst_r = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int src_r = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        uint8_t imm = (uint8_t)(di.immediate & 3);
+        if (imm & 1) cpu.zmm[dst_r][0] = cpu.zmm[src_r][0];
+        if (imm & 2) cpu.zmm[dst_r][1] = cpu.zmm[src_r][1];
+        break;
+    }
+    case Mnemonic::PBLENDW: {
+        int dst_r = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int src_r = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        uint8_t imm = (uint8_t)di.immediate;
+        uint16_t dst_w[8], src_w[8];
+        memcpy(dst_w, &cpu.zmm[dst_r], 16); memcpy(src_w, &cpu.zmm[src_r], 16);
+        for (int i = 0; i < 8; i++) if (imm & (1 << i)) dst_w[i] = src_w[i];
+        memcpy(&cpu.zmm[dst_r], dst_w, 16);
+        break;
+    }
     case Mnemonic::PSHUFW:
-    case Mnemonic::BLENDPS: case Mnemonic::BLENDPD:
-    case Mnemonic::PBLENDW: case Mnemonic::PBLENDVB:
-    case Mnemonic::BLENDVPS: case Mnemonic::BLENDVPD:
+    case Mnemonic::PBLENDVB: case Mnemonic::BLENDVPS: case Mnemonic::BLENDVPD:
         return StepResult::Unsupported;
-    case Mnemonic::CVTPS2PD: case Mnemonic::CVTPD2PS:
-    case Mnemonic::CVTDQ2PS: case Mnemonic::CVTPS2DQ: case Mnemonic::CVTTPS2DQ:
-    case Mnemonic::CVTDQ2PD: case Mnemonic::CVTPD2DQ: case Mnemonic::CVTTPD2DQ:
-        return StepResult::Unsupported;
+    case Mnemonic::CVTPS2PD: {
+        int dst_r = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int src_r = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        float f[2]; memcpy(f, &cpu.zmm[src_r], 8);
+        cpu.zmm[dst_r][0] = (double)f[0]; cpu.zmm[dst_r][1] = (double)f[1];
+        break;
+    }
+    case Mnemonic::CVTPD2PS: {
+        int dst_r = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int src_r = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        float f[4] = {0};
+        f[0] = (float)cpu.zmm[src_r][0]; f[1] = (float)cpu.zmm[src_r][1];
+        memcpy(&cpu.zmm[dst_r], f, 16);
+        break;
+    }
+    case Mnemonic::CVTDQ2PS: {
+        int dst_r = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int src_r = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        int32_t dw[4]; memcpy(dw, &cpu.zmm[src_r], 16);
+        float f[4]; for (int i=0;i<4;i++) f[i]=(float)dw[i];
+        memcpy(&cpu.zmm[dst_r], f, 16);
+        break;
+    }
+    case Mnemonic::CVTPS2DQ: {
+        int dst_r = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int src_r = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        float f[4]; memcpy(f, &cpu.zmm[src_r], 16);
+        int32_t dw[4]; for (int i=0;i<4;i++) dw[i]=(int32_t)lrintf(f[i]);
+        memcpy(&cpu.zmm[dst_r], dw, 16);
+        break;
+    }
+    case Mnemonic::CVTTPS2DQ: {
+        int dst_r = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int src_r = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        float f[4]; memcpy(f, &cpu.zmm[src_r], 16);
+        int32_t dw[4]; for (int i=0;i<4;i++) dw[i]=(int32_t)f[i];
+        memcpy(&cpu.zmm[dst_r], dw, 16);
+        break;
+    }
+    case Mnemonic::CVTDQ2PD: {
+        int dst_r = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int src_r = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        int32_t dw[2]; memcpy(dw, &cpu.zmm[src_r], 8);
+        cpu.zmm[dst_r][0] = (double)dw[0]; cpu.zmm[dst_r][1] = (double)dw[1];
+        break;
+    }
+    case Mnemonic::CVTPD2DQ: {
+        int dst_r = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int src_r = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        int32_t dw[4] = {0};
+        dw[0] = (int32_t)lrint(cpu.zmm[src_r][0]); dw[1] = (int32_t)lrint(cpu.zmm[src_r][1]);
+        memcpy(&cpu.zmm[dst_r], dw, 16);
+        break;
+    }
+    case Mnemonic::CVTTPD2DQ: {
+        int dst_r = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int src_r = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        int32_t dw[4] = {0};
+        dw[0] = (int32_t)cpu.zmm[src_r][0]; dw[1] = (int32_t)cpu.zmm[src_r][1];
+        memcpy(&cpu.zmm[dst_r], dw, 16);
+        break;
+    }
     case Mnemonic::AESENC: case Mnemonic::AESENCLAST:
     case Mnemonic::AESDEC: case Mnemonic::AESDECLAST:
     case Mnemonic::AESIMC: case Mnemonic::AESKEYGENASSIST:
@@ -4822,26 +4957,89 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     }
     case Mnemonic::HINT_NOP:
         break;
-    case Mnemonic::CMPSB: case Mnemonic::CMPSW: case Mnemonic::CMPSQ:
-        return StepResult::Unsupported;
-    case Mnemonic::MOVSB: case Mnemonic::MOVSW: case Mnemonic::MOVSQ:
-        return StepResult::Unsupported;
-    case Mnemonic::LODSB: case Mnemonic::LODSW: case Mnemonic::LODSD: case Mnemonic::LODSQ:
-        return StepResult::Unsupported;
-    case Mnemonic::STOSB: case Mnemonic::STOSD: case Mnemonic::STOSQ: case Mnemonic::STOSW:
-        return StepResult::Unsupported;
-    case Mnemonic::SCASB: case Mnemonic::SCASD: case Mnemonic::SCASQ: case Mnemonic::SCASW:
-        return StepResult::Unsupported;
+    case Mnemonic::CMPSB: case Mnemonic::CMPSW: case Mnemonic::CMPSQ: {
+        int str_sz = forced_str_sz;
+        if (!mem_check(cpu, cpu.gpr[7], str_sz)) return StepResult::MemFault;
+        if (!mem_check(cpu, cpu.gpr[6], str_sz)) return StepResult::MemFault;
+        uint64_t a = mem_read(cpu, cpu.gpr[6], str_sz);
+        uint64_t b = mem_read(cpu, cpu.gpr[7], str_sz);
+        update_flags_sub(cpu, a, b, (a - b) & mask(str_sz*8), str_sz*8);
+        int64_t d = (cpu.rflags & RFLAG_DF) ? -str_sz : str_sz;
+        cpu.gpr[6] += d; cpu.gpr[7] += d;
+        break;
+    }
+    case Mnemonic::MOVSB: case Mnemonic::MOVSW: case Mnemonic::MOVSQ: {
+        int str_sz = forced_str_sz;
+        if (!mem_check(cpu, cpu.gpr[7], str_sz)) return StepResult::MemFault;
+        if (!mem_check(cpu, cpu.gpr[6], str_sz)) return StepResult::MemFault;
+        mem_write(cpu, cpu.gpr[7], mem_read(cpu, cpu.gpr[6], str_sz), str_sz);
+        int64_t d = (cpu.rflags & RFLAG_DF) ? -str_sz : str_sz;
+        cpu.gpr[6] += d; cpu.gpr[7] += d;
+        break;
+    }
+    case Mnemonic::LODSB: case Mnemonic::LODSW: case Mnemonic::LODSD: case Mnemonic::LODSQ: {
+        int str_sz = forced_str_sz;
+        if (!mem_check(cpu, cpu.gpr[7], str_sz)) return StepResult::MemFault;
+        if (!mem_check(cpu, cpu.gpr[6], str_sz)) return StepResult::MemFault;
+        uint64_t val = mem_read(cpu, cpu.gpr[6], str_sz);
+        if (str_sz == 4) cpu.gpr[0] = val & 0xFFFFFFFF;
+        else if (str_sz == 8) cpu.gpr[0] = val;
+        else cpu.gpr[0] = (cpu.gpr[0] & ~mask(str_sz*8)) | val;
+        cpu.gpr[6] += (cpu.rflags & RFLAG_DF) ? -str_sz : str_sz;
+        break;
+    }
+    case Mnemonic::STOSB: case Mnemonic::STOSD: case Mnemonic::STOSQ: case Mnemonic::STOSW: {
+        int str_sz = forced_str_sz;
+        if (!mem_check(cpu, cpu.gpr[7], str_sz)) return StepResult::MemFault;
+        mem_write(cpu, cpu.gpr[7], cpu.gpr[0], str_sz);
+        cpu.gpr[7] += (cpu.rflags & RFLAG_DF) ? -str_sz : str_sz;
+        break;
+    }
+    case Mnemonic::SCASB: case Mnemonic::SCASD: case Mnemonic::SCASQ: case Mnemonic::SCASW: {
+        int str_sz = forced_str_sz;
+        if (!mem_check(cpu, cpu.gpr[7], str_sz)) return StepResult::MemFault;
+        uint64_t a = cpu.gpr[0] & mask(str_sz*8);
+        uint64_t b = mem_read(cpu, cpu.gpr[7], str_sz);
+        update_flags_sub(cpu, a, b, (a - b) & mask(str_sz*8), str_sz*8);
+        cpu.gpr[7] += (cpu.rflags & RFLAG_DF) ? -str_sz : str_sz;
+        break;
+    }
     case Mnemonic::INSB: case Mnemonic::INSD: case Mnemonic::INSW: case Mnemonic::INS:
         return StepResult::Unsupported;
     case Mnemonic::OUTSB: case Mnemonic::OUTSD: case Mnemonic::OUTSW: case Mnemonic::OUTS:
         return StepResult::Unsupported;
     case Mnemonic::IN: case Mnemonic::OUT:
         return StepResult::Unsupported;
-    case Mnemonic::LOOPE: case Mnemonic::LOOPNE:
-        return StepResult::Unsupported;
-    case Mnemonic::JCXZ: case Mnemonic::JECXZ:
-        return StepResult::Unsupported;
+    case Mnemonic::LOOPE: {
+        cpu.gpr[1]--;
+        if (cpu.gpr[1] != 0 && (cpu.rflags & RFLAG_ZF)) {
+            cpu.rip = cpu.rip + di.length + di.immediate;
+        } else {
+            cpu.rip += di.length;
+        }
+        return StepResult::OK;
+    }
+    case Mnemonic::LOOPNE: {
+        cpu.gpr[1]--;
+        if (cpu.gpr[1] != 0 && !(cpu.rflags & RFLAG_ZF)) {
+            cpu.rip = cpu.rip + di.length + di.immediate;
+        } else {
+            cpu.rip += di.length;
+        }
+        return StepResult::OK;
+    }
+    case Mnemonic::JCXZ: {
+        if ((cpu.gpr[1] & 0xFFFF) == 0)
+            cpu.rip = cpu.rip + di.length + di.immediate;
+        else cpu.rip += di.length;
+        return StepResult::OK;
+    }
+    case Mnemonic::JECXZ: {
+        if ((cpu.gpr[1] & 0xFFFFFFFF) == 0)
+            cpu.rip = cpu.rip + di.length + di.immediate;
+        else cpu.rip += di.length;
+        return StepResult::OK;
+    }
     case Mnemonic::ADDSUBPS: case Mnemonic::ADDSUBPD:
     case Mnemonic::LDDQU:
         return StepResult::Unsupported;
