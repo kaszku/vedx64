@@ -108,11 +108,23 @@ struct Op {
     uint8_t num_inputs = 0;
 };
 
+/// REP prefix mode for string instructions.
+enum class RepMode : uint8_t {
+    None = 0,   ///< No repeat — single execution.
+    Rep = 1,    ///< REP: repeat RCX times, decrement RCX each iteration.
+    RepZ = 2,   ///< REPZ/REPE: repeat while RCX > 0 && ZF == 1.
+    RepNZ = 3,  ///< REPNZ/REPNE: repeat while RCX > 0 && ZF == 0.
+};
+
 /// Flat IR representation of a single x86-64 instruction.
+/// When rep != RepMode::None, the ops describe a single iteration.
+/// The consumer is responsible for the loop: decrement RCX,
+/// check termination condition (RepZ/RepNZ check ZF after each iteration).
 struct Lifted {
     std::vector<Op> ops;
     uint64_t address = 0;
     uint8_t length = 0;
+    RepMode rep = RepMode::None;
 };
 
 /// Lift a single instruction at `code` into IR.

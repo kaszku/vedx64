@@ -106,27 +106,24 @@ int main() {
     printf("--- REP STOSB: fill 5 bytes at mem[50] with 0xBB ---\n");
     ctx.gpr[0] = 0xBB; ctx.gpr[7] = 50; ctx.gpr[1] = 5; // AL=0xBB, RDI=50, RCX=5
     { uint8_t c[]={0xF3,0xAA}; auto l=ir::lift(c,2);
-      printf("  IR per iteration (single-step semantic):\n"); if(l) ir::dump(*l);
-      printf("  Executing 5 iterations...\n");
-      if(l) for (int i = 0; i < 5; i++) ir::execute(ctx, *l);
-      printf("  Result: mem[50..54] = %02X %02X %02X %02X %02X, RDI=%llu\n\n",
-             mem[50], mem[51], mem[52], mem[53], mem[54], (unsigned long long)ctx.gpr[7]); }
+      printf("  IR (rep=%d):\n", (int)l->rep); if(l) ir::dump(*l);
+      if(l) ir::execute(ctx, *l); // interpreter handles REP loop automatically
+      printf("  Result: mem[50..54] = %02X %02X %02X %02X %02X, RDI=%llu, RCX=%llu\n\n",
+             mem[50], mem[51], mem[52], mem[53], mem[54], (unsigned long long)ctx.gpr[7], (unsigned long long)ctx.gpr[1]); }
     printf("--- REP MOVSB: copy 5 bytes from mem[50] to mem[80] ---\n");
     ctx.gpr[6] = 50; ctx.gpr[7] = 80; ctx.gpr[1] = 5; // RSI=50, RDI=80, RCX=5
     { uint8_t c[]={0xF3,0xA4}; auto l=ir::lift(c,2);
-      printf("  IR per iteration:\n"); if(l) ir::dump(*l);
-      if(l) for (int i = 0; i < 5; i++) ir::execute(ctx, *l);
-      printf("  Result: mem[80..84] = %02X %02X %02X %02X %02X\n\n",
-             mem[80], mem[81], mem[82], mem[83], mem[84]); }
+      printf("  IR (rep=%d):\n", (int)l->rep); if(l) ir::dump(*l);
+      if(l) ir::execute(ctx, *l);
+      printf("  Result: mem[80..84] = %02X %02X %02X %02X %02X, RCX=%llu\n\n",
+             mem[80], mem[81], mem[82], mem[83], mem[84], (unsigned long long)ctx.gpr[1]); }
     printf("--- REPNZ SCASB: scan for 0xBB in mem[80..89] ---\n");
     mem[85] = 0; mem[86] = 0; // clear bytes after copy
     ctx.gpr[0] = 0xBB; ctx.gpr[7] = 80; ctx.gpr[1] = 10;
     { uint8_t c[]={0xF2,0xAE}; auto l=ir::lift(c,2);
-      printf("  IR per iteration:\n"); if(l) ir::dump(*l);
-      printf("  Scanning (execute until ZF=1)...\n");
-      if(l) { int steps = 0; while (steps < 10) { ir::execute(ctx, *l); steps++; if (ctx.flags[2]) break; } 
-        printf("  Found after %d iterations, RDI=%llu\n\n", steps, (unsigned long long)ctx.gpr[7]); }
-    }
+      printf("  IR (rep=%d):\n", (int)l->rep); if(l) ir::dump(*l);
+      if(l) ir::execute(ctx, *l); // interpreter handles REPNZ termination
+      printf("  Found: RDI=%llu, RCX=%llu (stopped when ZF=1)\n\n", (unsigned long long)ctx.gpr[7], (unsigned long long)ctx.gpr[1]); }
     printf("--- Push/Pop roundtrip ---\n");
     ctx.gpr[5] = 0xDEADBEEF; ctx.gpr[4] = 128;
     { uint8_t c[]={0x55}; auto l=ir::lift(c,1);

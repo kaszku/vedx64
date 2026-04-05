@@ -2327,6 +2327,28 @@ std::optional<Lifted> lift(const uint8_t* code, size_t len, uint64_t address) {
     if (di.desc->num_operands > 0)
         sz = op_size_bytes(di.desc->operands[0].size, rex_w, has_66);
 
+    Mnemonic m = di.desc->mnemonic;
+    bool is_string = (m == Mnemonic::MOVS || m == Mnemonic::STOS || m == Mnemonic::LODS ||
+        m == Mnemonic::CMPS || m == Mnemonic::SCAS ||
+        m == Mnemonic::MOVSB || m == Mnemonic::MOVSW || m == Mnemonic::MOVSQ ||
+        m == Mnemonic::STOSB || m == Mnemonic::STOSW || m == Mnemonic::STOSD || m == Mnemonic::STOSQ ||
+        m == Mnemonic::LODSB || m == Mnemonic::LODSW || m == Mnemonic::LODSD || m == Mnemonic::LODSQ ||
+        m == Mnemonic::CMPSB || m == Mnemonic::CMPSW || m == Mnemonic::CMPSQ ||
+        m == Mnemonic::SCASB || m == Mnemonic::SCASW || m == Mnemonic::SCASD || m == Mnemonic::SCASQ);
+    if (is_string) {
+        bool has_f3 = false, has_f2 = false;
+        for (uint8_t i = 0; i < di.num_prefixes; ++i) {
+            if (di.legacy_prefix[i] == 0xF3) has_f3 = true;
+            if (di.legacy_prefix[i] == 0xF2) has_f2 = true;
+        }
+        bool is_scan = (m == Mnemonic::CMPS || m == Mnemonic::SCAS ||
+            m == Mnemonic::CMPSB || m == Mnemonic::CMPSW || m == Mnemonic::CMPSQ ||
+            m == Mnemonic::SCASB || m == Mnemonic::SCASW || m == Mnemonic::SCASD || m == Mnemonic::SCASQ);
+        if (has_f2 && is_scan) l.rep = RepMode::RepNZ;
+        else if (has_f3 && is_scan) l.rep = RepMode::RepZ;
+        else if (has_f3) l.rep = RepMode::Rep;
+    }
+
     ptrdiff_t idx = di.desc - g_instr_table;
     if (idx >= 0 && static_cast<size_t>(idx) < g_instr_table_size && g_lift_dispatch[idx]) {
         if (g_lift_dispatch[idx](l, di, sz, rex_w, has_66, n, address))
@@ -2338,7 +2360,20 @@ std::optional<Lifted> lift(const uint8_t* code, size_t len, uint64_t address) {
     return l;
 }
 
+static void execute_once(Context& ctx, const Lifted& lifted);
+
 void execute(Context& ctx, const Lifted& lifted) {
+    if (lifted.rep == RepMode::None) { execute_once(ctx, lifted); return; }
+    // REP loop: decrement RCX each iteration, check termination
+    while (ctx.gpr[1] != 0) {
+        execute_once(ctx, lifted);
+        ctx.gpr[1]--;
+        if (lifted.rep == RepMode::RepZ && !ctx.flags[2]) break;  // REPZ: stop if ZF=0
+        if (lifted.rep == RepMode::RepNZ && ctx.flags[2]) break;  // REPNZ: stop if ZF=1
+    }
+}
+
+static void execute_once(Context& ctx, const Lifted& lifted) {
     uint64_t temps[32] = {};
 
     auto read_var = [&](const VarNode& v) -> uint64_t {
@@ -2574,7 +2609,19 @@ std::string op_str(const Op& op) {
     return s;
 }
 
+const char* rep_mode_str(RepMode r) {
+    switch (r) {
+    case RepMode::None: return nullptr;
+    case RepMode::Rep: return "REP (loop RCX times)";
+    case RepMode::RepZ: return "REPZ (loop while RCX>0 && ZF=1)";
+    case RepMode::RepNZ: return "REPNZ (loop while RCX>0 && ZF=0)";
+    default: return "???";
+    }
+}
+
 void dump(const Lifted& lifted) {
+    if (lifted.rep != RepMode::None)
+        printf("    ; %s\n", rep_mode_str(lifted.rep));
     for (size_t i = 0; i < lifted.ops.size(); i++)
         printf("    %s\n", op_str(lifted.ops[i]).c_str());
 }
