@@ -29,6 +29,17 @@ Op make_op3(Opcode opc, VarNode dst, VarNode s0, VarNode s1) {
     return op;
 }
 
+Op make_op4(Opcode opc, VarNode dst, VarNode s0, VarNode s1, VarNode s2) {
+    Op op;
+    op.opcode = opc;
+    op.output = dst;
+    op.inputs[0] = s0;
+    op.inputs[1] = s1;
+    op.inputs[2] = s2;
+    op.num_inputs = 3;
+    return op;
+}
+
 uint8_t op_size_bytes(OpSize sz, bool rex_w, bool has_66) {
     switch (sz) {
     case OpSize::Byte: return 1;
@@ -1347,9 +1358,7 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         VarNode tmp = VarNode::temp(14, ssz);
         VarNode t16 = VarNode::temp(16, 8);
         l.ops.push_back(make_op2(Opcode::GET_DF, t16, VarNode::flags()));
-        l.ops.push_back(make_op3(Opcode::SHL, t16, t16, VarNode::constant(1, 1)));
-        l.ops.push_back(make_op3(Opcode::SUB, t16, VarNode::constant(1, 8), t16));
-        l.ops.push_back(make_op3(Opcode::MUL, t16, t16, VarNode::constant(ssz, 8)));
+        l.ops.push_back(make_op4(Opcode::SELECT, t16, t16, VarNode::constant(-((int64_t)ssz), 8), VarNode::constant(ssz, 8)));
         l.ops.push_back(make_op3(Opcode::LOAD, tmp, rsi, VarNode::ram(ssz)));
         l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(ssz), rdi, tmp));
         l.ops.push_back(make_op3(Opcode::ADD, rsi, rsi, t16));
@@ -1366,9 +1375,7 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         VarNode rax = VarNode::gpr(0, ssz), rdi = VarNode::gpr(7, 8);
         VarNode t16 = VarNode::temp(16, 8);
         l.ops.push_back(make_op2(Opcode::GET_DF, t16, VarNode::flags()));
-        l.ops.push_back(make_op3(Opcode::SHL, t16, t16, VarNode::constant(1, 1)));
-        l.ops.push_back(make_op3(Opcode::SUB, t16, VarNode::constant(1, 8), t16));
-        l.ops.push_back(make_op3(Opcode::MUL, t16, t16, VarNode::constant(ssz, 8)));
+        l.ops.push_back(make_op4(Opcode::SELECT, t16, t16, VarNode::constant(-((int64_t)ssz), 8), VarNode::constant(ssz, 8)));
         l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(ssz), rdi, rax));
         l.ops.push_back(make_op3(Opcode::ADD, rdi, rdi, t16));
         return true;
@@ -1383,9 +1390,7 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         VarNode rax = VarNode::gpr(0, ssz), rsi = VarNode::gpr(6, 8);
         VarNode t16 = VarNode::temp(16, 8);
         l.ops.push_back(make_op2(Opcode::GET_DF, t16, VarNode::flags()));
-        l.ops.push_back(make_op3(Opcode::SHL, t16, t16, VarNode::constant(1, 1)));
-        l.ops.push_back(make_op3(Opcode::SUB, t16, VarNode::constant(1, 8), t16));
-        l.ops.push_back(make_op3(Opcode::MUL, t16, t16, VarNode::constant(ssz, 8)));
+        l.ops.push_back(make_op4(Opcode::SELECT, t16, t16, VarNode::constant(-((int64_t)ssz), 8), VarNode::constant(ssz, 8)));
         l.ops.push_back(make_op3(Opcode::LOAD, rax, rsi, VarNode::ram(ssz)));
         l.ops.push_back(make_op3(Opcode::ADD, rsi, rsi, t16));
         return true;
@@ -1401,9 +1406,7 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         VarNode t1 = VarNode::temp(14, ssz), t2 = VarNode::temp(15, ssz);
         VarNode t16 = VarNode::temp(16, 8);
         l.ops.push_back(make_op2(Opcode::GET_DF, t16, VarNode::flags()));
-        l.ops.push_back(make_op3(Opcode::SHL, t16, t16, VarNode::constant(1, 1)));
-        l.ops.push_back(make_op3(Opcode::SUB, t16, VarNode::constant(1, 8), t16));
-        l.ops.push_back(make_op3(Opcode::MUL, t16, t16, VarNode::constant(ssz, 8)));
+        l.ops.push_back(make_op4(Opcode::SELECT, t16, t16, VarNode::constant(-((int64_t)ssz), 8), VarNode::constant(ssz, 8)));
         l.ops.push_back(make_op3(Opcode::LOAD, t1, rsi, VarNode::ram(ssz)));
         l.ops.push_back(make_op3(Opcode::LOAD, t2, rdi, VarNode::ram(ssz)));
         l.ops.push_back(make_op3(Opcode::SUB_FLAGS, VarNode::flags(), t1, t2));
@@ -1422,9 +1425,7 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         VarNode tmp = VarNode::temp(14, ssz);
         VarNode t16 = VarNode::temp(16, 8);
         l.ops.push_back(make_op2(Opcode::GET_DF, t16, VarNode::flags()));
-        l.ops.push_back(make_op3(Opcode::SHL, t16, t16, VarNode::constant(1, 1)));
-        l.ops.push_back(make_op3(Opcode::SUB, t16, VarNode::constant(1, 8), t16));
-        l.ops.push_back(make_op3(Opcode::MUL, t16, t16, VarNode::constant(ssz, 8)));
+        l.ops.push_back(make_op4(Opcode::SELECT, t16, t16, VarNode::constant(-((int64_t)ssz), 8), VarNode::constant(ssz, 8)));
         l.ops.push_back(make_op3(Opcode::LOAD, tmp, rdi, VarNode::ram(ssz)));
         l.ops.push_back(make_op3(Opcode::SUB_FLAGS, VarNode::flags(), rax, tmp));
         l.ops.push_back(make_op3(Opcode::ADD, rdi, rdi, t16));
@@ -2484,6 +2485,8 @@ static void execute_once(Context& ctx, const Lifted& lifted) {
         case Opcode::CMP_SLT: write_var(op.output, (int64_t)a < (int64_t)b ? 1 : 0); break;
         case Opcode::CMP_ULE: write_var(op.output, a <= b ? 1 : 0); break;
         case Opcode::CMP_SLE: write_var(op.output, (int64_t)a <= (int64_t)b ? 1 : 0); break;
+        case Opcode::SELECT: { uint64_t c = read_var(op.inputs[2]); write_var(op.output, a ? b : c); break; }
+        case Opcode::BITSEL: { uint64_t c = read_var(op.inputs[2]); write_var(op.output, (b & a) | (c & ~a)); break; }
         default: break;
         }
     }
@@ -2521,6 +2524,8 @@ const char* opcode_name(Opcode opc) {
     case Opcode::CMP_ULT: return "CMP_ULT";
     case Opcode::CMP_SLE: return "CMP_SLE";
     case Opcode::CMP_ULE: return "CMP_ULE";
+    case Opcode::SELECT: return "SELECT";
+    case Opcode::BITSEL: return "BITSEL";
     case Opcode::ZEXT: return "ZEXT";
     case Opcode::SEXT: return "SEXT";
     case Opcode::TRUNC: return "TRUNC";

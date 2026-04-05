@@ -38,6 +38,8 @@ enum class Opcode : uint8_t {
     CMP_ULT,
     CMP_SLE,
     CMP_ULE,
+    SELECT,
+    BITSEL,
     ZEXT,
     SEXT,
     TRUNC,
