@@ -1438,9 +1438,25 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     }
     case Mnemonic::ENTER: {
         uint16_t alloc_size = (uint16_t)di.immediate;
+        int nesting = (int)(di.displacement & 0x1F);
         cpu.gpr[4] -= 8;
+        if (!mem_check(cpu, cpu.gpr[4], 8)) return StepResult::MemFault;
         mem_write(cpu, cpu.gpr[4], cpu.gpr[5], 8);
-        cpu.gpr[5] = cpu.gpr[4];
+        uint64_t frame_temp = cpu.gpr[4];
+        if (nesting > 0) {
+            for (int i = 1; i < nesting; i++) {
+                cpu.gpr[5] -= 8;
+                if (!mem_check(cpu, cpu.gpr[5], 8)) return StepResult::MemFault;
+                uint64_t fp = mem_read(cpu, cpu.gpr[5], 8);
+                cpu.gpr[4] -= 8;
+                if (!mem_check(cpu, cpu.gpr[4], 8)) return StepResult::MemFault;
+                mem_write(cpu, cpu.gpr[4], fp, 8);
+            }
+            cpu.gpr[4] -= 8;
+            if (!mem_check(cpu, cpu.gpr[4], 8)) return StepResult::MemFault;
+            mem_write(cpu, cpu.gpr[4], frame_temp, 8);
+        }
+        cpu.gpr[5] = frame_temp;
         cpu.gpr[4] -= alloc_size;
         break;
     }

@@ -333,19 +333,22 @@ size_t decode(const uint8_t* code, size_t len, DecodedInstr& out) {
         pos += dsize;
     }
 
+    int imm_count = 0;
     for (uint8_t i = 0; i < desc->num_operands; ++i) {
         if (desc->operands[i].addr == AddrMode::Immediate ||
             desc->operands[i].addr == AddrMode::RelOffset) {
             int isz = imm_size(desc->operands[i].size, has_66, rex_w);
             if (pos + isz > len) return 0;
-            out.immediate = 0;
-            memcpy(&out.immediate, &code[pos], isz);
+            int64_t val = 0;
+            memcpy(&val, &code[pos], isz);
             // Sign-extend
-            if (isz == 1) out.immediate = (int8_t)(uint8_t)out.immediate;
-            else if (isz == 2) out.immediate = (int16_t)(uint16_t)out.immediate;
-            else if (isz == 4) out.immediate = (int32_t)(uint32_t)out.immediate;
+            if (isz == 1) val = (int8_t)(uint8_t)val;
+            else if (isz == 2) val = (int16_t)(uint16_t)val;
+            else if (isz == 4) val = (int32_t)(uint32_t)val;
+            if (imm_count == 0) out.immediate = val;
+            else out.displacement = val; // second immediate (e.g. ENTER nesting level)
             pos += isz;
-            break; // only one immediate per instruction
+            imm_count++;
         }
     }
 

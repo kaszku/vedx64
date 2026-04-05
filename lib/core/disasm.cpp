@@ -378,7 +378,7 @@ size_t disassemble(const uint8_t* code, size_t len, char* buf, size_t buf_len_, 
 
     if (di.desc->mnemonic == Mnemonic::ENTER) {
         uint16_t iw = (uint16_t)(di.immediate & 0xFFFF);
-        uint8_t ib = (uint8_t)((di.immediate >> 16) & 0xFF);
+        uint8_t ib = (uint8_t)(di.displacement & 0xFF);
         off += snprintf(buf+off, buf_len-off, "enter 0x%X, 0x%X", iw, ib);
         return consumed;
     }

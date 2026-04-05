@@ -1725,9 +1725,24 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         VarNode rsp = VarNode::gpr(4, 8);
         VarNode rbp = VarNode::gpr(5, 8);
         VarNode eight = VarNode::constant(8, 8);
+        int nesting = (int)(di.displacement & 0x1F); // nesting level 0-31
         l.ops.push_back(make_op3(Opcode::SUB, rsp, rsp, eight));
         l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(8), rsp, rbp));
-        l.ops.push_back(make_op2(Opcode::COPY, rbp, rsp));
+        VarNode frame_temp = VarNode::temp(17, 8);
+        l.ops.push_back(make_op2(Opcode::COPY, frame_temp, rsp));
+        if (nesting > 0) {
+            for (int i = 1; i < nesting; i++) {
+                // RBP -= 8; push [RBP] (copy caller's frame ptr)
+                l.ops.push_back(make_op3(Opcode::SUB, rbp, rbp, eight));
+                VarNode tmp = VarNode::temp(18, 8);
+                l.ops.push_back(make_op3(Opcode::LOAD, tmp, rbp, VarNode::ram(8)));
+                l.ops.push_back(make_op3(Opcode::SUB, rsp, rsp, eight));
+                l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(8), rsp, tmp));
+            }
+            l.ops.push_back(make_op3(Opcode::SUB, rsp, rsp, eight));
+            l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(8), rsp, frame_temp));
+        }
+        l.ops.push_back(make_op2(Opcode::COPY, rbp, frame_temp));
         if (di.immediate > 0)
             l.ops.push_back(make_op3(Opcode::SUB, rsp, rsp, VarNode::constant(di.immediate, 8)));
         return true;
