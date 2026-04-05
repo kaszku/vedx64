@@ -4714,7 +4714,6 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     }
     case Mnemonic::WBNOINVD: break;
     case Mnemonic::CMPPS: case Mnemonic::CMPPD: case Mnemonic::CMPSS: case Mnemonic::CMPSD: {
-        bool is_pd = (mn == Mnemonic::CMPPD);
         bool is_scalar = (mn == Mnemonic::CMPSS || mn == Mnemonic::CMPSD);
         bool is_double = (mn == Mnemonic::CMPPD || mn == Mnemonic::CMPSD);
         int dst_r = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
