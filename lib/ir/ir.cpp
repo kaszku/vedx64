@@ -551,7 +551,15 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         l.ops.push_back(make_op2(Opcode::SET_CF, VarNode::flags(), cf));
         return true;
     }
-    if (m == Mnemonic::CLD || m == Mnemonic::STD || m == Mnemonic::CLI || m == Mnemonic::STI) {
+    if (m == Mnemonic::CLD) {
+        l.ops.push_back(make_op2(Opcode::SET_DF, VarNode::flags(), VarNode::constant(0, 1)));
+        return true;
+    }
+    if (m == Mnemonic::STD) {
+        l.ops.push_back(make_op2(Opcode::SET_DF, VarNode::flags(), VarNode::constant(1, 1)));
+        return true;
+    }
+    if (m == Mnemonic::CLI || m == Mnemonic::STI) {
         l.ops.push_back({Opcode::NOP});
         return true;
     }
@@ -1337,11 +1345,15 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         else if (m == Mnemonic::MOVSQ) ssz = 8;
         VarNode rsi = VarNode::gpr(6, 8), rdi = VarNode::gpr(7, 8);
         VarNode tmp = VarNode::temp(14, ssz);
-        VarNode step = VarNode::constant(ssz, 8);
+        VarNode t16 = VarNode::temp(16, 8);
+        l.ops.push_back(make_op2(Opcode::GET_DF, t16, VarNode::flags()));
+        l.ops.push_back(make_op3(Opcode::SHL, t16, t16, VarNode::constant(1, 1)));
+        l.ops.push_back(make_op3(Opcode::SUB, t16, VarNode::constant(1, 8), t16));
+        l.ops.push_back(make_op3(Opcode::MUL, t16, t16, VarNode::constant(ssz, 8)));
         l.ops.push_back(make_op3(Opcode::LOAD, tmp, rsi, VarNode::ram(ssz)));
         l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(ssz), rdi, tmp));
-        l.ops.push_back(make_op3(Opcode::ADD, rsi, rsi, step));
-        l.ops.push_back(make_op3(Opcode::ADD, rdi, rdi, step));
+        l.ops.push_back(make_op3(Opcode::ADD, rsi, rsi, t16));
+        l.ops.push_back(make_op3(Opcode::ADD, rdi, rdi, t16));
         return true;
     }
 
@@ -1352,9 +1364,13 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         else if (m == Mnemonic::STOSD) ssz = 4;
         else if (m == Mnemonic::STOSQ) ssz = 8;
         VarNode rax = VarNode::gpr(0, ssz), rdi = VarNode::gpr(7, 8);
-        VarNode step = VarNode::constant(ssz, 8);
+        VarNode t16 = VarNode::temp(16, 8);
+        l.ops.push_back(make_op2(Opcode::GET_DF, t16, VarNode::flags()));
+        l.ops.push_back(make_op3(Opcode::SHL, t16, t16, VarNode::constant(1, 1)));
+        l.ops.push_back(make_op3(Opcode::SUB, t16, VarNode::constant(1, 8), t16));
+        l.ops.push_back(make_op3(Opcode::MUL, t16, t16, VarNode::constant(ssz, 8)));
         l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(ssz), rdi, rax));
-        l.ops.push_back(make_op3(Opcode::ADD, rdi, rdi, step));
+        l.ops.push_back(make_op3(Opcode::ADD, rdi, rdi, t16));
         return true;
     }
 
@@ -1365,9 +1381,13 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         else if (m == Mnemonic::LODSD) ssz = 4;
         else if (m == Mnemonic::LODSQ) ssz = 8;
         VarNode rax = VarNode::gpr(0, ssz), rsi = VarNode::gpr(6, 8);
-        VarNode step = VarNode::constant(ssz, 8);
+        VarNode t16 = VarNode::temp(16, 8);
+        l.ops.push_back(make_op2(Opcode::GET_DF, t16, VarNode::flags()));
+        l.ops.push_back(make_op3(Opcode::SHL, t16, t16, VarNode::constant(1, 1)));
+        l.ops.push_back(make_op3(Opcode::SUB, t16, VarNode::constant(1, 8), t16));
+        l.ops.push_back(make_op3(Opcode::MUL, t16, t16, VarNode::constant(ssz, 8)));
         l.ops.push_back(make_op3(Opcode::LOAD, rax, rsi, VarNode::ram(ssz)));
-        l.ops.push_back(make_op3(Opcode::ADD, rsi, rsi, step));
+        l.ops.push_back(make_op3(Opcode::ADD, rsi, rsi, t16));
         return true;
     }
 
@@ -1379,12 +1399,16 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         else if (m == Mnemonic::CMPSQ) ssz = 8;
         VarNode rsi = VarNode::gpr(6, 8), rdi = VarNode::gpr(7, 8);
         VarNode t1 = VarNode::temp(14, ssz), t2 = VarNode::temp(15, ssz);
-        VarNode step = VarNode::constant(ssz, 8);
+        VarNode t16 = VarNode::temp(16, 8);
+        l.ops.push_back(make_op2(Opcode::GET_DF, t16, VarNode::flags()));
+        l.ops.push_back(make_op3(Opcode::SHL, t16, t16, VarNode::constant(1, 1)));
+        l.ops.push_back(make_op3(Opcode::SUB, t16, VarNode::constant(1, 8), t16));
+        l.ops.push_back(make_op3(Opcode::MUL, t16, t16, VarNode::constant(ssz, 8)));
         l.ops.push_back(make_op3(Opcode::LOAD, t1, rsi, VarNode::ram(ssz)));
         l.ops.push_back(make_op3(Opcode::LOAD, t2, rdi, VarNode::ram(ssz)));
         l.ops.push_back(make_op3(Opcode::SUB_FLAGS, VarNode::flags(), t1, t2));
-        l.ops.push_back(make_op3(Opcode::ADD, rsi, rsi, step));
-        l.ops.push_back(make_op3(Opcode::ADD, rdi, rdi, step));
+        l.ops.push_back(make_op3(Opcode::ADD, rsi, rsi, t16));
+        l.ops.push_back(make_op3(Opcode::ADD, rdi, rdi, t16));
         return true;
     }
 
@@ -1396,10 +1420,14 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         else if (m == Mnemonic::SCASQ) ssz = 8;
         VarNode rax = VarNode::gpr(0, ssz), rdi = VarNode::gpr(7, 8);
         VarNode tmp = VarNode::temp(14, ssz);
-        VarNode step = VarNode::constant(ssz, 8);
+        VarNode t16 = VarNode::temp(16, 8);
+        l.ops.push_back(make_op2(Opcode::GET_DF, t16, VarNode::flags()));
+        l.ops.push_back(make_op3(Opcode::SHL, t16, t16, VarNode::constant(1, 1)));
+        l.ops.push_back(make_op3(Opcode::SUB, t16, VarNode::constant(1, 8), t16));
+        l.ops.push_back(make_op3(Opcode::MUL, t16, t16, VarNode::constant(ssz, 8)));
         l.ops.push_back(make_op3(Opcode::LOAD, tmp, rdi, VarNode::ram(ssz)));
         l.ops.push_back(make_op3(Opcode::SUB_FLAGS, VarNode::flags(), rax, tmp));
-        l.ops.push_back(make_op3(Opcode::ADD, rdi, rdi, step));
+        l.ops.push_back(make_op3(Opcode::ADD, rdi, rdi, t16));
         return true;
     }
 
@@ -1647,55 +1675,6 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         }
     }
 
-    if (m == Mnemonic::MOVSB || m == Mnemonic::MOVSW || m == Mnemonic::MOVSQ) {
-        uint8_t ssz = (m == Mnemonic::MOVSB) ? 1 : (m == Mnemonic::MOVSW) ? 2 : 8;
-        VarNode rsi = VarNode::gpr(6, 8); VarNode rdi = VarNode::gpr(7, 8);
-        VarNode tmp = VarNode::temp(14, ssz);
-        l.ops.push_back(make_op3(Opcode::LOAD, tmp, rsi, VarNode::ram(ssz)));
-        l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(ssz), rdi, tmp));
-        VarNode delta = VarNode::constant(ssz, 8);
-        l.ops.push_back(make_op3(Opcode::ADD, rsi, rsi, delta));
-        l.ops.push_back(make_op3(Opcode::ADD, rdi, rdi, delta));
-        return true;
-    }
-    if (m == Mnemonic::STOSB || m == Mnemonic::STOSW || m == Mnemonic::STOSQ) {
-        uint8_t ssz = (m == Mnemonic::STOSB) ? 1 : (m == Mnemonic::STOSW) ? 2 : 8;
-        VarNode rdi = VarNode::gpr(7, 8);
-        VarNode rax = VarNode::gpr(0, ssz);
-        l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(ssz), rdi, rax));
-        l.ops.push_back(make_op3(Opcode::ADD, rdi, rdi, VarNode::constant(ssz, 8)));
-        return true;
-    }
-    if (m == Mnemonic::LODSB || m == Mnemonic::LODSW || m == Mnemonic::LODSQ) {
-        uint8_t ssz = (m == Mnemonic::LODSB) ? 1 : (m == Mnemonic::LODSW) ? 2 : 8;
-        VarNode rsi = VarNode::gpr(6, 8);
-        VarNode rax = VarNode::gpr(0, ssz);
-        l.ops.push_back(make_op3(Opcode::LOAD, rax, rsi, VarNode::ram(ssz)));
-        l.ops.push_back(make_op3(Opcode::ADD, rsi, rsi, VarNode::constant(ssz, 8)));
-        return true;
-    }
-    if (m == Mnemonic::CMPSB || m == Mnemonic::CMPSW || m == Mnemonic::CMPSQ) {
-        uint8_t ssz = (m == Mnemonic::CMPSB) ? 1 : (m == Mnemonic::CMPSW) ? 2 : 8;
-        VarNode rsi = VarNode::gpr(6, 8); VarNode rdi = VarNode::gpr(7, 8);
-        VarNode a = VarNode::temp(14, ssz); VarNode b = VarNode::temp(15, ssz);
-        l.ops.push_back(make_op3(Opcode::LOAD, a, rsi, VarNode::ram(ssz)));
-        l.ops.push_back(make_op3(Opcode::LOAD, b, rdi, VarNode::ram(ssz)));
-        l.ops.push_back(make_op3(Opcode::SUB_FLAGS, VarNode::flags(), a, b));
-        VarNode delta = VarNode::constant(ssz, 8);
-        l.ops.push_back(make_op3(Opcode::ADD, rsi, rsi, delta));
-        l.ops.push_back(make_op3(Opcode::ADD, rdi, rdi, delta));
-        return true;
-    }
-    if (m == Mnemonic::SCASB || m == Mnemonic::SCASW || m == Mnemonic::SCASQ) {
-        uint8_t ssz = (m == Mnemonic::SCASB) ? 1 : (m == Mnemonic::SCASW) ? 2 : 8;
-        VarNode rdi = VarNode::gpr(7, 8);
-        VarNode rax = VarNode::gpr(0, ssz);
-        VarNode tmp = VarNode::temp(14, ssz);
-        l.ops.push_back(make_op3(Opcode::LOAD, tmp, rdi, VarNode::ram(ssz)));
-        l.ops.push_back(make_op3(Opcode::SUB_FLAGS, VarNode::flags(), rax, tmp));
-        l.ops.push_back(make_op3(Opcode::ADD, rdi, rdi, VarNode::constant(ssz, 8)));
-        return true;
-    }
     if (m == Mnemonic::INSB || m == Mnemonic::INSW || m == Mnemonic::INSD ||
         m == Mnemonic::OUTSB || m == Mnemonic::OUTSW || m == Mnemonic::OUTSD) {
         l.ops.push_back({Opcode::BARRIER});
@@ -2466,11 +2445,13 @@ static void execute_once(Context& ctx, const Lifted& lifted) {
         case Opcode::GET_SF: write_var(op.output, ctx.flags[3]); break;
         case Opcode::GET_OF: write_var(op.output, ctx.flags[4]); break;
         case Opcode::GET_PF: write_var(op.output, ctx.flags[1]); break;
+        case Opcode::GET_DF: write_var(op.output, ctx.flags[6]); break;
         case Opcode::SET_CF: ctx.flags[0] = (uint8_t)(a & 1); break;
         case Opcode::SET_ZF: ctx.flags[2] = (uint8_t)(a & 1); break;
         case Opcode::SET_SF: ctx.flags[3] = (uint8_t)(a & 1); break;
         case Opcode::SET_OF: ctx.flags[4] = (uint8_t)(a & 1); break;
         case Opcode::SET_PF: ctx.flags[1] = (uint8_t)(a & 1); break;
+        case Opcode::SET_DF: ctx.flags[6] = (uint8_t)(a & 1); break;
         case Opcode::LOAD:
             if (ctx.memory) {
                 uint64_t addr = a;
@@ -2551,11 +2532,13 @@ const char* opcode_name(Opcode opc) {
     case Opcode::GET_SF: return "GET_SF";
     case Opcode::GET_OF: return "GET_OF";
     case Opcode::GET_PF: return "GET_PF";
+    case Opcode::GET_DF: return "GET_DF";
     case Opcode::SET_CF: return "SET_CF";
     case Opcode::SET_ZF: return "SET_ZF";
     case Opcode::SET_SF: return "SET_SF";
     case Opcode::SET_OF: return "SET_OF";
     case Opcode::SET_PF: return "SET_PF";
+    case Opcode::SET_DF: return "SET_DF";
     case Opcode::BRANCH: return "BRANCH";
     case Opcode::CBRANCH: return "CBRANCH";
     case Opcode::CALL: return "CALL";

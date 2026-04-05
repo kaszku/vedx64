@@ -49,11 +49,13 @@ enum class Opcode : uint8_t {
     GET_SF,
     GET_OF,
     GET_PF,
+    GET_DF,
     SET_CF,
     SET_ZF,
     SET_SF,
     SET_OF,
     SET_PF,
+    SET_DF,
     BRANCH,
     CBRANCH,
     CALL,
@@ -135,7 +137,7 @@ std::optional<Lifted> lift(const uint8_t* code, size_t len, uint64_t address = 0
 struct Context {
     uint64_t gpr[16] = {};       ///< RAX=0, RCX=1, ..., R15=15
     uint8_t xmm[16][16] = {};    ///< XMM0-XMM15, 128-bit each
-    uint8_t flags[6] = {};        ///< CF=0, PF=1, ZF=2, SF=3, OF=4, AF=5
+    uint8_t flags[7] = {};        ///< CF=0, PF=1, ZF=2, SF=3, OF=4, AF=5, DF=6
     uint64_t rip = 0;
     uint8_t* memory = nullptr;
     size_t memory_size = 0;
