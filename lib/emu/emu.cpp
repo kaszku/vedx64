@@ -4796,8 +4796,30 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         memcpy(&cpu.zmm[dst_r], dst_w, 16);
         break;
     }
+    case Mnemonic::BLENDVPS: {
+        int d = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int s = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        uint32_t dv[4], sv[4], mv[4];
+        memcpy(dv, cpu.zmm[d], 16); memcpy(sv, cpu.zmm[s], 16); memcpy(mv, cpu.zmm[0], 16);
+        for (int i=0;i<4;i++) if (mv[i] & 0x80000000) dv[i] = sv[i];
+        memcpy(cpu.zmm[d], dv, 16); break;
+    }
+    case Mnemonic::BLENDVPD: {
+        int d = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int s = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        uint64_t mv[2]; memcpy(mv, cpu.zmm[0], 16);
+        if (mv[0] >> 63) cpu.zmm[d][0] = cpu.zmm[s][0];
+        if (mv[1] >> 63) cpu.zmm[d][1] = cpu.zmm[s][1]; break;
+    }
+    case Mnemonic::PBLENDVB: {
+        int d = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int s = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        uint8_t dv[16], sv[16], mv[16];
+        memcpy(dv, cpu.zmm[d], 16); memcpy(sv, cpu.zmm[s], 16); memcpy(mv, cpu.zmm[0], 16);
+        for (int i=0;i<16;i++) if (mv[i] & 0x80) dv[i] = sv[i];
+        memcpy(cpu.zmm[d], dv, 16); break;
+    }
     case Mnemonic::PSHUFW:
-    case Mnemonic::PBLENDVB: case Mnemonic::BLENDVPS: case Mnemonic::BLENDVPD:
         return StepResult::Unsupported;
     case Mnemonic::CVTPS2PD: {
         int dst_r = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
@@ -5176,8 +5198,18 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     case Mnemonic::PCMPISTRI: case Mnemonic::PCMPISTRM:
     case Mnemonic::PHMINPOSUW:
     case Mnemonic::DPPD: case Mnemonic::DPPS:
+    case Mnemonic::MASKMOVDQU: {
+        int src = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int msk = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        uint8_t sv[16], mv[16]; memcpy(sv, cpu.zmm[src], 16); memcpy(mv, cpu.zmm[msk], 16);
+        for (int i=0;i<16;i++) if (mv[i] & 0x80) {
+            if (!mem_check(cpu, cpu.gpr[7]+i, 1)) return StepResult::MemFault;
+            mem_write(cpu, cpu.gpr[7]+i, sv[i], 1);
+        }
+        break;
+    }
     case Mnemonic::MPSADBW:
-    case Mnemonic::MASKMOVDQU: case Mnemonic::MASKMOVQ:
+    case Mnemonic::MASKMOVQ:
         return StepResult::Unsupported;
     case Mnemonic::MOVHLPS: {
         int d = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
@@ -5615,9 +5647,10 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     case Mnemonic::AAA: case Mnemonic::AAD: case Mnemonic::AAM: case Mnemonic::AAS:
     case Mnemonic::DAA: case Mnemonic::DAS:
     case Mnemonic::PUSHA: case Mnemonic::PUSHAD: case Mnemonic::POPA: case Mnemonic::POPAD:
-    case Mnemonic::BOUND: case Mnemonic::SALC:
+    case Mnemonic::SETALC: case Mnemonic::SALC:
+        cpu.gpr[0] = (cpu.gpr[0] & ~0xFFULL) | ((cpu.rflags & RFLAG_CF) ? 0xFF : 0x00); break;
+    case Mnemonic::BOUND:
     case Mnemonic::LDS: case Mnemonic::LES: case Mnemonic::LFS: case Mnemonic::LGS: case Mnemonic::LSS:
-    case Mnemonic::SETALC:
         return StepResult::Unsupported;
     case Mnemonic::F2XM1:
     case Mnemonic::FBLD: case Mnemonic::FBSTP:
@@ -5636,11 +5669,80 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     case Mnemonic::FPREM1:
     case Mnemonic::FSAVE: case Mnemonic::FSCALE: case Mnemonic::FSETPM:
     case Mnemonic::FSINCOS: case Mnemonic::FSTENV:
-    case Mnemonic::FXAM: case Mnemonic::FXTRACT:
-    case Mnemonic::FYL2X: case Mnemonic::FYL2XP1:
-        return StepResult::Unsupported;
-    case Mnemonic::BEXTR: case Mnemonic::MULX: case Mnemonic::PDEP: case Mnemonic::PEXT:
-        return StepResult::Unsupported;
+    case Mnemonic::FXAM: {
+        double v = cpu.fpu_stack[cpu.fpu_top];
+        cpu.fpu_status &= ~0x4700;
+        if (v != v) cpu.fpu_status |= 0x0100; // NaN: C3=0,C2=0,C0=1
+        else if (v == 0.0) cpu.fpu_status |= 0x4000; // Zero: C3=1
+        else cpu.fpu_status |= 0x0400; // Normal: C2=1
+        if (v < 0.0 || (v == 0.0 && 1.0/v < 0)) cpu.fpu_status |= 0x0200; // C1=sign
+        break;
+    }
+    case Mnemonic::FXTRACT: {
+        double v = cpu.fpu_stack[cpu.fpu_top];
+        int exp; double sig = frexp(v, &exp);
+        cpu.fpu_stack[cpu.fpu_top] = sig * 2.0; // significand in [1,2)
+        cpu.fpu_top = (cpu.fpu_top - 1) & 7;
+        cpu.fpu_stack[cpu.fpu_top] = (double)(exp - 1); break;
+    }
+    case Mnemonic::FYL2X: {
+        double st0 = cpu.fpu_stack[cpu.fpu_top];
+        double st1 = cpu.fpu_stack[(cpu.fpu_top + 1) & 7];
+        cpu.fpu_top = (cpu.fpu_top + 1) & 7;
+        cpu.fpu_stack[cpu.fpu_top] = st1 * log2(st0); break;
+    }
+    case Mnemonic::FYL2XP1: {
+        double st0 = cpu.fpu_stack[cpu.fpu_top];
+        double st1 = cpu.fpu_stack[(cpu.fpu_top + 1) & 7];
+        cpu.fpu_top = (cpu.fpu_top + 1) & 7;
+        cpu.fpu_stack[cpu.fpu_top] = st1 * log2(1.0 + st0); break;
+    }
+    case Mnemonic::BEXTR: {
+        uint64_t src = read_operand(cpu, di, 1, bits);
+        uint64_t ctrl = read_operand(cpu, di, 2, bits);
+        uint8_t start = ctrl & 0xFF; uint8_t len = (ctrl >> 8) & 0xFF;
+        uint64_t res = (start >= (uint8_t)bits) ? 0 : (src >> start) & ((1ULL << (len < (uint8_t)bits ? len : (uint8_t)bits)) - 1);
+        write_operand(cpu, di, 0, res, bits);
+        cpu.rflags &= ~(RFLAG_ZF | RFLAG_CF | RFLAG_OF);
+        if (res == 0) cpu.rflags |= RFLAG_ZF;
+        break;
+    }
+    case Mnemonic::MULX: {
+        uint64_t a = cpu.gpr[2]; // RDX is implicit source
+        uint64_t b = read_operand(cpu, di, 2, bits);
+        // 64×64→128 using 32-bit parts
+        uint64_t a_lo = a & 0xFFFFFFFF, a_hi = a >> 32;
+        uint64_t b_lo = b & 0xFFFFFFFF, b_hi = b >> 32;
+        uint64_t ll = a_lo * b_lo, lh = a_lo * b_hi, hl = a_hi * b_lo, hh = a_hi * b_hi;
+        uint64_t mid = (ll >> 32) + (lh & 0xFFFFFFFF) + (hl & 0xFFFFFFFF);
+        uint64_t lo = (ll & 0xFFFFFFFF) | (mid << 32);
+        uint64_t hi = hh + (lh >> 32) + (hl >> 32) + (mid >> 32);
+        write_operand(cpu, di, 1, lo, bits);  // low half
+        write_operand(cpu, di, 0, hi, bits);  // high half
+        break;
+    }
+    case Mnemonic::PDEP: {
+        uint64_t src = read_operand(cpu, di, 2, bits);
+        uint64_t msk = read_operand(cpu, di, 1, bits);
+        uint64_t res = 0, k = 0;
+        for (uint64_t m = msk; m; m &= m - 1) {
+            uint64_t bit = m & (-m);
+            if (src & (1ULL << k)) res |= bit;
+            k++;
+        }
+        write_operand(cpu, di, 0, res, bits); break;
+    }
+    case Mnemonic::PEXT: {
+        uint64_t src = read_operand(cpu, di, 2, bits);
+        uint64_t msk = read_operand(cpu, di, 1, bits);
+        uint64_t res = 0, k = 0;
+        for (uint64_t m = msk; m; m &= m - 1) {
+            uint64_t bit = m & (-m);
+            if (src & bit) res |= (1ULL << k);
+            k++;
+        }
+        write_operand(cpu, di, 0, res, bits); break;
+    }
     case Mnemonic::BNDCL: case Mnemonic::BNDCN: case Mnemonic::BNDCU:
     case Mnemonic::BNDLDX: case Mnemonic::BNDMK: case Mnemonic::BNDMOV: case Mnemonic::BNDSTX:
         return StepResult::Unsupported;
