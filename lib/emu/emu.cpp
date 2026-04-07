@@ -4819,8 +4819,15 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         for (int i=0;i<16;i++) if (mv[i] & 0x80) dv[i] = sv[i];
         memcpy(cpu.zmm[d], dv, 16); break;
     }
-    case Mnemonic::PSHUFW:
-        return StepResult::Unsupported;
+    case Mnemonic::PSHUFW: {
+        int d = ((di.modrm >> 3) & 7);
+        int s = (di.modrm & 7);
+        uint8_t imm = (uint8_t)di.immediate;
+        uint16_t sv[4]; memcpy(sv, cpu.zmm[s], 8);
+        uint16_t rv[4];
+        for (int i=0;i<4;i++) rv[i] = sv[(imm >> (i*2)) & 3];
+        memcpy(cpu.zmm[d], rv, 8); break;
+    }
     case Mnemonic::CVTPS2PD: {
         int dst_r = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
         int src_r = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
@@ -5196,8 +5203,36 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     }
     case Mnemonic::PCMPESTRI: case Mnemonic::PCMPESTRM:
     case Mnemonic::PCMPISTRI: case Mnemonic::PCMPISTRM:
-    case Mnemonic::PHMINPOSUW:
-    case Mnemonic::DPPD: case Mnemonic::DPPS:
+        return StepResult::Unsupported;
+    case Mnemonic::PHMINPOSUW: {
+        int d = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int s = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        uint16_t sv[8]; memcpy(sv, cpu.zmm[s], 16);
+        uint16_t min_val = sv[0]; int min_idx = 0;
+        for (int i=1;i<8;i++) if (sv[i] < min_val) { min_val = sv[i]; min_idx = i; }
+        uint16_t rv[8] = {0}; rv[0] = min_val; rv[1] = (uint16_t)min_idx;
+        memcpy(cpu.zmm[d], rv, 16); break;
+    }
+    case Mnemonic::DPPS: {
+        int d = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int s = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        uint8_t imm = (uint8_t)di.immediate;
+        float df[4], sf[4]; memcpy(df, cpu.zmm[d], 16); memcpy(sf, cpu.zmm[s], 16);
+        float dot = 0;
+        for (int i=0;i<4;i++) if (imm & (1 << (i+4))) dot += df[i] * sf[i];
+        for (int i=0;i<4;i++) df[i] = (imm & (1 << i)) ? dot : 0.0f;
+        memcpy(cpu.zmm[d], df, 16); break;
+    }
+    case Mnemonic::DPPD: {
+        int d = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int s = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        uint8_t imm = (uint8_t)di.immediate;
+        double dot = 0;
+        if (imm & 0x10) dot += cpu.zmm[d][0] * cpu.zmm[s][0];
+        if (imm & 0x20) dot += cpu.zmm[d][1] * cpu.zmm[s][1];
+        cpu.zmm[d][0] = (imm & 0x01) ? dot : 0.0;
+        cpu.zmm[d][1] = (imm & 0x02) ? dot : 0.0; break;
+    }
     case Mnemonic::MASKMOVDQU: {
         int src = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
         int msk = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
@@ -5208,7 +5243,23 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         }
         break;
     }
-    case Mnemonic::MPSADBW:
+    case Mnemonic::MPSADBW: {
+        int d = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int s = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        uint8_t imm = (uint8_t)di.immediate;
+        uint8_t db[16], sb[16]; memcpy(db, cpu.zmm[d], 16); memcpy(sb, cpu.zmm[s], 16);
+        int d_off = (imm & 4) ? 4 : 0; int s_off = (imm & 3) * 4;
+        uint16_t rv[8];
+        for (int i=0;i<8;i++) {
+            uint16_t sad = 0;
+            for (int j=0;j<4;j++) {
+                int diff = (int)db[d_off+i+j] - (int)sb[s_off+j];
+                sad += (uint16_t)(diff < 0 ? -diff : diff);
+            }
+            rv[i] = sad;
+        }
+        memcpy(cpu.zmm[d], rv, 16); break;
+    }
     case Mnemonic::MASKMOVQ:
         return StepResult::Unsupported;
     case Mnemonic::MOVHLPS: {
@@ -5562,11 +5613,94 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         vex_zero_upper(cpu, di, dst);
         break;
     }
-    case Mnemonic::VGATHERDPD: case Mnemonic::VGATHERDPS:
-    case Mnemonic::VGATHERQPD: case Mnemonic::VGATHERQPS:
-    case Mnemonic::VPGATHERDD: case Mnemonic::VPGATHERDQ:
-    case Mnemonic::VPGATHERQD: case Mnemonic::VPGATHERQQ:
-        return StepResult::Unsupported;
+    case Mnemonic::VGATHERDPS: case Mnemonic::VPGATHERDD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int msk = (int)di.vex_vvvv;
+        // Index reg from SIB.index, base from SIB.base or displacement
+        int idx_r = ((di.sib >> 3) & 7) | ((di.rex & 0x02) ? 8 : 0);
+        uint64_t base = (di.sib & 7) == 5 && ((di.modrm >> 6) & 3) == 0 ? 0 : cpu.gpr[(di.sib & 7) | ((di.rex & 0x01) ? 8 : 0)];
+        base += di.displacement;
+        int scale = 1 << ((di.sib >> 6) & 3);
+        int count = di.vex_L ? 8 : 4;
+        int32_t indices[8]; uint32_t mask_v[8], dst_v[8];
+        memcpy(indices, cpu.zmm[idx_r], count*4);
+        memcpy(mask_v, cpu.zmm[msk], count*4);
+        memcpy(dst_v, cpu.zmm[dst], count*4);
+        for (int i=0;i<count;i++) {
+            if (mask_v[i] & 0x80000000) {
+                uint64_t addr = base + (int64_t)indices[i] * scale;
+                if (!mem_check(cpu, addr, 4)) return StepResult::MemFault;
+                dst_v[i] = (uint32_t)mem_read(cpu, addr, 4);
+            }
+            mask_v[i] = 0; // clear mask after use
+        }
+        memcpy(cpu.zmm[dst], dst_v, count*4);
+        memcpy(cpu.zmm[msk], mask_v, count*4);
+        vex_zero_upper(cpu, di, dst); break;
+    }
+    case Mnemonic::VGATHERDPD: case Mnemonic::VPGATHERDQ: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int msk = (int)di.vex_vvvv;
+        int idx_r = ((di.sib >> 3) & 7) | ((di.rex & 0x02) ? 8 : 0);
+        uint64_t base = (di.sib & 7) == 5 && ((di.modrm >> 6) & 3) == 0 ? 0 : cpu.gpr[(di.sib & 7) | ((di.rex & 0x01) ? 8 : 0)];
+        base += di.displacement;
+        int scale = 1 << ((di.sib >> 6) & 3);
+        int count = di.vex_L ? 4 : 2;
+        int32_t indices[4]; memcpy(indices, cpu.zmm[idx_r], count*4);
+        uint64_t mask_v[4]; memcpy(mask_v, cpu.zmm[msk], count*8);
+        for (int i=0;i<count;i++) {
+            if (mask_v[i] >> 63) {
+                uint64_t addr = base + (int64_t)indices[i] * scale;
+                if (!mem_check(cpu, addr, 8)) return StepResult::MemFault;
+                cpu.zmm[dst][i] = 0; uint64_t v = mem_read(cpu, addr, 8); memcpy(&cpu.zmm[dst][i], &v, 8);
+            }
+            mask_v[i] = 0;
+        }
+        memcpy(cpu.zmm[msk], mask_v, count*8);
+        vex_zero_upper(cpu, di, dst); break;
+    }
+    case Mnemonic::VGATHERQPS: case Mnemonic::VPGATHERQD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int msk = (int)di.vex_vvvv;
+        int idx_r = ((di.sib >> 3) & 7) | ((di.rex & 0x02) ? 8 : 0);
+        uint64_t base = (di.sib & 7) == 5 && ((di.modrm >> 6) & 3) == 0 ? 0 : cpu.gpr[(di.sib & 7) | ((di.rex & 0x01) ? 8 : 0)];
+        base += di.displacement;
+        int scale = 1 << ((di.sib >> 6) & 3);
+        int count = di.vex_L ? 4 : 2;
+        int64_t indices[4]; memcpy(indices, cpu.zmm[idx_r], count*8);
+        uint32_t dst_v[4], mask_v[4]; memcpy(dst_v, cpu.zmm[dst], count*4); memcpy(mask_v, cpu.zmm[msk], count*4);
+        for (int i=0;i<count;i++) {
+            if (mask_v[i] & 0x80000000) {
+                uint64_t addr = base + indices[i] * scale;
+                if (!mem_check(cpu, addr, 4)) return StepResult::MemFault;
+                dst_v[i] = (uint32_t)mem_read(cpu, addr, 4);
+            }
+            mask_v[i] = 0;
+        }
+        memcpy(cpu.zmm[dst], dst_v, count*4); memcpy(cpu.zmm[msk], mask_v, count*4);
+        vex_zero_upper(cpu, di, dst); break;
+    }
+    case Mnemonic::VGATHERQPD: case Mnemonic::VPGATHERQQ: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int msk = (int)di.vex_vvvv;
+        int idx_r = ((di.sib >> 3) & 7) | ((di.rex & 0x02) ? 8 : 0);
+        uint64_t base = (di.sib & 7) == 5 && ((di.modrm >> 6) & 3) == 0 ? 0 : cpu.gpr[(di.sib & 7) | ((di.rex & 0x01) ? 8 : 0)];
+        base += di.displacement;
+        int scale = 1 << ((di.sib >> 6) & 3);
+        int count = di.vex_L ? 4 : 2;
+        int64_t indices[4]; memcpy(indices, cpu.zmm[idx_r], count*8);
+        uint64_t mask_v[4]; memcpy(mask_v, cpu.zmm[msk], count*8);
+        for (int i=0;i<count;i++) {
+            if (mask_v[i] >> 63) {
+                uint64_t addr = base + indices[i] * scale;
+                if (!mem_check(cpu, addr, 8)) return StepResult::MemFault;
+                cpu.zmm[dst][i] = 0; uint64_t v = mem_read(cpu, addr, 8); memcpy(&cpu.zmm[dst][i], &v, 8);
+            }
+            mask_v[i] = 0;
+        }
+        memcpy(cpu.zmm[msk], mask_v, count*8);
+        vex_zero_upper(cpu, di, dst); break;
+    }
     case Mnemonic::VPERMPD: {
         int dst = xmm_reg_index(di, di.desc->operands[0]);
         int src = xmm_reg_index(di, di.desc->operands[1]);
