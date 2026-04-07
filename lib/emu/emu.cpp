@@ -4871,11 +4871,38 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     case Mnemonic::SHA256MSG1: case Mnemonic::SHA256MSG2:
     case Mnemonic::SHA256RNDS2:
         return StepResult::Unsupported;
-    case Mnemonic::FUCOM: case Mnemonic::FUCOMP: case Mnemonic::FUCOMPP:
+    case Mnemonic::FUCOM: case Mnemonic::FUCOMP: case Mnemonic::FUCOMPP: {
+        // Unordered compare ST(0) with ST(i): set C0/C2/C3 in FPU status word
+        int i = di.modrm & 7; if (i == 0 && mn != Mnemonic::FUCOMPP) i = 1;
+        double a = cpu.fpu_stack[cpu.fpu_top]; double b = cpu.fpu_stack[(cpu.fpu_top + i) & 7];
+        cpu.fpu_status &= ~0x4500;
+        if (a != a || b != b) cpu.fpu_status |= 0x4500; // unordered
+        else if (a < b) cpu.fpu_status |= 0x0100;
+        else if (a == b) cpu.fpu_status |= 0x4000;
+        if (mn == Mnemonic::FUCOMP || mn == Mnemonic::FUCOMPP) cpu.fpu_top = (cpu.fpu_top + 1) & 7;
+        if (mn == Mnemonic::FUCOMPP) cpu.fpu_top = (cpu.fpu_top + 1) & 7;
+        break;
+    }
     case Mnemonic::FCLEX: case Mnemonic::FNCLEX:
-    case Mnemonic::FSQRT: case Mnemonic::FPREM: case Mnemonic::FRNDINT:
-    case Mnemonic::FSIN: case Mnemonic::FCOS: case Mnemonic::FPTAN: case Mnemonic::FPATAN:
-    case Mnemonic::WAIT:
+        cpu.fpu_status &= ~0x80FF; break; // clear exception flags
+    case Mnemonic::FSQRT: cpu.fpu_stack[cpu.fpu_top] = sqrt(cpu.fpu_stack[cpu.fpu_top]); break;
+    case Mnemonic::FRNDINT: cpu.fpu_stack[cpu.fpu_top] = rint(cpu.fpu_stack[cpu.fpu_top]); break;
+    case Mnemonic::FSIN: cpu.fpu_stack[cpu.fpu_top] = sin(cpu.fpu_stack[cpu.fpu_top]); break;
+    case Mnemonic::FCOS: cpu.fpu_stack[cpu.fpu_top] = cos(cpu.fpu_stack[cpu.fpu_top]); break;
+    case Mnemonic::FPTAN: {
+        cpu.fpu_stack[cpu.fpu_top] = tan(cpu.fpu_stack[cpu.fpu_top]);
+        cpu.fpu_top = (cpu.fpu_top - 1) & 7; cpu.fpu_stack[cpu.fpu_top] = 1.0; break;
+    }
+    case Mnemonic::FPATAN: {
+        double st1 = cpu.fpu_stack[(cpu.fpu_top + 1) & 7];
+        cpu.fpu_top = (cpu.fpu_top + 1) & 7;
+        cpu.fpu_stack[cpu.fpu_top] = atan2(st1, cpu.fpu_stack[cpu.fpu_top]); break;
+    }
+    case Mnemonic::FPREM: {
+        double st1 = cpu.fpu_stack[(cpu.fpu_top + 1) & 7];
+        cpu.fpu_stack[cpu.fpu_top] = fmod(cpu.fpu_stack[cpu.fpu_top], st1); break;
+    }
+    case Mnemonic::WAIT: break; // NOP (wait for FPU)
     case Mnemonic::FNSAVE: case Mnemonic::FRSTOR:
         return StepResult::Unsupported;
     case Mnemonic::WRMSR:
@@ -5055,13 +5082,96 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         else cpu.rip += di.length;
         return StepResult::OK;
     }
-    case Mnemonic::ADDSUBPS: case Mnemonic::ADDSUBPD:
-    case Mnemonic::LDDQU:
-        return StepResult::Unsupported;
-    case Mnemonic::PHADDD: case Mnemonic::PHADDW: case Mnemonic::PHADDSW:
-    case Mnemonic::PHSUBD: case Mnemonic::PHSUBW: case Mnemonic::PHSUBSW:
-    case Mnemonic::PSIGNB: case Mnemonic::PSIGND: case Mnemonic::PSIGNW:
-        return StepResult::Unsupported;
+    case Mnemonic::ADDSUBPS: {
+        int d = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int s = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        float df[4], sf[4]; memcpy(df, cpu.zmm[d], 16); memcpy(sf, cpu.zmm[s], 16);
+        df[0] -= sf[0]; df[1] += sf[1]; df[2] -= sf[2]; df[3] += sf[3];
+        memcpy(cpu.zmm[d], df, 16); break;
+    }
+    case Mnemonic::ADDSUBPD: {
+        int d = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int s = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        cpu.zmm[d][0] -= cpu.zmm[s][0]; cpu.zmm[d][1] += cpu.zmm[s][1]; break;
+    }
+    case Mnemonic::LDDQU: {
+        int d = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        uint64_t addr = compute_ea(cpu, di);
+        if (!mem_check(cpu, addr, 16)) return StepResult::MemFault;
+        for (int i = 0; i < 2; i++) cpu.zmm[d][i] = 0;
+        uint64_t lo = mem_read(cpu, addr, 8); uint64_t hi = mem_read(cpu, addr+8, 8);
+        memcpy(&cpu.zmm[d][0], &lo, 8); memcpy(&cpu.zmm[d][1], &hi, 8);
+        break;
+    }
+    case Mnemonic::PSIGNB: {
+        int d = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int s = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        int8_t dv[16], sv[16]; memcpy(dv, cpu.zmm[d], 16); memcpy(sv, cpu.zmm[s], 16);
+        for (int i=0;i<16;i++) dv[i] = sv[i] < 0 ? -dv[i] : sv[i] == 0 ? 0 : dv[i];
+        memcpy(cpu.zmm[d], dv, 16); break;
+    }
+    case Mnemonic::PSIGNW: {
+        int d = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int s = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        int16_t dv[8], sv[8]; memcpy(dv, cpu.zmm[d], 16); memcpy(sv, cpu.zmm[s], 16);
+        for (int i=0;i<8;i++) dv[i] = sv[i] < 0 ? -dv[i] : sv[i] == 0 ? 0 : dv[i];
+        memcpy(cpu.zmm[d], dv, 16); break;
+    }
+    case Mnemonic::PSIGND: {
+        int d = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int s = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        int32_t dv[4], sv[4]; memcpy(dv, cpu.zmm[d], 16); memcpy(sv, cpu.zmm[s], 16);
+        for (int i=0;i<4;i++) dv[i] = sv[i] < 0 ? -dv[i] : sv[i] == 0 ? 0 : dv[i];
+        memcpy(cpu.zmm[d], dv, 16); break;
+    }
+    case Mnemonic::PHADDW: {
+        int d = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int s = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        int16_t dv[8], sv[8], rv[8]; memcpy(dv, cpu.zmm[d], 16); memcpy(sv, cpu.zmm[s], 16);
+        for (int i=0;i<4;i++) rv[i] = dv[i*2] + dv[i*2+1];
+        for (int i=0;i<4;i++) rv[i+4] = sv[i*2] + sv[i*2+1];
+        memcpy(cpu.zmm[d], rv, 16); break;
+    }
+    case Mnemonic::PHADDD: {
+        int d = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int s = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        int32_t dv[4], sv[4], rv[4]; memcpy(dv, cpu.zmm[d], 16); memcpy(sv, cpu.zmm[s], 16);
+        for (int i=0;i<2;i++) rv[i] = dv[i*2] + dv[i*2+1];
+        for (int i=0;i<2;i++) rv[i+2] = sv[i*2] + sv[i*2+1];
+        memcpy(cpu.zmm[d], rv, 16); break;
+    }
+    case Mnemonic::PHADDSW: {
+        int d = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int s = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        int16_t dv[8], sv[8], rv[8]; memcpy(dv, cpu.zmm[d], 16); memcpy(sv, cpu.zmm[s], 16);
+        for (int i=0;i<4;i++) { int32_t r = (int32_t)dv[i*2] + (int32_t)dv[i*2+1]; rv[i] = r > 32767 ? 32767 : r < -32768 ? -32768 : (int16_t)r; }
+        for (int i=0;i<4;i++) { int32_t r = (int32_t)sv[i*2] + (int32_t)sv[i*2+1]; rv[i+4] = r > 32767 ? 32767 : r < -32768 ? -32768 : (int16_t)r; }
+        memcpy(cpu.zmm[d], rv, 16); break;
+    }
+    case Mnemonic::PHSUBW: {
+        int d = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int s = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        int16_t dv[8], sv[8], rv[8]; memcpy(dv, cpu.zmm[d], 16); memcpy(sv, cpu.zmm[s], 16);
+        for (int i=0;i<4;i++) rv[i] = dv[i*2] - dv[i*2+1];
+        for (int i=0;i<4;i++) rv[i+4] = sv[i*2] - sv[i*2+1];
+        memcpy(cpu.zmm[d], rv, 16); break;
+    }
+    case Mnemonic::PHSUBD: {
+        int d = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int s = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        int32_t dv[4], sv[4], rv[4]; memcpy(dv, cpu.zmm[d], 16); memcpy(sv, cpu.zmm[s], 16);
+        for (int i=0;i<2;i++) rv[i] = dv[i*2] - dv[i*2+1];
+        for (int i=0;i<2;i++) rv[i+2] = sv[i*2] - sv[i*2+1];
+        memcpy(cpu.zmm[d], rv, 16); break;
+    }
+    case Mnemonic::PHSUBSW: {
+        int d = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int s = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        int16_t dv[8], sv[8], rv[8]; memcpy(dv, cpu.zmm[d], 16); memcpy(sv, cpu.zmm[s], 16);
+        for (int i=0;i<4;i++) { int32_t r = (int32_t)dv[i*2] - (int32_t)dv[i*2+1]; rv[i] = r > 32767 ? 32767 : r < -32768 ? -32768 : (int16_t)r; }
+        for (int i=0;i<4;i++) { int32_t r = (int32_t)sv[i*2] - (int32_t)sv[i*2+1]; rv[i+4] = r > 32767 ? 32767 : r < -32768 ? -32768 : (int16_t)r; }
+        memcpy(cpu.zmm[d], rv, 16); break;
+    }
     case Mnemonic::PCMPESTRI: case Mnemonic::PCMPESTRM:
     case Mnemonic::PCMPISTRI: case Mnemonic::PCMPISTRM:
     case Mnemonic::PHMINPOSUW:
@@ -5069,37 +5179,400 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     case Mnemonic::MPSADBW:
     case Mnemonic::MASKMOVDQU: case Mnemonic::MASKMOVQ:
         return StepResult::Unsupported;
-    case Mnemonic::MOVHLPS: case Mnemonic::MOVLHPS:
-    case Mnemonic::MOVSD: case Mnemonic::MOVNTQ: case Mnemonic::MOVDQ2Q: case Mnemonic::MOVQ2DQ:
+    case Mnemonic::MOVHLPS: {
+        int d = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int s = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        memcpy(&cpu.zmm[d][0], &cpu.zmm[s][1], 8); break;
+    }
+    case Mnemonic::MOVLHPS: {
+        int d = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        int s = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+        memcpy(&cpu.zmm[d][1], &cpu.zmm[s][0], 8); break;
+    }
+    case Mnemonic::MOVSD: {
+        int d = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
+        if (((di.modrm >> 6) & 3) == 3) {
+            int s = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
+            cpu.zmm[d][0] = cpu.zmm[s][0]; // reg-reg: only low qword
+        } else {
+            uint64_t addr = compute_ea(cpu, di);
+            if (!mem_check(cpu, addr, 8)) return StepResult::MemFault;
+            uint64_t v = mem_read(cpu, addr, 8);
+            memcpy(&cpu.zmm[d][0], &v, 8); cpu.zmm[d][1] = 0;
+        }
+        break;
+    }
+    case Mnemonic::MOVNTQ: case Mnemonic::MOVDQ2Q: case Mnemonic::MOVQ2DQ:
     case Mnemonic::CVTPD2PI: case Mnemonic::CVTPI2PD: case Mnemonic::CVTPI2PS: case Mnemonic::CVTPS2PI:
     case Mnemonic::CVTTPD2PI: case Mnemonic::CVTTPS2PI:
         return StepResult::Unsupported;
-    case Mnemonic::VFMADD132PD: case Mnemonic::VFMADD132SD:
-    case Mnemonic::VFMADD213PD: case Mnemonic::VFMADD213SD:
-    case Mnemonic::VFMADD231PD: case Mnemonic::VFMADD231SD:
-    case Mnemonic::VFMADDSUB132PD: case Mnemonic::VFMADDSUB213PD: case Mnemonic::VFMADDSUB231PD:
-    case Mnemonic::VFMSUB132PD: case Mnemonic::VFMSUB132SD:
-    case Mnemonic::VFMSUB213PD: case Mnemonic::VFMSUB213SD:
-    case Mnemonic::VFMSUB231PD: case Mnemonic::VFMSUB231SD:
-    case Mnemonic::VFMSUBADD132PD: case Mnemonic::VFMSUBADD213PD: case Mnemonic::VFMSUBADD231PD:
-    case Mnemonic::VFNMADD132PD: case Mnemonic::VFNMADD132SD:
-    case Mnemonic::VFNMADD213PD: case Mnemonic::VFNMADD213SD:
-    case Mnemonic::VFNMADD231PD: case Mnemonic::VFNMADD231SD:
-    case Mnemonic::VFNMSUB132PD: case Mnemonic::VFNMSUB132SD:
-    case Mnemonic::VFNMSUB213PD: case Mnemonic::VFNMSUB213SD:
-    case Mnemonic::VFNMSUB231PD: case Mnemonic::VFNMSUB231SD:
-        return StepResult::Unsupported;
+    case Mnemonic::VFMADD132PD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        int count = (di.vex_L >= 2) ? 8 : ((di.vex_L >= 1) ? 4 : 2);
+        for (int i = 0; i < count; i++) {
+            double a=cpu.zmm[dst][i], b=cpu.zmm[src3][i], c=cpu.zmm[vvvv][i];
+            cpu.zmm[dst][i] = a*b + c;
+        }
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFMADD132SD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        double a=cpu.zmm[dst][0], b=cpu.zmm[src3][0], c=cpu.zmm[vvvv][0];
+        cpu.zmm[dst][0] = a*b + c;
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFMADD213PD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        int count = (di.vex_L >= 2) ? 8 : ((di.vex_L >= 1) ? 4 : 2);
+        for (int i = 0; i < count; i++) {
+            double a=cpu.zmm[vvvv][i], b=cpu.zmm[dst][i], c=cpu.zmm[src3][i];
+            cpu.zmm[dst][i] = a*b + c;
+        }
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFMADD213SD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        double a=cpu.zmm[vvvv][0], b=cpu.zmm[dst][0], c=cpu.zmm[src3][0];
+        cpu.zmm[dst][0] = a*b + c;
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFMADD231PD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        int count = (di.vex_L >= 2) ? 8 : ((di.vex_L >= 1) ? 4 : 2);
+        for (int i = 0; i < count; i++) {
+            double a=cpu.zmm[vvvv][i], b=cpu.zmm[src3][i], c=cpu.zmm[dst][i];
+            cpu.zmm[dst][i] = a*b + c;
+        }
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFMADD231SD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        double a=cpu.zmm[vvvv][0], b=cpu.zmm[src3][0], c=cpu.zmm[dst][0];
+        cpu.zmm[dst][0] = a*b + c;
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFMSUB132PD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        int count = (di.vex_L >= 2) ? 8 : ((di.vex_L >= 1) ? 4 : 2);
+        for (int i = 0; i < count; i++) {
+            double a=cpu.zmm[dst][i], b=cpu.zmm[src3][i], c=cpu.zmm[vvvv][i];
+            cpu.zmm[dst][i] = a*b - c;
+        }
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFMSUB132SD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        double a=cpu.zmm[dst][0], b=cpu.zmm[src3][0], c=cpu.zmm[vvvv][0];
+        cpu.zmm[dst][0] = a*b - c;
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFMSUB213PD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        int count = (di.vex_L >= 2) ? 8 : ((di.vex_L >= 1) ? 4 : 2);
+        for (int i = 0; i < count; i++) {
+            double a=cpu.zmm[vvvv][i], b=cpu.zmm[dst][i], c=cpu.zmm[src3][i];
+            cpu.zmm[dst][i] = a*b - c;
+        }
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFMSUB213SD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        double a=cpu.zmm[vvvv][0], b=cpu.zmm[dst][0], c=cpu.zmm[src3][0];
+        cpu.zmm[dst][0] = a*b - c;
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFMSUB231PD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        int count = (di.vex_L >= 2) ? 8 : ((di.vex_L >= 1) ? 4 : 2);
+        for (int i = 0; i < count; i++) {
+            double a=cpu.zmm[vvvv][i], b=cpu.zmm[src3][i], c=cpu.zmm[dst][i];
+            cpu.zmm[dst][i] = a*b - c;
+        }
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFMSUB231SD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        double a=cpu.zmm[vvvv][0], b=cpu.zmm[src3][0], c=cpu.zmm[dst][0];
+        cpu.zmm[dst][0] = a*b - c;
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFNMADD132PD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        int count = (di.vex_L >= 2) ? 8 : ((di.vex_L >= 1) ? 4 : 2);
+        for (int i = 0; i < count; i++) {
+            double a=cpu.zmm[dst][i], b=cpu.zmm[src3][i], c=cpu.zmm[vvvv][i];
+            cpu.zmm[dst][i] = -(a*b) + c;
+        }
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFNMADD132SD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        double a=cpu.zmm[dst][0], b=cpu.zmm[src3][0], c=cpu.zmm[vvvv][0];
+        cpu.zmm[dst][0] = -(a*b) + c;
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFNMADD213PD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        int count = (di.vex_L >= 2) ? 8 : ((di.vex_L >= 1) ? 4 : 2);
+        for (int i = 0; i < count; i++) {
+            double a=cpu.zmm[vvvv][i], b=cpu.zmm[dst][i], c=cpu.zmm[src3][i];
+            cpu.zmm[dst][i] = -(a*b) + c;
+        }
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFNMADD213SD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        double a=cpu.zmm[vvvv][0], b=cpu.zmm[dst][0], c=cpu.zmm[src3][0];
+        cpu.zmm[dst][0] = -(a*b) + c;
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFNMADD231PD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        int count = (di.vex_L >= 2) ? 8 : ((di.vex_L >= 1) ? 4 : 2);
+        for (int i = 0; i < count; i++) {
+            double a=cpu.zmm[vvvv][i], b=cpu.zmm[src3][i], c=cpu.zmm[dst][i];
+            cpu.zmm[dst][i] = -(a*b) + c;
+        }
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFNMADD231SD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        double a=cpu.zmm[vvvv][0], b=cpu.zmm[src3][0], c=cpu.zmm[dst][0];
+        cpu.zmm[dst][0] = -(a*b) + c;
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFNMSUB132PD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        int count = (di.vex_L >= 2) ? 8 : ((di.vex_L >= 1) ? 4 : 2);
+        for (int i = 0; i < count; i++) {
+            double a=cpu.zmm[dst][i], b=cpu.zmm[src3][i], c=cpu.zmm[vvvv][i];
+            cpu.zmm[dst][i] = -(a*b) - c;
+        }
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFNMSUB132SD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        double a=cpu.zmm[dst][0], b=cpu.zmm[src3][0], c=cpu.zmm[vvvv][0];
+        cpu.zmm[dst][0] = -(a*b) - c;
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFNMSUB213PD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        int count = (di.vex_L >= 2) ? 8 : ((di.vex_L >= 1) ? 4 : 2);
+        for (int i = 0; i < count; i++) {
+            double a=cpu.zmm[vvvv][i], b=cpu.zmm[dst][i], c=cpu.zmm[src3][i];
+            cpu.zmm[dst][i] = -(a*b) - c;
+        }
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFNMSUB213SD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        double a=cpu.zmm[vvvv][0], b=cpu.zmm[dst][0], c=cpu.zmm[src3][0];
+        cpu.zmm[dst][0] = -(a*b) - c;
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFNMSUB231PD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        int count = (di.vex_L >= 2) ? 8 : ((di.vex_L >= 1) ? 4 : 2);
+        for (int i = 0; i < count; i++) {
+            double a=cpu.zmm[vvvv][i], b=cpu.zmm[src3][i], c=cpu.zmm[dst][i];
+            cpu.zmm[dst][i] = -(a*b) - c;
+        }
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFNMSUB231SD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        double a=cpu.zmm[vvvv][0], b=cpu.zmm[src3][0], c=cpu.zmm[dst][0];
+        cpu.zmm[dst][0] = -(a*b) - c;
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFMADDSUB132PD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        int count = (di.vex_L >= 2) ? 8 : ((di.vex_L >= 1) ? 4 : 2);
+        for (int i = 0; i < count; i++) {
+            double a=cpu.zmm[dst][i], b=cpu.zmm[src3][i], c=cpu.zmm[vvvv][i];
+            cpu.zmm[dst][i] = (i & 1) ? a*b + c : a*b - c;
+        }
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFMADDSUB213PD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        int count = (di.vex_L >= 2) ? 8 : ((di.vex_L >= 1) ? 4 : 2);
+        for (int i = 0; i < count; i++) {
+            double a=cpu.zmm[vvvv][i], b=cpu.zmm[dst][i], c=cpu.zmm[src3][i];
+            cpu.zmm[dst][i] = (i & 1) ? a*b + c : a*b - c;
+        }
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFMADDSUB231PD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        int count = (di.vex_L >= 2) ? 8 : ((di.vex_L >= 1) ? 4 : 2);
+        for (int i = 0; i < count; i++) {
+            double a=cpu.zmm[vvvv][i], b=cpu.zmm[src3][i], c=cpu.zmm[dst][i];
+            cpu.zmm[dst][i] = (i & 1) ? a*b + c : a*b - c;
+        }
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFMSUBADD132PD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        int count = (di.vex_L >= 2) ? 8 : ((di.vex_L >= 1) ? 4 : 2);
+        for (int i = 0; i < count; i++) {
+            double a=cpu.zmm[dst][i], b=cpu.zmm[src3][i], c=cpu.zmm[vvvv][i];
+            cpu.zmm[dst][i] = (i & 1) ? a*b - c : a*b + c;
+        }
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFMSUBADD213PD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        int count = (di.vex_L >= 2) ? 8 : ((di.vex_L >= 1) ? 4 : 2);
+        for (int i = 0; i < count; i++) {
+            double a=cpu.zmm[vvvv][i], b=cpu.zmm[dst][i], c=cpu.zmm[src3][i];
+            cpu.zmm[dst][i] = (i & 1) ? a*b - c : a*b + c;
+        }
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
+    case Mnemonic::VFMSUBADD231PD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int vvvv = (int)di.vex_vvvv;
+        int src3 = xmm_reg_index(di, di.desc->operands[2]);
+        int count = (di.vex_L >= 2) ? 8 : ((di.vex_L >= 1) ? 4 : 2);
+        for (int i = 0; i < count; i++) {
+            double a=cpu.zmm[vvvv][i], b=cpu.zmm[src3][i], c=cpu.zmm[dst][i];
+            cpu.zmm[dst][i] = (i & 1) ? a*b - c : a*b + c;
+        }
+        vex_zero_upper(cpu, di, dst);
+        break;
+    }
     case Mnemonic::VGATHERDPD: case Mnemonic::VGATHERDPS:
     case Mnemonic::VGATHERQPD: case Mnemonic::VGATHERQPS:
     case Mnemonic::VPGATHERDD: case Mnemonic::VPGATHERDQ:
     case Mnemonic::VPGATHERQD: case Mnemonic::VPGATHERQQ:
         return StepResult::Unsupported;
-    case Mnemonic::VPERMPD: case Mnemonic::VPERMPS:
+    case Mnemonic::VPERMPD: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int src = xmm_reg_index(di, di.desc->operands[1]);
+        uint8_t imm = (uint8_t)di.immediate;
+        double s[4]; memcpy(s, cpu.zmm[src], 32);
+        for (int i = 0; i < 4; i++) cpu.zmm[dst][i] = s[(imm >> (i*2)) & 3];
+        vex_zero_upper(cpu, di, dst); break;
+    }
+    case Mnemonic::VPERMPS: {
+        int dst = xmm_reg_index(di, di.desc->operands[0]);
+        int idx_r = (int)di.vex_vvvv;
+        int src = xmm_reg_index(di, di.desc->operands[2]);
+        int32_t idx[8]; float sv[8], rv[8]; memcpy(idx, cpu.zmm[idx_r], 32); memcpy(sv, cpu.zmm[src], 32);
+        for (int i = 0; i < 8; i++) rv[i] = sv[idx[i] & 7];
+        memcpy(cpu.zmm[dst], rv, 32); vex_zero_upper(cpu, di, dst); break;
+    }
     case Mnemonic::VMFUNC: case Mnemonic::VMXON:
         return StepResult::Unsupported;
-    case Mnemonic::KSHIFTLW: case Mnemonic::KSHIFTRW:
-    case Mnemonic::KUNPCKBW: case Mnemonic::KUNPCKDQ: case Mnemonic::KUNPCKWD:
-        return StepResult::Unsupported;
+    case Mnemonic::KSHIFTLW: {
+        int d = (di.modrm >> 3) & 7; int s = di.modrm & 7;
+        cpu.opmask[d] = (uint16_t)(cpu.opmask[s] << (di.immediate & 15)); break;
+    }
+    case Mnemonic::KSHIFTRW: {
+        int d = (di.modrm >> 3) & 7; int s = di.modrm & 7;
+        cpu.opmask[d] = (uint16_t)(cpu.opmask[s] >> (di.immediate & 15)); break;
+    }
+    case Mnemonic::KUNPCKBW: {
+        int d = (di.modrm >> 3) & 7; int s1 = di.vex_vvvv; int s2 = di.modrm & 7;
+        cpu.opmask[d] = ((uint16_t)(cpu.opmask[s1] & 0xFF) << 8) | (uint16_t)(cpu.opmask[s2] & 0xFF); break;
+    }
+    case Mnemonic::KUNPCKWD: {
+        int d = (di.modrm >> 3) & 7; int s1 = di.vex_vvvv; int s2 = di.modrm & 7;
+        cpu.opmask[d] = ((uint32_t)(cpu.opmask[s1] & 0xFFFF) << 16) | (uint32_t)(cpu.opmask[s2] & 0xFFFF); break;
+    }
+    case Mnemonic::KUNPCKDQ: {
+        int d = (di.modrm >> 3) & 7; int s1 = di.vex_vvvv; int s2 = di.modrm & 7;
+        cpu.opmask[d] = ((uint64_t)(cpu.opmask[s1] & 0xFFFFFFFF) << 32) | (uint64_t)(cpu.opmask[s2] & 0xFFFFFFFF); break;
+    }
     case Mnemonic::XSAVE: case Mnemonic::XSAVEC: case Mnemonic::XSAVEOPT: case Mnemonic::XSAVES:
     case Mnemonic::XRSTOR: case Mnemonic::XRSTORS:
         return StepResult::Unsupported;
