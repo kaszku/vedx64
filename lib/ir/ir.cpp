@@ -741,13 +741,20 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         return true;
     }
 
-    if (m == Mnemonic::CMPXCHG && di.desc->has_modrm && mod_ == 3) {
-        VarNode dst = reg_from_modrm_rm(di, sz);
+    if (m == Mnemonic::CMPXCHG && di.desc->has_modrm) {
         VarNode src = reg_from_modrm_reg(di, sz);
         VarNode rax = VarNode::gpr(0, sz);
-        l.ops.push_back(make_op3(Opcode::SUB_FLAGS, VarNode::flags(), rax, dst));
-        // Simplified: always store src (assumes equal)
-        l.ops.push_back(make_op2(Opcode::COPY, dst, src));
+        if (mod_ == 3) {
+            VarNode dst = reg_from_modrm_rm(di, sz);
+            l.ops.push_back(make_op3(Opcode::SUB_FLAGS, VarNode::flags(), rax, dst));
+            l.ops.push_back(make_op2(Opcode::COPY, dst, src)); // simplified: assumes equal
+        } else {
+            VarNode ea = compute_ea(l, di);
+            VarNode tmp = VarNode::temp(14, sz);
+            l.ops.push_back(make_op3(Opcode::LOAD, tmp, ea, VarNode::ram(sz)));
+            l.ops.push_back(make_op3(Opcode::SUB_FLAGS, VarNode::flags(), rax, tmp));
+            l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(sz), ea, src)); // simplified: assumes equal
+        }
         return true;
     }
 
@@ -759,6 +766,18 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         l.ops.push_back(make_op2(Opcode::COPY, src, dst));
         l.ops.push_back(make_op2(Opcode::COPY, dst, tmp));
         l.ops.push_back(make_op3(Opcode::ADD_FLAGS, VarNode::flags(), dst, src));
+        return true;
+    }
+    if (m == Mnemonic::XADD && di.desc->has_modrm && mod_ != 3) {
+        VarNode ea = compute_ea(l, di);
+        VarNode src = reg_from_modrm_reg(di, sz);
+        VarNode old_val = VarNode::temp(12, sz);
+        VarNode sum = VarNode::temp(13, sz);
+        l.ops.push_back(make_op3(Opcode::LOAD, old_val, ea, VarNode::ram(sz)));
+        l.ops.push_back(make_op3(Opcode::ADD, sum, old_val, src));
+        l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(sz), ea, sum));
+        l.ops.push_back(make_op2(Opcode::COPY, src, old_val));
+        l.ops.push_back(make_op3(Opcode::ADD_FLAGS, VarNode::flags(), old_val, src));
         return true;
     }
 
@@ -1609,11 +1628,6 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         return true;
     }
 
-    if (m == Mnemonic::MOVS || m == Mnemonic::STOS || m == Mnemonic::LODS ||
-        m == Mnemonic::CMPS || m == Mnemonic::SCAS) {
-        l.ops.push_back({Opcode::BARRIER});
-        return true;
-    }
 
     if (m == Mnemonic::IN || m == Mnemonic::OUT || m == Mnemonic::INS || m == Mnemonic::OUTS) {
         l.ops.push_back({Opcode::BARRIER});
@@ -1843,14 +1857,20 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         l.ops.push_back(make_op3(opc, dst, dst, VarNode::constant(di.immediate * 8, 1)));
         return true;
     }
+    if (m == Mnemonic::MOVNTI) {
+        VarNode ea = compute_ea(l, di);
+        VarNode src = reg_from_modrm_reg(di, sz);
+        l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(sz), ea, src));
+        return true;
+    }
     if (m == Mnemonic::MASKMOVDQU || m == Mnemonic::MASKMOVQ ||
-        m == Mnemonic::MOVNTI || m == Mnemonic::MOVNTQ ||
+        m == Mnemonic::MOVNTQ ||
         m == Mnemonic::MOVDQ2Q || m == Mnemonic::MOVQ2DQ) {
         l.ops.push_back({Opcode::BARRIER});
         return true;
     }
     if (m == Mnemonic::STMXCSR || m == Mnemonic::LDMXCSR) {
-        l.ops.push_back({Opcode::BARRIER});
+        l.ops.push_back({Opcode::NOP});
         return true;
     }
 
@@ -1913,16 +1933,21 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         return true;
     }
 
-    if (m == Mnemonic::KMOVB || m == Mnemonic::KMOVW || m == Mnemonic::KMOVD || m == Mnemonic::KMOVQ ||
-        m == Mnemonic::KANDW || m == Mnemonic::KANDD || m == Mnemonic::KANDQ || m == Mnemonic::KANDNW ||
+    if (m == Mnemonic::KMOVB || m == Mnemonic::KMOVW || m == Mnemonic::KMOVD || m == Mnemonic::KMOVQ) {
+        l.ops.push_back({Opcode::NOP}); return true; // simplified: opmask move
+    }
+    if (m == Mnemonic::KANDW || m == Mnemonic::KANDD || m == Mnemonic::KANDQ || m == Mnemonic::KANDNW ||
         m == Mnemonic::KORW || m == Mnemonic::KORD || m == Mnemonic::KORQ ||
         m == Mnemonic::KXORW || m == Mnemonic::KXORD || m == Mnemonic::KXORQ ||
-        m == Mnemonic::KNOTW || m == Mnemonic::KNOTD || m == Mnemonic::KNOTQ ||
-        m == Mnemonic::KORTESTW || m == Mnemonic::KORTESTD || m == Mnemonic::KORTESTQ ||
-        m == Mnemonic::KUNPCKBW || m == Mnemonic::KUNPCKWD || m == Mnemonic::KUNPCKDQ ||
+        m == Mnemonic::KNOTW || m == Mnemonic::KNOTD || m == Mnemonic::KNOTQ) {
+        l.ops.push_back({Opcode::NOP}); return true; // simplified: opmask logic
+    }
+    if (m == Mnemonic::KORTESTW || m == Mnemonic::KORTESTD || m == Mnemonic::KORTESTQ) {
+        l.ops.push_back({Opcode::NOP}); return true; // simplified: opmask test
+    }
+    if (m == Mnemonic::KUNPCKBW || m == Mnemonic::KUNPCKWD || m == Mnemonic::KUNPCKDQ ||
         m == Mnemonic::KSHIFTRW || m == Mnemonic::KSHIFTLW) {
-        l.ops.push_back({Opcode::BARRIER});
-        return true;
+        l.ops.push_back({Opcode::NOP}); return true; // simplified: opmask shift/unpack
     }
 
     if (m == Mnemonic::CALLF || m == Mnemonic::RETF ||
