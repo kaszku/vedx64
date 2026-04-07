@@ -195,8 +195,14 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
             } else {
                 dst = reg_from_modrm_reg(di, sz); src = reg_from_modrm_rm(di, sz);
             }
-            l.ops.push_back(make_op3(opc, dst, dst, src));
-            l.ops.push_back(make_op3(flags_opc, VarNode::flags(), dst, src));
+            // Compute into temp, flags from original operands (ADD/SUB) or result (AND/OR/XOR), then copy to dst
+            VarNode tmp_res = VarNode::temp(30, sz);
+            l.ops.push_back(make_op3(opc, tmp_res, dst, src));
+            if (flags_opc == Opcode::ADD_FLAGS || flags_opc == Opcode::SUB_FLAGS)
+                l.ops.push_back(make_op3(flags_opc, VarNode::flags(), dst, src)); // from original operands
+            else
+                l.ops.push_back(make_op3(flags_opc, VarNode::flags(), tmp_res, VarNode::constant(0, sz))); // from result
+            l.ops.push_back(make_op2(Opcode::COPY, dst, tmp_res));
         } else {
             // Memory forms: LOAD, operate, STORE
             VarNode ea = compute_ea(l, di); // effective address placeholder
@@ -205,16 +211,26 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
                 VarNode tmp = VarNode::temp(11, sz);
                 l.ops.push_back(make_op3(Opcode::LOAD, tmp, ea, VarNode::ram(sz)));
                 VarNode src = has_imm ? VarNode::constant(di.immediate, sz) : reg_from_modrm_reg(di, sz);
-                l.ops.push_back(make_op3(opc, tmp, tmp, src));
-                l.ops.push_back(make_op3(flags_opc, VarNode::flags(), tmp, src));
+                VarNode tmp2 = VarNode::temp(30, sz);
+                l.ops.push_back(make_op3(opc, tmp2, tmp, src));
+                if (flags_opc == Opcode::ADD_FLAGS || flags_opc == Opcode::SUB_FLAGS)
+                    l.ops.push_back(make_op3(flags_opc, VarNode::flags(), tmp, src));
+                else
+                    l.ops.push_back(make_op3(flags_opc, VarNode::flags(), tmp2, VarNode::constant(0, sz)));
+                l.ops.push_back(make_op2(Opcode::COPY, tmp, tmp2));
                 l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(sz), ea, tmp));
             } else {
                 // reg, mem — load mem into temp, op into reg
                 VarNode dst = reg_from_modrm_reg(di, sz);
                 VarNode tmp = VarNode::temp(11, sz);
                 l.ops.push_back(make_op3(Opcode::LOAD, tmp, ea, VarNode::ram(sz)));
-                l.ops.push_back(make_op3(opc, dst, dst, tmp));
-                l.ops.push_back(make_op3(flags_opc, VarNode::flags(), dst, tmp));
+                VarNode tmp2 = VarNode::temp(30, sz);
+                l.ops.push_back(make_op3(opc, tmp2, dst, tmp));
+                if (flags_opc == Opcode::ADD_FLAGS || flags_opc == Opcode::SUB_FLAGS)
+                    l.ops.push_back(make_op3(flags_opc, VarNode::flags(), dst, tmp));
+                else
+                    l.ops.push_back(make_op3(flags_opc, VarNode::flags(), tmp2, VarNode::constant(0, sz)));
+                l.ops.push_back(make_op2(Opcode::COPY, dst, tmp2));
             }
         }
         return true;
@@ -350,14 +366,14 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         Opcode flags_opc = (m == Mnemonic::INC) ? Opcode::ADD_FLAGS : Opcode::SUB_FLAGS;
         if (mod_ == 3) {
             VarNode dst = reg_from_modrm_rm(di, sz);
-            l.ops.push_back(make_op3(opc, dst, dst, one));
             l.ops.push_back(make_op3(flags_opc, VarNode::flags(), dst, one));
+            l.ops.push_back(make_op3(opc, dst, dst, one));
         } else {
             VarNode ea = compute_ea(l, di);
             VarNode tmp = VarNode::temp(11, sz);
             l.ops.push_back(make_op3(Opcode::LOAD, tmp, ea, VarNode::ram(sz)));
-            l.ops.push_back(make_op3(opc, tmp, tmp, one));
             l.ops.push_back(make_op3(flags_opc, VarNode::flags(), tmp, one));
+            l.ops.push_back(make_op3(opc, tmp, tmp, one));
             l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(sz), ea, tmp));
         }
         return true;
@@ -638,7 +654,61 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         if (di.desc->has_modrm && ((di.modrm >> 6) & 3) == 3) {
             VarNode dst = reg_from_modrm_reg(di, sz);
             VarNode src = reg_from_modrm_rm(di, sz);
-            l.ops.push_back(make_op2(Opcode::COPY, dst, src));
+            VarNode cond = VarNode::temp(20, 1);
+            if (m == Mnemonic::CMOVZ) l.ops.push_back(make_op2(Opcode::GET_ZF, cond, VarNode::flags()));
+            else if (m == Mnemonic::CMOVNZ) { l.ops.push_back(make_op2(Opcode::GET_ZF, cond, VarNode::flags()));
+                VarNode nc = VarNode::temp(21, 1); l.ops.push_back(make_op3(Opcode::XOR, nc, cond, VarNode::constant(1, 1))); cond = nc; }
+            else if (m == Mnemonic::CMOVB) l.ops.push_back(make_op2(Opcode::GET_CF, cond, VarNode::flags()));
+            else if (m == Mnemonic::CMOVNB) { l.ops.push_back(make_op2(Opcode::GET_CF, cond, VarNode::flags()));
+                VarNode nc = VarNode::temp(21, 1); l.ops.push_back(make_op3(Opcode::XOR, nc, cond, VarNode::constant(1, 1))); cond = nc; }
+            else if (m == Mnemonic::CMOVS) l.ops.push_back(make_op2(Opcode::GET_SF, cond, VarNode::flags()));
+            else if (m == Mnemonic::CMOVNS) { l.ops.push_back(make_op2(Opcode::GET_SF, cond, VarNode::flags()));
+                VarNode nc = VarNode::temp(21, 1); l.ops.push_back(make_op3(Opcode::XOR, nc, cond, VarNode::constant(1, 1))); cond = nc; }
+            else if (m == Mnemonic::CMOVO) l.ops.push_back(make_op2(Opcode::GET_OF, cond, VarNode::flags()));
+            else if (m == Mnemonic::CMOVNO) { l.ops.push_back(make_op2(Opcode::GET_OF, cond, VarNode::flags()));
+                VarNode nc = VarNode::temp(21, 1); l.ops.push_back(make_op3(Opcode::XOR, nc, cond, VarNode::constant(1, 1))); cond = nc; }
+            else if (m == Mnemonic::CMOVP) l.ops.push_back(make_op2(Opcode::GET_PF, cond, VarNode::flags()));
+            else if (m == Mnemonic::CMOVNP) { l.ops.push_back(make_op2(Opcode::GET_PF, cond, VarNode::flags()));
+                VarNode nc = VarNode::temp(21, 1); l.ops.push_back(make_op3(Opcode::XOR, nc, cond, VarNode::constant(1, 1))); cond = nc; }
+            else if (m == Mnemonic::CMOVBE) {
+                VarNode cf = VarNode::temp(21, 1); VarNode zf = VarNode::temp(22, 1);
+                l.ops.push_back(make_op2(Opcode::GET_CF, cf, VarNode::flags()));
+                l.ops.push_back(make_op2(Opcode::GET_ZF, zf, VarNode::flags()));
+                l.ops.push_back(make_op3(Opcode::OR, cond, cf, zf)); }
+            else if (m == Mnemonic::CMOVNBE) {
+                VarNode cf = VarNode::temp(21, 1); VarNode zf = VarNode::temp(22, 1);
+                l.ops.push_back(make_op2(Opcode::GET_CF, cf, VarNode::flags()));
+                l.ops.push_back(make_op2(Opcode::GET_ZF, zf, VarNode::flags()));
+                l.ops.push_back(make_op3(Opcode::OR, cond, cf, zf));
+                VarNode nc = VarNode::temp(23, 1); l.ops.push_back(make_op3(Opcode::XOR, nc, cond, VarNode::constant(1, 1))); cond = nc; }
+            else if (m == Mnemonic::CMOVL) {
+                VarNode sf = VarNode::temp(21, 1); VarNode of = VarNode::temp(22, 1);
+                l.ops.push_back(make_op2(Opcode::GET_SF, sf, VarNode::flags()));
+                l.ops.push_back(make_op2(Opcode::GET_OF, of, VarNode::flags()));
+                l.ops.push_back(make_op3(Opcode::XOR, cond, sf, of)); }
+            else if (m == Mnemonic::CMOVNL) {
+                VarNode sf = VarNode::temp(21, 1); VarNode of = VarNode::temp(22, 1);
+                l.ops.push_back(make_op2(Opcode::GET_SF, sf, VarNode::flags()));
+                l.ops.push_back(make_op2(Opcode::GET_OF, of, VarNode::flags()));
+                l.ops.push_back(make_op3(Opcode::XOR, cond, sf, of));
+                VarNode nc = VarNode::temp(23, 1); l.ops.push_back(make_op3(Opcode::XOR, nc, cond, VarNode::constant(1, 1))); cond = nc; }
+            else if (m == Mnemonic::CMOVLE) {
+                VarNode sf = VarNode::temp(21, 1); VarNode of = VarNode::temp(22, 1); VarNode zf = VarNode::temp(23, 1);
+                l.ops.push_back(make_op2(Opcode::GET_SF, sf, VarNode::flags()));
+                l.ops.push_back(make_op2(Opcode::GET_OF, of, VarNode::flags()));
+                l.ops.push_back(make_op2(Opcode::GET_ZF, zf, VarNode::flags()));
+                VarNode ne = VarNode::temp(24, 1); l.ops.push_back(make_op3(Opcode::XOR, ne, sf, of));
+                l.ops.push_back(make_op3(Opcode::OR, cond, zf, ne)); }
+            else if (m == Mnemonic::CMOVNLE) {
+                VarNode sf = VarNode::temp(21, 1); VarNode of = VarNode::temp(22, 1); VarNode zf = VarNode::temp(23, 1);
+                l.ops.push_back(make_op2(Opcode::GET_SF, sf, VarNode::flags()));
+                l.ops.push_back(make_op2(Opcode::GET_OF, of, VarNode::flags()));
+                l.ops.push_back(make_op2(Opcode::GET_ZF, zf, VarNode::flags()));
+                VarNode ne = VarNode::temp(24, 1); l.ops.push_back(make_op3(Opcode::XOR, ne, sf, of));
+                l.ops.push_back(make_op3(Opcode::OR, cond, zf, ne));
+                VarNode nc = VarNode::temp(25, 1); l.ops.push_back(make_op3(Opcode::XOR, nc, cond, VarNode::constant(1, 1))); cond = nc; }
+            else { l.ops.push_back(make_op2(Opcode::COPY, cond, VarNode::constant(1, 1))); }
+            l.ops.push_back(make_op4(Opcode::SELECT, dst, cond, src, dst));
             return true;
         }
     }

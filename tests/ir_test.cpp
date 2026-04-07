@@ -29,7 +29,8 @@ int main() {
     auto la = ir::lift(add_rax_rcx, sizeof(add_rax_rcx));
     CHECK(la.has_value(), "lift add rax, rcx");
     CHECK(la->ops.size() >= 2, "add has op + flags");
-    CHECK(la->ops[0].opcode == ir::Opcode::ADD, "add opcode");
+    CHECK(la->ops[0].opcode == ir::Opcode::ADD, "add result first");
+    CHECK(la->ops[1].opcode == ir::Opcode::ADD_FLAGS, "add flags second");
 
     {
         ir::Context ctx;
@@ -325,6 +326,226 @@ int main() {
        if (l) { ir::Context ctx; ctx.flags[0] = 0;
        ir::execute(ctx, *l);
        if (ctx.flags[0] == 1) sem_pass++; else printf("    FAIL stc: CF=%d\n", ctx.flags[0]); }
+    }
+    printf("--- Operand & side-effect checks ---\n");
+    { // push rbp / pop rcx → RCX == old RBP, RSP restored
+       uint8_t push_c[] = {0x55};  // push rbp
+       uint8_t pop_c[]  = {0x59};  // pop rcx
+       auto push_l = ir::lift(push_c, 1);
+       auto pop_l  = ir::lift(pop_c,  1);
+       uint8_t stk[256] = {};
+       ir::Context ctx; ctx.memory = stk; ctx.memory_size = 256;
+       ctx.gpr[4] = 128; ctx.gpr[5] = 0xDEADBEEF;
+       if (push_l) ir::execute(ctx, *push_l);
+       sem_total++; if (ctx.gpr[4] == 120) sem_pass++; else printf("    FAIL push: RSP=%llu\n", (unsigned long long)ctx.gpr[4]);
+       if (pop_l) ir::execute(ctx, *pop_l);
+       sem_total++; if (ctx.gpr[1] == 0xDEADBEEF) sem_pass++; else printf("    FAIL pop: RCX=%llX\n", (unsigned long long)ctx.gpr[1]);
+       sem_total++; if (ctx.gpr[4] == 128) sem_pass++; else printf("    FAIL pop: RSP=%llu\n", (unsigned long long)ctx.gpr[4]);
+    }
+    { // enter 0x20, 0 / leave → RSP/RBP restored
+       uint8_t enter_c[] = {0xC8,0x20,0x00,0x00};
+       uint8_t leave_c[] = {0xC9};
+       auto enter_l = ir::lift(enter_c, 4);
+       auto leave_l = ir::lift(leave_c, 1);
+       uint8_t stk[512] = {};
+       ir::Context ctx; ctx.memory = stk; ctx.memory_size = 512;
+       ctx.gpr[4] = 256; ctx.gpr[5] = 0xAAAA;
+       uint64_t orig_rsp = ctx.gpr[4];
+       if (enter_l) ir::execute(ctx, *enter_l);
+       uint64_t frame_rbp = ctx.gpr[5];
+       sem_total++; if (ctx.gpr[4] == frame_rbp - 0x20) sem_pass++; else printf("    FAIL enter RSP=%llu exp=%llu\n", (unsigned long long)ctx.gpr[4], (unsigned long long)(frame_rbp-0x20));
+       if (leave_l) ir::execute(ctx, *leave_l);
+       sem_total++; if (ctx.gpr[5] == 0xAAAA) sem_pass++; else printf("    FAIL leave RBP=%llX\n", (unsigned long long)ctx.gpr[5]);
+       sem_total++; if (ctx.gpr[4] == orig_rsp) sem_pass++; else printf("    FAIL leave RSP=%llu\n", (unsigned long long)ctx.gpr[4]);
+    }
+    { // STD then stosb should decrement RDI
+       uint8_t std_c[] = {0xFD}; // std
+       uint8_t cld_c[] = {0xFC}; // cld
+       uint8_t stos_c[] = {0xAA}; // stosb
+       auto std_l = ir::lift(std_c, 1); auto cld_l = ir::lift(cld_c, 1);
+       auto stos_l = ir::lift(stos_c, 1);
+       uint8_t buf[256] = {};
+       ir::Context ctx; ctx.memory = buf; ctx.memory_size = 256;
+       ctx.gpr[0] = 0xCC; ctx.gpr[7] = 100;
+       if (std_l) ir::execute(ctx, *std_l); // set DF=1
+       sem_total++; if (ctx.flags[6] == 1) sem_pass++; else printf("    FAIL STD: DF=%d\n", ctx.flags[6]);
+       if (stos_l) ir::execute(ctx, *stos_l);
+       sem_total++; if (ctx.gpr[7] == 99) sem_pass++; else printf("    FAIL STD+stosb: RDI=%llu (exp 99)\n", (unsigned long long)ctx.gpr[7]);
+       sem_total++; if (buf[100] == 0xCC) sem_pass++; else printf("    FAIL STD+stosb: [100]=%d\n", buf[100]);
+       // CLD then stosb should increment RDI
+       if (cld_l) ir::execute(ctx, *cld_l);
+       ctx.gpr[7] = 110;
+       if (stos_l) ir::execute(ctx, *stos_l);
+       sem_total++; if (ctx.gpr[7] == 111) sem_pass++; else printf("    FAIL CLD+stosb: RDI=%llu\n", (unsigned long long)ctx.gpr[7]);
+    }
+    { // rep stosb: fill 8 bytes
+       uint8_t rep_stos[] = {0xF3,0xAA};
+       auto l = ir::lift(rep_stos, 2);
+       uint8_t buf[256] = {};
+       ir::Context ctx; ctx.memory = buf; ctx.memory_size = 256;
+       ctx.gpr[0] = 0xAB; ctx.gpr[7] = 30; ctx.gpr[1] = 8;
+       if (l) ir::execute(ctx, *l);
+       sem_total++; if (ctx.gpr[1] == 0) sem_pass++; else printf("    FAIL rep stosb: RCX=%llu\n", (unsigned long long)ctx.gpr[1]);
+       sem_total++; if (ctx.gpr[7] == 38) sem_pass++; else printf("    FAIL rep stosb: RDI=%llu\n", (unsigned long long)ctx.gpr[7]);
+       bool all_ab = true; for (int i=0;i<8;i++) if (buf[30+i] != 0xAB) all_ab = false;
+       sem_total++; if (all_ab) sem_pass++; else printf("    FAIL rep stosb: data mismatch\n");
+    }
+    { // repnz scasb: scan for 0x42
+       uint8_t repnz_scas[] = {0xF2,0xAE};
+       auto l = ir::lift(repnz_scas, 2);
+       uint8_t buf[256] = {};
+       buf[50] = 0x11; buf[51] = 0x22; buf[52] = 0x42; buf[53] = 0x33;
+       ir::Context ctx; ctx.memory = buf; ctx.memory_size = 256;
+       ctx.gpr[0] = 0x42; ctx.gpr[7] = 50; ctx.gpr[1] = 10;
+       if (l) ir::execute(ctx, *l);
+       sem_total++; if (ctx.gpr[7] == 53) sem_pass++; else printf("    FAIL repnz scasb: RDI=%llu (exp 53)\n", (unsigned long long)ctx.gpr[7]);
+       sem_total++; if (ctx.gpr[1] == 7) sem_pass++; else printf("    FAIL repnz scasb: RCX=%llu (exp 7)\n", (unsigned long long)ctx.gpr[1]);
+       sem_total++; if (ctx.flags[2] == 1) sem_pass++; else printf("    FAIL repnz scasb: ZF=%d\n", ctx.flags[2]); // ZF=1 (found)
+    }
+    { // repe cmpsb: compare matching then mismatching
+       uint8_t repe_cmps[] = {0xF3,0xA6};
+       auto l = ir::lift(repe_cmps, 2);
+       uint8_t buf[256] = {};
+       buf[0]=1; buf[1]=2; buf[2]=3; buf[3]=99; // src
+       buf[100]=1; buf[101]=2; buf[102]=3; buf[103]=77; // dst
+       ir::Context ctx; ctx.memory = buf; ctx.memory_size = 256;
+       ctx.gpr[6] = 0; ctx.gpr[7] = 100; ctx.gpr[1] = 10;
+       if (l) ir::execute(ctx, *l);
+       sem_total++; if (ctx.gpr[1] == 6) sem_pass++; else printf("    FAIL repe cmpsb: RCX=%llu (exp 6)\n", (unsigned long long)ctx.gpr[1]);
+       sem_total++; if (ctx.flags[2] == 0) sem_pass++; else printf("    FAIL repe cmpsb: ZF=%d (exp 0)\n", ctx.flags[2]);
+    }
+    { // lock cmpxchg [rbx], ecx — memory compare-exchange
+       uint8_t c[] = {0xF0,0x0F,0xB1,0x0B}; // lock cmpxchg [rbx], ecx
+       auto l = ir::lift(c, 4);
+       uint8_t buf[256] = {};
+       buf[40] = 42; // [rbx] = 42
+       ir::Context ctx; ctx.memory = buf; ctx.memory_size = 256;
+       ctx.gpr[0] = 42; // EAX = 42 (equal to [rbx])
+       ctx.gpr[1] = 99; // ECX = 99 (new value)
+       ctx.gpr[3] = 40; // RBX = address
+       if (l) ir::execute(ctx, *l);
+       sem_total++; if (buf[40] == 99) sem_pass++; else printf("    FAIL cmpxchg mem: [40]=%d (exp 99)\n", buf[40]);
+    }
+    { // lock xadd [rbx], ecx — exchange and add
+       uint8_t c[] = {0xF0,0x0F,0xC1,0x0B}; // lock xadd [rbx], ecx
+       auto l = ir::lift(c, 4);
+       uint8_t buf[256] = {};
+       uint32_t v = 100; memcpy(&buf[40], &v, 4);
+       ir::Context ctx; ctx.memory = buf; ctx.memory_size = 256;
+       ctx.gpr[1] = 5; ctx.gpr[3] = 40;
+       if (l) ir::execute(ctx, *l);
+       uint32_t result; memcpy(&result, &buf[40], 4);
+       sem_total++; if (result == 105) sem_pass++; else printf("    FAIL xadd mem: [40]=%u (exp 105)\n", result);
+       sem_total++; if ((ctx.gpr[1] & 0xFFFFFFFF) == 100) sem_pass++; else printf("    FAIL xadd mem: ECX=%llu (exp 100)\n", (unsigned long long)ctx.gpr[1]);
+    }
+    { uint8_t c[] = {0xF3,0x48,0x0F,0xB8,0xC1}; // popcnt rax,rcx
+       auto l = ir::lift(c, 5); sem_total++;
+       if (l) { ir::Context ctx; ctx.gpr[1] = 0xFF00FF00FF;
+       ir::execute(ctx, *l);
+       if (ctx.gpr[0] == 24) sem_pass++; else printf("    FAIL popcnt: %llu\n", (unsigned long long)ctx.gpr[0]); }
+    }
+    { uint8_t c[] = {0xF3,0x48,0x0F,0xBC,0xC1}; // tzcnt rax,rcx
+       auto l = ir::lift(c, 5); sem_total++;
+       if (l) { ir::Context ctx; ctx.gpr[1] = 0x80; // bit 7 set
+       ir::execute(ctx, *l);
+       if (ctx.gpr[0] == 7) sem_pass++; else printf("    FAIL tzcnt: %llu\n", (unsigned long long)ctx.gpr[0]); }
+    }
+    { uint8_t c[] = {0xF3,0x48,0x0F,0xBD,0xC1}; // lzcnt rax,rcx
+       auto l = ir::lift(c, 5); sem_total++;
+       if (l) { ir::Context ctx; ctx.gpr[1] = 1; // only bit 0 set → 63 leading zeros
+       ir::execute(ctx, *l);
+       if (ctx.gpr[0] == 63) sem_pass++; else printf("    FAIL lzcnt: %llu\n", (unsigned long long)ctx.gpr[0]); }
+    }
+    { uint8_t c[] = {0x48,0x0F,0xB6,0xC1}; // movzx rax, cl
+       auto l = ir::lift(c, 4); sem_total++;
+       if (l) { ir::Context ctx; ctx.gpr[0] = 0xDEAD; ctx.gpr[1] = 0xFF;
+       ir::execute(ctx, *l);
+       if (ctx.gpr[0] == 0xFF) sem_pass++; else printf("    FAIL movzx: %llX\n", (unsigned long long)ctx.gpr[0]); }
+    }
+    { uint8_t c[] = {0x48,0x0F,0xBE,0xC1}; // movsx rax, cl
+       auto l = ir::lift(c, 4); sem_total++;
+       if (l) { ir::Context ctx; ctx.gpr[1] = 0x80; // -128 as signed byte
+       ir::execute(ctx, *l);
+       if (ctx.gpr[0] == 0xFFFFFFFFFFFFFF80ULL) sem_pass++; else printf("    FAIL movsx: %llX\n", (unsigned long long)ctx.gpr[0]); }
+    }
+    { // cmovne rax, rcx — should move when ZF=0
+       uint8_t c[] = {0x48,0x0F,0x45,0xC1};
+       auto l = ir::lift(c, 4); sem_total++;
+       if (l) { ir::Context ctx; ctx.gpr[0] = 1; ctx.gpr[1] = 42; ctx.flags[2] = 0; // ZF=0 → move
+       ir::execute(ctx, *l);
+       if (ctx.gpr[0] == 42) sem_pass++; else printf("    FAIL cmovne(ZF=0): %llu\n", (unsigned long long)ctx.gpr[0]); }
+    }
+    { // cmovne rax, rcx — should NOT move when ZF=1
+       uint8_t c[] = {0x48,0x0F,0x45,0xC1};
+       auto l = ir::lift(c, 4); sem_total++;
+       if (l) { ir::Context ctx; ctx.gpr[0] = 1; ctx.gpr[1] = 42; ctx.flags[2] = 1; // ZF=1 → no move
+       ir::execute(ctx, *l);
+       if (ctx.gpr[0] == 1) sem_pass++; else printf("    FAIL cmovne(ZF=1): %llu\n", (unsigned long long)ctx.gpr[0]); }
+    }
+    { // pushfq / popfq roundtrip
+       uint8_t pushf_c[] = {0x9C}; uint8_t popf_c[] = {0x9D};
+       auto pushf_l = ir::lift(pushf_c, 1); auto popf_l = ir::lift(popf_c, 1);
+       uint8_t stk[256] = {};
+       ir::Context ctx; ctx.memory = stk; ctx.memory_size = 256;
+       ctx.gpr[4] = 128; ctx.flags[0] = 1; ctx.flags[2] = 1; // CF=1, ZF=1
+       if (pushf_l) ir::execute(ctx, *pushf_l);
+       sem_total++; if (ctx.gpr[4] == 120) sem_pass++; else printf("    FAIL pushfq RSP=%llu\n", (unsigned long long)ctx.gpr[4]);
+       ctx.flags[0] = 0; ctx.flags[2] = 0; // clear flags
+       if (popf_l) ir::execute(ctx, *popf_l);
+       sem_total++; if (ctx.gpr[4] == 128) sem_pass++; else printf("    FAIL popfq RSP=%llu\n", (unsigned long long)ctx.gpr[4]);
+    }
+    { // add rax, rcx: 0xFFFFFFFFFFFFFFFF + 1 = 0 with CF=1
+       uint8_t c[] = {0x48,0x01,0xC8};
+       auto l = ir::lift(c, 3); sem_total++;
+       if (l) { ir::Context ctx; ctx.gpr[0] = 0xFFFFFFFFFFFFFFFFULL; ctx.gpr[1] = 1;
+       ir::execute(ctx, *l);
+       if (ctx.gpr[0] == 0 && ctx.flags[2] == 1) sem_pass++; // ZF=1 (result zero)
+       else printf("    FAIL add overflow: RAX=%llX ZF=%d\n", (unsigned long long)ctx.gpr[0], ctx.flags[2]); }
+    }
+    { // test rax, rax → ZF=1 when RAX=0, ZF=0 when RAX!=0
+       uint8_t c[] = {0x48,0x85,0xC0};
+       auto l = ir::lift(c, 3);
+       if (l) {
+           ir::Context ctx; ctx.gpr[0] = 0;
+           ir::execute(ctx, *l);
+           sem_total++; if (ctx.flags[2] == 1) sem_pass++; else printf("    FAIL test(0): ZF=%d\n", ctx.flags[2]);
+           ctx.gpr[0] = 42;
+           ir::execute(ctx, *l);
+           sem_total++; if (ctx.flags[2] == 0) sem_pass++; else printf("    FAIL test(42): ZF=%d\n", ctx.flags[2]);
+       }
+    }
+    { // neg rax: 0 → 0 (ZF=1, CF=0), 1 → -1 (ZF=0, CF=1)
+       uint8_t c[] = {0x48,0xF7,0xD8};
+       auto l = ir::lift(c, 3);
+       if (l) {
+           ir::Context ctx; ctx.gpr[0] = 0;
+           ir::execute(ctx, *l);
+           sem_total++; if (ctx.gpr[0] == 0 && ctx.flags[2] == 1) sem_pass++; else printf("    FAIL neg(0): RAX=%llu ZF=%d\n", (unsigned long long)ctx.gpr[0], ctx.flags[2]);
+           ctx.gpr[0] = 1;
+           ir::execute(ctx, *l);
+           sem_total++; if (ctx.gpr[0] == 0xFFFFFFFFFFFFFFFFULL) sem_pass++; else printf("    FAIL neg(1): RAX=%llX\n", (unsigned long long)ctx.gpr[0]);
+       }
+    }
+    { // inc rax: CF should be preserved from previous op
+       uint8_t c[] = {0x48,0xFF,0xC0}; // inc rax
+       auto l = ir::lift(c, 3);
+       if (l) {
+           ir::Context ctx; ctx.gpr[0] = 0xFFFFFFFFFFFFFFFFULL; ctx.flags[0] = 1; // CF=1 before
+           ir::execute(ctx, *l);
+           sem_total++; if (ctx.gpr[0] == 0) sem_pass++; else printf("    FAIL inc wrap: %llX\n", (unsigned long long)ctx.gpr[0]);
+           sem_total++; if (ctx.flags[2] == 1) sem_pass++; else printf("    FAIL inc ZF: %d\n", ctx.flags[2]);
+       }
+    }
+    { // rep movsb: copy 4 bytes
+       uint8_t c[] = {0xF3,0xA4};
+       auto l = ir::lift(c, 2);
+       uint8_t buf[256] = {};
+       buf[0]=0xDE; buf[1]=0xAD; buf[2]=0xBE; buf[3]=0xEF;
+       ir::Context ctx; ctx.memory = buf; ctx.memory_size = 256;
+       ctx.gpr[6] = 0; ctx.gpr[7] = 100; ctx.gpr[1] = 4;
+       if (l) ir::execute(ctx, *l);
+       sem_total++; if (buf[100]==0xDE && buf[101]==0xAD && buf[102]==0xBE && buf[103]==0xEF) sem_pass++; else printf("    FAIL rep movsb\n");
+       sem_total++; if (ctx.gpr[1] == 0) sem_pass++; else printf("    FAIL rep movsb: RCX=%llu\n", (unsigned long long)ctx.gpr[1]);
     }
     printf("    Semantic: %d/%d\n", sem_pass, sem_total);
     CHECK(sem_pass == sem_total, "all semantic checks pass");
