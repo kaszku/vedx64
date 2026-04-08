@@ -18,8 +18,8 @@ and language bindings for Python and Rust.
 | **Decoder** | Decode raw bytes into structured `DecodedInstr` with full prefix, REX, VEX/EVEX, ModRM, SIB, displacement and immediate support |
 | **Encoder** | Re-encode a `DecodedInstr` back to machine code bytes |
 | **Disassembler** | Format instructions as Intel-syntax text with EVEX masking ({k1}{z}) and rounding ({rn-sae}) decorations |
-| **Emulator** | Execute instructions on a virtual `CpuState` with GPRs, RFLAGS, XMM/YMM/ZMM, x87 FPU, and byte-addressable memory. 638 mnemonic handlers |
-| **IR Lifter** | Lift instructions to a flat SSA-style intermediate representation with 47 IR opcodes. 831 mnemonic handlers covering ALU, SSE/AVX, BMI, AES-NI, SHA, x87, and system instructions |
+| **Emulator** | Execute instructions on a virtual `CpuState` with GPRs, RFLAGS, XMM/YMM/ZMM, x87 FPU, opmask, and byte-addressable memory |
+| **IR Lifter** | Lift instructions to a flat micro-op IR with 66 opcodes (SELECT, BITSEL, GET_DF, FADD..FMAX, POPCNT/CTZ/CLZ). RepMode for REP/REPZ/REPNZ loop semantics. Display functions (dump, op_str, varnode_str) |
 | **Assembler DSL** | Chainable `CodeGen` class: `e.mov(rax, 42).add(rax, rcx).ret();` with label support |
 | **Text Assembler** | Assemble Intel-syntax text to machine code: 585 mnemonics, memory/SIB, labels, prefixes, segments, XMM/ZMM/MMX, AVX-512 masking, directives (db/dw/dd/dq/times/align/equ), error reporting |
 | **Inline Hooking** | Handle-based API to install, enable, disable, and remove function hooks with trampoline generation (Windows + Linux) |
@@ -41,9 +41,8 @@ and language bindings for Python and Rust.
 | Decode coverage | 100% |
 | Assembler DSL methods | 1,580 |
 | Text assembler mnemonics | 585 |
-| IR lifter handlers | 831 mnemonics |
-| Emulator handlers | 638 mnemonics |
-| Test suites | 12 (4,500+ assertions) |
+| IR opcodes | 66 (SELECT, BITSEL, GET_DF, FADD..FMAX, POPCNT/CTZ/CLZ) |
+| Test suites | 11 (950+ assertions) |
 
 ## Quick Start
 
@@ -101,13 +100,30 @@ int main() {
 
 ```cpp
 #include <vedx64/ir.hpp>
+#include <cstdio>
 
-auto lifted = vedx64::ir::lift(code, len, 0x401000);
+// Lift a single instruction to IR micro-ops
+uint8_t code[] = {0x48, 0x01, 0xC8}; // add rax, rcx
+auto lifted = vedx64::ir::lift(code, sizeof(code));
 if (lifted) {
-    for (auto& op : lifted->ops) {
-        // op.opcode, op.output, op.inputs[0..2]
-    }
+    vedx64::ir::dump(*lifted);  // pretty-print IR ops
+    // Output:
+    //   ADD t30:8, RAX, RCX
+    //   ADD_FLAGS FLAGS, RAX, RCX
+    //   COPY RAX, t30:8
 }
+
+// Execute IR on an interpreter context
+vedx64::ir::Context ctx;
+ctx.gpr[0] = 10; ctx.gpr[1] = 32; // RAX=10, RCX=32
+vedx64::ir::execute(ctx, *lifted);
+printf("RAX = %llu\n", ctx.gpr[0]); // 42
+
+// REP string instructions use RepMode for loop semantics
+uint8_t rep_stos[] = {0xF3, 0xAA}; // rep stosb
+auto rep_l = vedx64::ir::lift(rep_stos, 2);
+// rep_l->rep == RepMode::Rep — interpreter loops automatically:
+// GET_DF t16, FLAGS; SELECT t16, t16, #-1, #1; STORE [1], RDI, AL; ADD RDI, RDI, t16
 ```
 
 ## AVX-512 / EVEX Example
@@ -218,7 +234,7 @@ loop:
 | `vedx64/encoding_id.hpp` | `EncodingId` typed enum (1396 unique encodings) |
 | `vedx64/codegen.hpp` | `CodeGen` assembler DSL with `Reg`, `Xmm`, `Mem` operand types and label support |
 | `vedx64/assembler.hpp` | `assemble()`, `assemble_block()` — 585 mnemonics, memory/SIB, labels, XMM/ZMM/MMX, AVX-512 `{k}{z}`, directives, error reporting |
-| `vedx64/ir.hpp` | `ir::Opcode` (47 opcodes), `VarNode` (GPR/XMM/Temp/RAM/Const), `Op`, `Lifted`, `lift()`, `execute()` |
+| `vedx64/ir.hpp` | `ir::Opcode` (66 opcodes incl. SELECT/BITSEL), `VarNode`, `Op`, `Lifted` (with RepMode), `lift()`, `execute()`, `dump()`, `op_str()`, `varnode_str()` |
 | `vedx64/emu.hpp` | `CpuState` (GPR, RFLAGS, XMM/YMM, x87, memory), `emu_init()`, `emu_step()`, `emu_run()`, `StepResult` |
 | `vedx64/relocation.hpp` | `can_relocate()`, `is_rip_relative()`, `relocate_instruction()`, `relocate_block()`, `calc_stolen_bytes()` |
 | `vedx64/branch_follow.hpp` | `FlowInfo`, `BasicBlock`, `classify_flow()`, `walk_basic_block()`, `walk_cfg()` |
@@ -341,10 +357,10 @@ including extensions:
 include/vedx64/       C++ headers (public API)
 lib/                  C++ implementation files
 tests/                Test executables (11 suites)
-examples/             Example programs (10 examples)
+examples/             Example programs (9 examples)
 python/               Python nanobind binding
 rust/                 Rust cxx binding crate
-tools/                instrgen corpus generator, standalone disassembler, standalone assembler
+tools/                instrgen, disassembler, assembler REPL, benchmark (with optional Capstone comparison)
 ```
 
 ## License
