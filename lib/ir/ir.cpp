@@ -2850,44 +2850,215 @@ void dump(const Lifted& lifted) {
 
 #include "vedx64/codegen.hpp"
 namespace vedx64 { namespace ir {
-static inline Reg ir_gpr(const VarNode& v) { return Reg{(uint8_t)(v.offset & 15), (uint16_t)(v.size*8)}; }
+static inline Reg ir_gpr(const VarNode& v) { return Reg{(uint8_t)(v.offset & 15), (uint8_t)(v.size*8)}; }
+static inline Xmm ir_xmm(const VarNode& v) { return Xmm{(uint8_t)(v.offset & 15)}; }
 bool emit(const Op& op, CodeGen& cg) {
-    auto is_gpr_reg = [](const VarNode& v) { return v.space == Space::GPR && (v.size==1||v.size==2||v.size==4||v.size==8); };
+    auto is_gpr = [](const VarNode& v) { return v.space == Space::GPR && (v.size==1||v.size==2||v.size==4||v.size==8); };
+    auto is_xmm = [](const VarNode& v) { return v.space == Space::XMM; };
+    auto is_const = [](const VarNode& v) { return v.space == Space::Const; };
+    auto is_flags = [](const VarNode& v) { return v.space == Space::Flags; };
+    auto same_gpr = [&](const VarNode& a, const VarNode& b) { return is_gpr(a) && is_gpr(b) && a.offset==b.offset && a.size==b.size; };
     switch (op.opcode) {
-    case Opcode::NOP:   cg.nop(); return true;
-    case Opcode::RET:   cg.ret(); return true;
-    case Opcode::UD2:   cg.db(0x0F).db(0x0B); return true;
+    case Opcode::NOP:     cg.nop(); return true;
+    case Opcode::RET:     cg.ret(); return true;
+    case Opcode::UD2:     cg.db(0x0F).db(0x0B); return true;
     case Opcode::SYSCALL: cg.db(0x0F).db(0x05); return true;
     case Opcode::RDTSC:   cg.db(0x0F).db(0x31); return true;
-    case Opcode::BARRIER: return true; // abstract fence, no emit
+    case Opcode::BARRIER: cg.db(0x0F).db(0xAE).db(0xF0); return true; // mfence
     case Opcode::COPY: {
-        if (is_gpr_reg(op.output) && is_gpr_reg(op.inputs[0]) && op.output.size == op.inputs[0].size) {
+        if (is_gpr(op.output) && is_gpr(op.inputs[0]) && op.output.size == op.inputs[0].size) {
             cg.mov(ir_gpr(op.output), ir_gpr(op.inputs[0])); return true;
         }
-        if (is_gpr_reg(op.output) && op.inputs[0].space == Space::Const) {
+        if (is_gpr(op.output) && is_const(op.inputs[0])) {
             cg.mov(ir_gpr(op.output), (int64_t)op.inputs[0].value); return true;
         }
         return false;
     }
-    case Opcode::ADD:
-    case Opcode::SUB:
-    case Opcode::AND:
-    case Opcode::OR:
-    case Opcode::XOR: {
-        if (!is_gpr_reg(op.output) || !is_gpr_reg(op.inputs[0]) || op.num_inputs < 2) return false;
-        if (op.output.offset != op.inputs[0].offset || op.output.size != op.inputs[0].size) return false;
+    case Opcode::ADD: case Opcode::SUB: case Opcode::AND:
+    case Opcode::OR:  case Opcode::XOR:
+    case Opcode::IMUL: {
+        if (op.num_inputs < 2 || !same_gpr(op.output, op.inputs[0])) return false;
         Reg d = ir_gpr(op.output);
-        if (is_gpr_reg(op.inputs[1]) && op.inputs[1].size == op.output.size) {
+        if (is_gpr(op.inputs[1]) && op.inputs[1].size == op.output.size) {
             Reg s = ir_gpr(op.inputs[1]);
             switch (op.opcode) {
-            case Opcode::ADD: cg.add(d, s); return true;
-            case Opcode::SUB: cg.sub(d, s); return true;
-            case Opcode::AND: cg.and_(d, s); return true;
-            case Opcode::OR:  cg.or_(d, s); return true;
-            case Opcode::XOR: cg.xor_(d, s); return true;
+            case Opcode::ADD:  cg.add(d, s);  return true;
+            case Opcode::SUB:  cg.sub(d, s);  return true;
+            case Opcode::AND:  cg.and_(d, s); return true;
+            case Opcode::OR:   cg.or_(d, s);  return true;
+            case Opcode::XOR:  cg.xor_(d, s); return true;
+            case Opcode::IMUL: cg.imul(d, s); return true;
             default: return false;
             }
         }
+        if (is_const(op.inputs[1])) {
+            int64_t imm = op.inputs[1].value;
+            switch (op.opcode) {
+            case Opcode::ADD:  cg.add(d, imm);  return true;
+            case Opcode::SUB:  cg.sub(d, imm);  return true;
+            case Opcode::AND:  cg.and_(d, imm); return true;
+            case Opcode::OR:   cg.or_(d, imm);  return true;
+            case Opcode::XOR:  cg.xor_(d, imm); return true;
+            case Opcode::IMUL: cg.imul(d, d, imm); return true;
+            default: return false;
+            }
+        }
+        return false;
+    }
+    case Opcode::NOT: case Opcode::NEG: case Opcode::BSWAP: {
+        if (!same_gpr(op.output, op.inputs[0])) return false;
+        Reg d = ir_gpr(op.output);
+        if (op.opcode == Opcode::NOT)   { cg.not_(d); return true; }
+        if (op.opcode == Opcode::NEG)   { cg.neg(d);  return true; }
+        if (op.opcode == Opcode::BSWAP) { if (d.bits < 32) return false; cg.bswap(d); return true; }
+        return false;
+    }
+    case Opcode::SHL: case Opcode::SHR: case Opcode::SAR:
+    case Opcode::ROL: case Opcode::ROR: {
+        if (!same_gpr(op.output, op.inputs[0]) || op.num_inputs < 2 || !is_const(op.inputs[1])) return false;
+        Reg d = ir_gpr(op.output); int64_t n = op.inputs[1].value;
+        switch (op.opcode) {
+        case Opcode::SHL: cg.shl(d, n); return true;
+        case Opcode::SHR: cg.shr(d, n); return true;
+        case Opcode::SAR: cg.sar(d, n); return true;
+        case Opcode::ROL: cg.rol(d, n); return true;
+        case Opcode::ROR: cg.ror(d, n); return true;
+        default: return false;
+        }
+    }
+    case Opcode::POPCNT: case Opcode::CTZ: case Opcode::CLZ: {
+        if (!is_gpr(op.output) || !is_gpr(op.inputs[0]) || op.output.size != op.inputs[0].size) return false;
+        if (op.output.size < 2) return false;
+        Reg d = ir_gpr(op.output), s = ir_gpr(op.inputs[0]);
+        if (op.opcode == Opcode::POPCNT) { cg.popcnt(d, s); return true; }
+        if (op.opcode == Opcode::CTZ)    { cg.tzcnt(d, s); return true; }
+        if (op.opcode == Opcode::CLZ)    { cg.lzcnt(d, s); return true; }
+        return false;
+    }
+    case Opcode::ZEXT: {
+        if (!is_gpr(op.output) || !is_gpr(op.inputs[0])) return false;
+        if (op.output.size <= op.inputs[0].size) return false;
+        Reg d = ir_gpr(op.output), s = ir_gpr(op.inputs[0]);
+        if (op.inputs[0].size == 4 && op.output.size == 8) {
+            Reg d32{d.id, (uint8_t)32}; cg.mov(d32, s); return true;
+        }
+        if (op.inputs[0].size == 1 || op.inputs[0].size == 2) { cg.movzx(d, s); return true; }
+        return false;
+    }
+    case Opcode::SEXT: {
+        if (!is_gpr(op.output) || !is_gpr(op.inputs[0])) return false;
+        if (op.output.size <= op.inputs[0].size) return false;
+        Reg d = ir_gpr(op.output), s = ir_gpr(op.inputs[0]);
+        if (op.inputs[0].size == 4 && op.output.size == 8) { cg.db(0x48).db(0x63).db(0xC0 | ((d.id & 7) << 3) | (s.id & 7)); return true; } // movsxd
+        if (op.inputs[0].size == 1 || op.inputs[0].size == 2) { cg.movsx(d, s); return true; }
+        return false;
+    }
+    case Opcode::TRUNC: {
+        if (!is_gpr(op.output) || !is_gpr(op.inputs[0])) return false;
+        if (op.output.size >= op.inputs[0].size) return false;
+        if (op.output.offset == op.inputs[0].offset) return true;
+        Reg d = ir_gpr(op.output); Reg s{(uint8_t)(op.inputs[0].offset & 15), (uint8_t)(op.output.size*8)};
+        cg.mov(d, s); return true;
+    }
+    case Opcode::BITCAST: {
+        if (op.output.size != op.inputs[0].size) return false;
+        if (is_gpr(op.output) && is_gpr(op.inputs[0])) {
+            if (op.output.offset == op.inputs[0].offset) return true;
+            cg.mov(ir_gpr(op.output), ir_gpr(op.inputs[0])); return true;
+        }
+        return false; // XMM↔GPR movq would need dedicated overloads
+    }
+    case Opcode::TEST: {
+        if (!is_flags(op.output) || op.num_inputs < 2) return false;
+        if (is_gpr(op.inputs[0]) && is_gpr(op.inputs[1]) && op.inputs[0].size == op.inputs[1].size) {
+            cg.test(ir_gpr(op.inputs[0]), ir_gpr(op.inputs[1])); return true;
+        }
+        return false;
+    }
+    case Opcode::CMP_EQ: case Opcode::CMP_NE: case Opcode::CMP_SLT:
+    case Opcode::CMP_ULT: case Opcode::CMP_SLE: case Opcode::CMP_ULE: {
+        if (!is_gpr(op.output) || !is_gpr(op.inputs[0]) || op.num_inputs < 2) return false;
+        if (!is_gpr(op.inputs[1]) || op.inputs[0].size != op.inputs[1].size) return false;
+        Reg dlow{(uint8_t)(op.output.offset & 15), (uint8_t)8};
+        Reg d = ir_gpr(op.output);
+        cg.xor_(d, d);
+        cg.cmp(ir_gpr(op.inputs[0]), ir_gpr(op.inputs[1]));
+        switch (op.opcode) {
+        case Opcode::CMP_EQ:  cg.setz(dlow);  return true;
+        case Opcode::CMP_NE:  cg.setnz(dlow); return true;
+        case Opcode::CMP_ULT: cg.setb(dlow);  return true;
+        case Opcode::CMP_ULE: cg.db(0x0F).db(0x96).db(0xC0 | (dlow.id & 7)); return true; // setbe
+        case Opcode::CMP_SLT: cg.db(0x0F).db(0x9C).db(0xC0 | (dlow.id & 7)); return true; // setl
+        case Opcode::CMP_SLE: cg.db(0x0F).db(0x9E).db(0xC0 | (dlow.id & 7)); return true; // setle
+        default: return false;
+        }
+    }
+    case Opcode::GET_CF: case Opcode::GET_ZF: case Opcode::GET_SF:
+    case Opcode::GET_OF: case Opcode::GET_PF: {
+        if (!is_gpr(op.output)) return false;
+        Reg dlow{(uint8_t)(op.output.offset & 15), (uint8_t)8};
+        switch (op.opcode) {
+        case Opcode::GET_CF: cg.setc(dlow); break;
+        case Opcode::GET_ZF: cg.setz(dlow); break;
+        case Opcode::GET_SF: cg.sets(dlow); break;
+        case Opcode::GET_OF: cg.seto(dlow); break;
+        case Opcode::GET_PF: cg.setp(dlow); break;
+        default: return false;
+        }
+        if (op.output.size > 1) cg.movzx(ir_gpr(op.output), dlow);
+        return true;
+    }
+    case Opcode::SET_CF: {
+        if (!is_const(op.inputs[0])) return false;
+        cg.db((op.inputs[0].value & 1) ? 0xF9 : 0xF8); return true; // stc/clc
+    }
+    case Opcode::SET_DF: {
+        if (!is_const(op.inputs[0])) return false;
+        cg.db((op.inputs[0].value & 1) ? 0xFD : 0xFC); return true; // std/cld
+    }
+    case Opcode::INDIRECT_JMP: {
+        if (!is_gpr(op.inputs[0]) || op.inputs[0].size != 8) return false;
+        cg.jmp(ir_gpr(op.inputs[0])); return true;
+    }
+    case Opcode::CALL: case Opcode::VCALL: {
+        if (is_gpr(op.inputs[0]) && op.inputs[0].size == 8) { cg.call(ir_gpr(op.inputs[0])); return true; }
+        return false; // direct call needs a Label
+    }
+    case Opcode::FADD: case Opcode::FSUB: case Opcode::FMUL:
+    case Opcode::FDIV: case Opcode::FMIN: case Opcode::FMAX: {
+        if (!is_xmm(op.output) || !is_xmm(op.inputs[0]) || op.num_inputs < 2 || !is_xmm(op.inputs[1])) return false;
+        if (op.output.offset != op.inputs[0].offset || op.output.size != op.inputs[0].size) return false;
+        Xmm d = ir_xmm(op.output), s = ir_xmm(op.inputs[1]);
+        uint8_t sz = op.output.size;
+        if (sz == 4) {
+            switch (op.opcode) {
+            case Opcode::FADD: cg.addss(d, s); return true;
+            case Opcode::FSUB: cg.subss(d, s); return true;
+            case Opcode::FMUL: cg.mulss(d, s); return true;
+            case Opcode::FDIV: cg.divss(d, s); return true;
+            case Opcode::FMIN: cg.minss(d, s); return true;
+            case Opcode::FMAX: cg.maxss(d, s); return true;
+            default: return false;
+            }
+        }
+        if (sz == 8) {
+            switch (op.opcode) {
+            case Opcode::FADD: cg.addsd(d, s); return true;
+            case Opcode::FSUB: cg.subsd(d, s); return true;
+            case Opcode::FMUL: cg.mulsd(d, s); return true;
+            case Opcode::FDIV: cg.divsd(d, s); return true;
+            case Opcode::FMIN: cg.minsd(d, s); return true;
+            case Opcode::FMAX: cg.maxsd(d, s); return true;
+            default: return false;
+            }
+        }
+        return false;
+    }
+    case Opcode::FSQRT: {
+        if (!is_xmm(op.output) || !is_xmm(op.inputs[0])) return false;
+        Xmm d = ir_xmm(op.output), s = ir_xmm(op.inputs[0]);
+        if (op.output.size == 4) { cg.sqrtss(d, s); return true; }
+        if (op.output.size == 8) { cg.sqrtsd(d, s); return true; }
         return false;
     }
     default: return false;
