@@ -311,6 +311,17 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
                 return true;
             }
         }
+        if (di.desc->has_modrm) {
+            VarNode tgt;
+            if (mod_ == 3) { tgt = reg_from_modrm_rm(di, 8); }
+            else {
+                VarNode ea = compute_ea(l, di);
+                tgt = VarNode::temp(30, 8);
+                l.ops.push_back(make_op3(Opcode::LOAD, tgt, ea, VarNode::ram(8)));
+            }
+            l.ops.push_back(make_op2(Opcode::INDIRECT_JMP, tgt, tgt));
+            return true;
+        }
         l.ops.push_back({Opcode::BRANCH});
         return true;
     }
@@ -559,7 +570,16 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         m == Mnemonic::MONITOR || m == Mnemonic::MWAIT || m == Mnemonic::XEND ||
         m == Mnemonic::XTEST || m == Mnemonic::XABORT ||
         m == Mnemonic::FWAIT || m == Mnemonic::FNOP || m == Mnemonic::EMMS) {
-        l.ops.push_back({Opcode::BARRIER});
+        if (m == Mnemonic::RDTSC || m == Mnemonic::RDTSCP)
+            l.ops.push_back(make_op2(Opcode::RDTSC, VarNode::gpr(0, 8), VarNode::constant(0, 8)));
+        else if (m == Mnemonic::SYSCALL || m == Mnemonic::SYSENTER || m == Mnemonic::INT || m == Mnemonic::INT1)
+            l.ops.push_back({Opcode::SYSCALL});
+        else
+            l.ops.push_back({Opcode::BARRIER});
+        return true;
+    }
+    if (m == Mnemonic::UD || m == Mnemonic::UD2 || m == Mnemonic::ICEBP) {
+        l.ops.push_back({Opcode::UD2});
         return true;
     }
 
@@ -2004,16 +2024,46 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
     }
 
     if (m == Mnemonic::KMOVB || m == Mnemonic::KMOVW || m == Mnemonic::KMOVD || m == Mnemonic::KMOVQ) {
-        l.ops.push_back({Opcode::NOP}); return true; // simplified: opmask move
+        uint8_t ksz = (m == Mnemonic::KMOVB) ? 1 : (m == Mnemonic::KMOVW) ? 2 : (m == Mnemonic::KMOVD) ? 4 : 8;
+        if (di.desc->has_modrm && ((di.modrm >> 6) & 3) == 3) {
+            VarNode dst = VarNode::opmask((di.modrm >> 3) & 7, ksz);
+            VarNode src = VarNode::opmask(di.modrm & 7, ksz);
+            l.ops.push_back(make_op2(Opcode::COPY, dst, src));
+            return true;
+        }
+        l.ops.push_back({Opcode::NOP}); return true;
     }
     if (m == Mnemonic::KANDW || m == Mnemonic::KANDD || m == Mnemonic::KANDQ || m == Mnemonic::KANDNW ||
         m == Mnemonic::KORW || m == Mnemonic::KORD || m == Mnemonic::KORQ ||
         m == Mnemonic::KXORW || m == Mnemonic::KXORD || m == Mnemonic::KXORQ ||
         m == Mnemonic::KNOTW || m == Mnemonic::KNOTD || m == Mnemonic::KNOTQ) {
-        l.ops.push_back({Opcode::NOP}); return true; // simplified: opmask logic
+        uint8_t ksz = (m==Mnemonic::KANDW||m==Mnemonic::KORW||m==Mnemonic::KXORW||m==Mnemonic::KNOTW||m==Mnemonic::KANDNW)?2:
+                      (m==Mnemonic::KANDD||m==Mnemonic::KORD||m==Mnemonic::KXORD||m==Mnemonic::KNOTD)?4:8;
+        if (di.desc->has_modrm) {
+            VarNode dst = VarNode::opmask((di.modrm >> 3) & 7, ksz);
+            VarNode src = VarNode::opmask(di.modrm & 7, ksz);
+            Opcode oc = Opcode::AND;
+            if (m==Mnemonic::KORW||m==Mnemonic::KORD||m==Mnemonic::KORQ) oc = Opcode::OR;
+            else if (m==Mnemonic::KXORW||m==Mnemonic::KXORD||m==Mnemonic::KXORQ) oc = Opcode::XOR;
+            else if (m==Mnemonic::KNOTW||m==Mnemonic::KNOTD||m==Mnemonic::KNOTQ) {
+                l.ops.push_back(make_op2(Opcode::NOT, dst, src)); return true;
+            }
+            l.ops.push_back(make_op3(oc, dst, dst, src));
+            return true;
+        }
+        l.ops.push_back({Opcode::NOP}); return true;
     }
     if (m == Mnemonic::KORTESTW || m == Mnemonic::KORTESTD || m == Mnemonic::KORTESTQ) {
-        l.ops.push_back({Opcode::NOP}); return true; // simplified: opmask test
+        uint8_t ksz = (m==Mnemonic::KORTESTW)?2:(m==Mnemonic::KORTESTD)?4:8;
+        if (di.desc->has_modrm) {
+            VarNode a = VarNode::opmask((di.modrm >> 3) & 7, ksz);
+            VarNode b = VarNode::opmask(di.modrm & 7, ksz);
+            VarNode t = VarNode::temp(30, ksz);
+            l.ops.push_back(make_op3(Opcode::OR, t, a, b));
+            l.ops.push_back(make_op3(Opcode::AND_FLAGS, VarNode::flags(), t, t));
+            return true;
+        }
+        l.ops.push_back({Opcode::NOP}); return true;
     }
     if (m == Mnemonic::KUNPCKBW || m == Mnemonic::KUNPCKWD || m == Mnemonic::KUNPCKDQ ||
         m == Mnemonic::KSHIFTRW || m == Mnemonic::KSHIFTLW) {
@@ -2464,6 +2514,7 @@ static void execute_once(Context& ctx, const Lifted& lifted) {
         case Space::Temp: return temps[v.offset & 31];
         case Space::Flags: return ctx.flags[0];
         case Space::XMM: { uint64_t val = 0; memcpy(&val, &ctx.xmm[v.offset & 15][0], v.size < 8 ? v.size : 8); return val; }
+        case Space::OpMask: return ctx.opmask[v.offset & 7];
         default: return 0;
         }
     };
@@ -2480,6 +2531,10 @@ static void execute_once(Context& ctx, const Lifted& lifted) {
         case Space::Temp: temps[v.offset & 31] = val; break;
         case Space::Flags: ctx.flags[0] = (uint8_t)val; break;
         case Space::XMM: memcpy(&ctx.xmm[v.offset & 15][0], &val, v.size < 8 ? v.size : 8); break;
+        case Space::OpMask: {
+            uint64_t mask = v.size >= 8 ? ~0ULL : ((1ULL << (v.size*8)) - 1);
+            ctx.opmask[v.offset & 7] = val & mask; break;
+        }
         default: break;
         }
     };
@@ -2582,6 +2637,54 @@ static void execute_once(Context& ctx, const Lifted& lifted) {
         case Opcode::CMP_SLE: write_var(op.output, (int64_t)a <= (int64_t)b ? 1 : 0); break;
         case Opcode::SELECT: { uint64_t c = read_var(op.inputs[2]); write_var(op.output, a ? b : c); break; }
         case Opcode::BITSEL: { uint64_t c = read_var(op.inputs[2]); write_var(op.output, (b & a) | (c & ~a)); break; }
+        case Opcode::LEA: write_var(op.output, a); break;
+        case Opcode::MOD: write_var(op.output, b ? a % b : 0); break;
+        case Opcode::SMOD: write_var(op.output, b ? (uint64_t)((int64_t)a % (int64_t)b) : 0); break;
+        case Opcode::BSWAP: {
+            uint8_t sz = op.output.size;
+            uint64_t r = 0;
+            for (uint8_t i = 0; i < sz; i++) r |= ((a >> (i*8)) & 0xFF) << ((sz-1-i)*8);
+            write_var(op.output, r); break;
+        }
+        case Opcode::BITREV: {
+            uint8_t sz = op.output.size; uint64_t r = 0;
+            for (uint8_t i = 0; i < sz*8; i++) if ((a >> i) & 1) r |= 1ULL << (sz*8-1-i);
+            write_var(op.output, r); break;
+        }
+        case Opcode::TEST: {
+            uint64_t res = a & b;
+            ctx.flags[0] = 0; ctx.flags[4] = 0;
+            ctx.flags[1] = (uint8_t)(popcnt64(res & 0xFF) % 2 == 0 ? 1 : 0);
+            ctx.flags[2] = (res == 0) ? 1 : 0;
+            ctx.flags[3] = (res >> 63) ? 1 : 0;
+            break;
+        }
+        case Opcode::EXTRACT: {
+            uint8_t lo = (uint8_t)b; uint8_t wid = (uint8_t)read_var(op.inputs[2]);
+            uint64_t mask = wid >= 64 ? ~0ULL : ((1ULL << wid) - 1);
+            write_var(op.output, (a >> lo) & mask); break;
+        }
+        case Opcode::INSERT: {
+            uint64_t pack = read_var(op.inputs[2]);
+            uint8_t lo = (uint8_t)(pack & 0xFF); uint8_t wid = (uint8_t)((pack >> 8) & 0xFF);
+            uint64_t mask = wid >= 64 ? ~0ULL : ((1ULL << wid) - 1);
+            write_var(op.output, (a & ~(mask << lo)) | ((b & mask) << lo)); break;
+        }
+        case Opcode::CONCAT: write_var(op.output, (a << (op.inputs[1].size*8)) | b); break;
+        case Opcode::BITCAST: write_var(op.output, a); break;
+        case Opcode::I2F: case Opcode::F2I: case Opcode::F2F:
+            write_var(op.output, a); break;
+        case Opcode::INDIRECT_JMP: ctx.rip = a; return;
+        case Opcode::VCALL: ctx.rip = a; return;
+        case Opcode::UD2: ctx.halted = true; return;
+        case Opcode::RDTSC: write_var(op.output, 0); break;
+        case Opcode::SYSCALL: break; // host-specific, no-op in pure interp
+        case Opcode::VADD: case Opcode::VSUB: case Opcode::VMUL:
+        case Opcode::VAND: case Opcode::VOR: case Opcode::VXOR:
+        case Opcode::VSHL: case Opcode::VSHR: case Opcode::VCMP:
+        case Opcode::VEXTRACT_ELEM: case Opcode::VINSERT_ELEM: case Opcode::VBROADCAST:
+        case Opcode::ARCH_X64:
+            write_var(op.output, a); break; // placeholder
         default: break;
         }
     }
@@ -2597,6 +2700,7 @@ const char* opcode_name(Opcode opc) {
     case Opcode::COPY: return "COPY";
     case Opcode::LOAD: return "LOAD";
     case Opcode::STORE: return "STORE";
+    case Opcode::LEA: return "LEA";
     case Opcode::ADD: return "ADD";
     case Opcode::SUB: return "SUB";
     case Opcode::MUL: return "MUL";
@@ -2604,6 +2708,8 @@ const char* opcode_name(Opcode opc) {
     case Opcode::DIV: return "DIV";
     case Opcode::IDIV: return "IDIV";
     case Opcode::NEG: return "NEG";
+    case Opcode::MOD: return "MOD";
+    case Opcode::SMOD: return "SMOD";
     case Opcode::AND: return "AND";
     case Opcode::OR: return "OR";
     case Opcode::XOR: return "XOR";
@@ -2613,6 +2719,13 @@ const char* opcode_name(Opcode opc) {
     case Opcode::SAR: return "SAR";
     case Opcode::ROL: return "ROL";
     case Opcode::ROR: return "ROR";
+    case Opcode::BSWAP: return "BSWAP";
+    case Opcode::BITREV: return "BITREV";
+    case Opcode::TEST: return "TEST";
+    case Opcode::EXTRACT: return "EXTRACT";
+    case Opcode::INSERT: return "INSERT";
+    case Opcode::CONCAT: return "CONCAT";
+    case Opcode::BITCAST: return "BITCAST";
     case Opcode::CMP_EQ: return "CMP_EQ";
     case Opcode::CMP_NE: return "CMP_NE";
     case Opcode::CMP_SLT: return "CMP_SLT";
@@ -2624,6 +2737,9 @@ const char* opcode_name(Opcode opc) {
     case Opcode::ZEXT: return "ZEXT";
     case Opcode::SEXT: return "SEXT";
     case Opcode::TRUNC: return "TRUNC";
+    case Opcode::I2F: return "I2F";
+    case Opcode::F2I: return "F2I";
+    case Opcode::F2F: return "F2F";
     case Opcode::ADD_FLAGS: return "ADD_FLAGS";
     case Opcode::SUB_FLAGS: return "SUB_FLAGS";
     case Opcode::AND_FLAGS: return "AND_FLAGS";
@@ -2641,7 +2757,9 @@ const char* opcode_name(Opcode opc) {
     case Opcode::SET_DF: return "SET_DF";
     case Opcode::BRANCH: return "BRANCH";
     case Opcode::CBRANCH: return "CBRANCH";
+    case Opcode::INDIRECT_JMP: return "INDIRECT_JMP";
     case Opcode::CALL: return "CALL";
+    case Opcode::VCALL: return "VCALL";
     case Opcode::RET: return "RET";
     case Opcode::POPCNT: return "POPCNT";
     case Opcode::CTZ: return "CTZ";
@@ -2653,9 +2771,25 @@ const char* opcode_name(Opcode opc) {
     case Opcode::FSQRT: return "FSQRT";
     case Opcode::FMIN: return "FMIN";
     case Opcode::FMAX: return "FMAX";
+    case Opcode::VADD: return "VADD";
+    case Opcode::VSUB: return "VSUB";
+    case Opcode::VMUL: return "VMUL";
+    case Opcode::VAND: return "VAND";
+    case Opcode::VOR: return "VOR";
+    case Opcode::VXOR: return "VXOR";
+    case Opcode::VSHL: return "VSHL";
+    case Opcode::VSHR: return "VSHR";
+    case Opcode::VCMP: return "VCMP";
+    case Opcode::VEXTRACT_ELEM: return "VEXTRACT_ELEM";
+    case Opcode::VINSERT_ELEM: return "VINSERT_ELEM";
+    case Opcode::VBROADCAST: return "VBROADCAST";
+    case Opcode::RDTSC: return "RDTSC";
+    case Opcode::SYSCALL: return "SYSCALL";
+    case Opcode::UD2: return "UD2";
     case Opcode::NOP: return "NOP";
     case Opcode::UNDEF: return "UNDEF";
     case Opcode::BARRIER: return "BARRIER";
+    case Opcode::ARCH_X64: return "ARCH_X64";
     default: return "???";
     }
 }
@@ -2676,6 +2810,7 @@ std::string varnode_str(const VarNode& v) {
     case Space::MMX: snprintf(buf, sizeof(buf), "MMX%d", v.offset); return buf;
     case Space::Seg: snprintf(buf, sizeof(buf), "SEG%d", v.offset); return buf;
     case Space::RAM: snprintf(buf, sizeof(buf), "[%d]", v.size); return buf;
+    case Space::OpMask: snprintf(buf, sizeof(buf), "K%d:%d", v.offset, v.size); return buf;
     default: return "???";
     }
 }
@@ -2712,4 +2847,51 @@ void dump(const Lifted& lifted) {
 
 } // namespace ir
 } // namespace vedx64
+
+#include "vedx64/codegen.hpp"
+namespace vedx64 { namespace ir {
+static inline Reg ir_gpr(const VarNode& v) { return Reg{(uint8_t)(v.offset & 15), (uint16_t)(v.size*8)}; }
+bool emit(const Op& op, CodeGen& cg) {
+    auto is_gpr_reg = [](const VarNode& v) { return v.space == Space::GPR && (v.size==1||v.size==2||v.size==4||v.size==8); };
+    switch (op.opcode) {
+    case Opcode::NOP:   cg.nop(); return true;
+    case Opcode::RET:   cg.ret(); return true;
+    case Opcode::UD2:   cg.db(0x0F).db(0x0B); return true;
+    case Opcode::SYSCALL: cg.db(0x0F).db(0x05); return true;
+    case Opcode::RDTSC:   cg.db(0x0F).db(0x31); return true;
+    case Opcode::BARRIER: return true; // abstract fence, no emit
+    case Opcode::COPY: {
+        if (is_gpr_reg(op.output) && is_gpr_reg(op.inputs[0]) && op.output.size == op.inputs[0].size) {
+            cg.mov(ir_gpr(op.output), ir_gpr(op.inputs[0])); return true;
+        }
+        if (is_gpr_reg(op.output) && op.inputs[0].space == Space::Const) {
+            cg.mov(ir_gpr(op.output), (int64_t)op.inputs[0].value); return true;
+        }
+        return false;
+    }
+    case Opcode::ADD:
+    case Opcode::SUB:
+    case Opcode::AND:
+    case Opcode::OR:
+    case Opcode::XOR: {
+        if (!is_gpr_reg(op.output) || !is_gpr_reg(op.inputs[0]) || op.num_inputs < 2) return false;
+        if (op.output.offset != op.inputs[0].offset || op.output.size != op.inputs[0].size) return false;
+        Reg d = ir_gpr(op.output);
+        if (is_gpr_reg(op.inputs[1]) && op.inputs[1].size == op.output.size) {
+            Reg s = ir_gpr(op.inputs[1]);
+            switch (op.opcode) {
+            case Opcode::ADD: cg.add(d, s); return true;
+            case Opcode::SUB: cg.sub(d, s); return true;
+            case Opcode::AND: cg.and_(d, s); return true;
+            case Opcode::OR:  cg.or_(d, s); return true;
+            case Opcode::XOR: cg.xor_(d, s); return true;
+            default: return false;
+            }
+        }
+        return false;
+    }
+    default: return false;
+    }
+}
+} }
 #endif // VEDX64_IR

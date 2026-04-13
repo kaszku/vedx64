@@ -37,4 +37,19 @@ bool relocate_block(
 /// Returns 0 if instructions cannot be decoded.
 size_t calc_stolen_bytes(const uint8_t* code, size_t min_bytes, size_t max_stolen = 256);
 
+/// Emit a conditional jump to an absolute target, with automatic fallback for out-of-range.
+/// cc is the Jcc condition opcode byte for the 0F 8x form (e.g. 0x84 = JE, 0x85 = JNE).
+/// If target fits in rel32 from src_addr: emits `0F 8x rel32` (6 bytes).
+/// Otherwise: emits inverted short Jcc over an indirect JMP [rip+0] + qword target (16 bytes).
+/// Returns bytes written into out_buf (must be >=16 bytes). Returns 0 on error.
+size_t emit_long_jcc(uint8_t cc, uintptr_t src_addr, uintptr_t target,
+                     uint8_t* out_buf, size_t out_cap);
+
+/// Detect a jump-table dispatch pattern at `code` of length `len`.
+/// Recognizes the common form: `LEA base, [rip+disp]; JMP [base+idx*8]` or `JMP [rip+disp+idx*scale]`.
+/// On success, fills in `table_addr` (address of the jump table) and `entry_size` (4 or 8).
+/// Returns true if pattern recognized.
+bool detect_jump_table(const uint8_t* code, size_t len, uintptr_t addr,
+                       uintptr_t* table_addr, uint8_t* entry_size);
+
 } // namespace vedx64

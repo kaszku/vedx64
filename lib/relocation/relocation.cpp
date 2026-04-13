@@ -3,6 +3,8 @@
 
 #include "vedx64/relocation.hpp"
 #include <cstring>
+#include <climits>
+#include "vedx64/mnemonic.hpp"
 
 namespace vedx64 {
 
@@ -97,6 +99,49 @@ bool relocate_instruction(
     *out_len = insn_len;
     size_t dummy_count = 0;
     return relocate_block(out_buf, insn_len, old_addr, &dummy_count);
+}
+
+size_t emit_long_jcc(uint8_t cc, uintptr_t src_addr, uintptr_t target,
+                     uint8_t* out_buf, size_t out_cap) {
+    if (!out_buf || out_cap < 6) return 0;
+    int64_t rel = (int64_t)target - (int64_t)(src_addr + 6);
+    if (rel >= INT32_MIN && rel <= INT32_MAX) {
+        out_buf[0] = 0x0F; out_buf[1] = cc;
+        int32_t r32 = (int32_t)rel;
+        memcpy(out_buf + 2, &r32, 4);
+        return 6;
+    }
+    if (out_cap < 16) return 0;
+    uint8_t inv = (uint8_t)(cc ^ 0x01);
+    out_buf[0] = (uint8_t)(0x70 | (inv & 0x0F));
+    out_buf[1] = 0x0E;
+    out_buf[2] = 0xFF; out_buf[3] = 0x25;
+    uint32_t disp = 0; memcpy(out_buf + 4, &disp, 4);
+    uint64_t abs_tgt = (uint64_t)target; memcpy(out_buf + 8, &abs_tgt, 8);
+    return 16;
+}
+
+bool detect_jump_table(const uint8_t* code, size_t len, uintptr_t addr,
+                       uintptr_t* table_addr, uint8_t* entry_size) {
+    if (!code || len == 0) return false;
+    DecodedInstr di1; size_t n1 = decode(code, len, di1); if (n1 == 0) return false;
+    if (di1.desc && di1.desc->mnemonic == Mnemonic::JMP && di1.desc->has_modrm) {
+        uint8_t mb = di1.modrm;
+        size_t modrm_off = di1.num_prefixes + (di1.rex ? 1 : 0) + (di1.desc->opcode > 0xFF ? 2 : 1);
+        if ((mb >> 6) == 0 && (mb & 7) == 4 && modrm_off + 1 < n1) {
+            uint8_t sib = code[modrm_off + 1];
+            if (entry_size) *entry_size = (uint8_t)(1 << ((sib >> 6) & 3));
+            if (table_addr) *table_addr = 0;
+            return true;
+        }
+        if ((mb >> 6) == 0 && (mb & 7) == 5 && modrm_off + 5 <= n1) {
+            int32_t d; memcpy(&d, code + modrm_off + 1, 4);
+            if (table_addr) *table_addr = (uintptr_t)((int64_t)(addr + n1) + d);
+            if (entry_size) *entry_size = 8;
+            return true;
+        }
+    }
+    return false;
 }
 
 size_t calc_stolen_bytes(const uint8_t* code, size_t min_bytes, size_t max_stolen) {

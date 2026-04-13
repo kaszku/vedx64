@@ -16,6 +16,7 @@ enum class Opcode : uint8_t {
     COPY,
     LOAD,
     STORE,
+    LEA,
     ADD,
     SUB,
     MUL,
@@ -23,6 +24,8 @@ enum class Opcode : uint8_t {
     DIV,
     IDIV,
     NEG,
+    MOD,
+    SMOD,
     AND,
     OR,
     XOR,
@@ -32,6 +35,13 @@ enum class Opcode : uint8_t {
     SAR,
     ROL,
     ROR,
+    BSWAP,
+    BITREV,
+    TEST,
+    EXTRACT,
+    INSERT,
+    CONCAT,
+    BITCAST,
     CMP_EQ,
     CMP_NE,
     CMP_SLT,
@@ -43,6 +53,9 @@ enum class Opcode : uint8_t {
     ZEXT,
     SEXT,
     TRUNC,
+    I2F,
+    F2I,
+    F2F,
     ADD_FLAGS,
     SUB_FLAGS,
     AND_FLAGS,
@@ -60,7 +73,9 @@ enum class Opcode : uint8_t {
     SET_DF,
     BRANCH,
     CBRANCH,
+    INDIRECT_JMP,
     CALL,
+    VCALL,
     RET,
     POPCNT,
     CTZ,
@@ -72,9 +87,25 @@ enum class Opcode : uint8_t {
     FSQRT,
     FMIN,
     FMAX,
+    VADD,
+    VSUB,
+    VMUL,
+    VAND,
+    VOR,
+    VXOR,
+    VSHL,
+    VSHR,
+    VCMP,
+    VEXTRACT_ELEM,
+    VINSERT_ELEM,
+    VBROADCAST,
+    RDTSC,
+    SYSCALL,
+    UD2,
     NOP,
     UNDEF,
     BARRIER,
+    ARCH_X64,
 };
 
 /// Address space for IR variables.
@@ -87,6 +118,7 @@ enum class Space : uint8_t {
     MMX,
     Seg,
     RAM,
+    OpMask,
 };
 
 /// A variable/location in the IR.
@@ -102,6 +134,7 @@ struct VarNode {
     static VarNode temp(uint16_t id, uint8_t sz) { return {Space::Temp, id, sz, 0}; }
     static VarNode flags() { return {Space::Flags, 0, 1, 0}; }
     static VarNode ram(uint8_t sz) { return {Space::RAM, 0, sz, 0}; }
+    static VarNode opmask(uint16_t k, uint8_t sz) { return {Space::OpMask, k, sz, 0}; }
 };
 
 /// A single IR micro-operation.
@@ -139,6 +172,7 @@ std::optional<Lifted> lift(const uint8_t* code, size_t len, uint64_t address = 0
 struct Context {
     uint64_t gpr[16] = {};       ///< RAX=0, RCX=1, ..., R15=15
     uint8_t xmm[16][16] = {};    ///< XMM0-XMM15, 128-bit each
+    uint64_t opmask[8] = {};     ///< K0-K7 opmask registers (AVX-512)
     uint8_t flags[7] = {};        ///< CF=0, PF=1, ZF=2, SF=3, OF=4, AF=5, DF=6
     uint64_t rip = 0;
     uint8_t* memory = nullptr;
@@ -148,6 +182,18 @@ struct Context {
 
 /// Execute a single lifted instruction on the given context.
 void execute(Context& ctx, const Lifted& lifted);
+
+} // namespace ir
+} // namespace vedx64
+// Forward-declare CodeGen for lowering API.
+namespace vedx64 { class CodeGen; }
+namespace vedx64 { namespace ir {
+
+/// Lower a single IR op to x86-64 bytes using the given CodeGen.
+/// Returns true on success, false if the op has no direct lowering.
+/// Currently supports: COPY, ADD, SUB, AND, OR, XOR, LOAD, STORE, NOP, RET (for GPR operands).
+/// Most ops — especially flag/vector/FP — return false; callers must keep original bytes.
+bool emit(const Op& op, CodeGen& cg);
 
 #ifdef VEDX64_STRINGS
 #include <string>
