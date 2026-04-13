@@ -40,6 +40,74 @@ Op make_op4(Opcode opc, VarNode dst, VarNode s0, VarNode s1, VarNode s2) {
     return op;
 }
 
+VarNode emit_jcc_cond(std::vector<Op>& ops, Mnemonic m) {
+    VarNode cond = VarNode::temp(40, 1);
+    auto invert = [&](VarNode& c) {
+        VarNode nc = VarNode::temp(41, 1);
+        ops.push_back(make_op3(Opcode::XOR, nc, c, VarNode::constant(1, 1))); c = nc;
+    };
+    switch (m) {
+    case Mnemonic::JZ: case Mnemonic::JE:
+        ops.push_back(make_op2(Opcode::GET_ZF, cond, VarNode::flags())); break;
+    case Mnemonic::JNZ: case Mnemonic::JNE:
+        ops.push_back(make_op2(Opcode::GET_ZF, cond, VarNode::flags())); invert(cond); break;
+    case Mnemonic::JB: case Mnemonic::JC: case Mnemonic::JNAE:
+        ops.push_back(make_op2(Opcode::GET_CF, cond, VarNode::flags())); break;
+    case Mnemonic::JNB: case Mnemonic::JNC: case Mnemonic::JAE:
+        ops.push_back(make_op2(Opcode::GET_CF, cond, VarNode::flags())); invert(cond); break;
+    case Mnemonic::JS:
+        ops.push_back(make_op2(Opcode::GET_SF, cond, VarNode::flags())); break;
+    case Mnemonic::JNS:
+        ops.push_back(make_op2(Opcode::GET_SF, cond, VarNode::flags())); invert(cond); break;
+    case Mnemonic::JO:
+        ops.push_back(make_op2(Opcode::GET_OF, cond, VarNode::flags())); break;
+    case Mnemonic::JNO:
+        ops.push_back(make_op2(Opcode::GET_OF, cond, VarNode::flags())); invert(cond); break;
+    case Mnemonic::JP: case Mnemonic::JPE:
+        ops.push_back(make_op2(Opcode::GET_PF, cond, VarNode::flags())); break;
+    case Mnemonic::JNP: case Mnemonic::JPO:
+        ops.push_back(make_op2(Opcode::GET_PF, cond, VarNode::flags())); invert(cond); break;
+    case Mnemonic::JBE: case Mnemonic::JNA: {
+        VarNode cf = VarNode::temp(42,1), zf = VarNode::temp(43,1);
+        ops.push_back(make_op2(Opcode::GET_CF, cf, VarNode::flags()));
+        ops.push_back(make_op2(Opcode::GET_ZF, zf, VarNode::flags()));
+        ops.push_back(make_op3(Opcode::OR, cond, cf, zf)); break; }
+    case Mnemonic::JNBE: case Mnemonic::JA: {
+        VarNode cf = VarNode::temp(42,1), zf = VarNode::temp(43,1);
+        ops.push_back(make_op2(Opcode::GET_CF, cf, VarNode::flags()));
+        ops.push_back(make_op2(Opcode::GET_ZF, zf, VarNode::flags()));
+        ops.push_back(make_op3(Opcode::OR, cond, cf, zf)); invert(cond); break; }
+    case Mnemonic::JL: case Mnemonic::JNGE: {
+        VarNode sf = VarNode::temp(42,1), of = VarNode::temp(43,1);
+        ops.push_back(make_op2(Opcode::GET_SF, sf, VarNode::flags()));
+        ops.push_back(make_op2(Opcode::GET_OF, of, VarNode::flags()));
+        ops.push_back(make_op3(Opcode::XOR, cond, sf, of)); break; }
+    case Mnemonic::JNL: case Mnemonic::JGE: {
+        VarNode sf = VarNode::temp(42,1), of = VarNode::temp(43,1);
+        ops.push_back(make_op2(Opcode::GET_SF, sf, VarNode::flags()));
+        ops.push_back(make_op2(Opcode::GET_OF, of, VarNode::flags()));
+        ops.push_back(make_op3(Opcode::XOR, cond, sf, of)); invert(cond); break; }
+    case Mnemonic::JLE: case Mnemonic::JNG: {
+        VarNode sf = VarNode::temp(42,1), of = VarNode::temp(43,1), zf = VarNode::temp(44,1);
+        VarNode ne = VarNode::temp(45,1);
+        ops.push_back(make_op2(Opcode::GET_SF, sf, VarNode::flags()));
+        ops.push_back(make_op2(Opcode::GET_OF, of, VarNode::flags()));
+        ops.push_back(make_op2(Opcode::GET_ZF, zf, VarNode::flags()));
+        ops.push_back(make_op3(Opcode::XOR, ne, sf, of));
+        ops.push_back(make_op3(Opcode::OR, cond, zf, ne)); break; }
+    case Mnemonic::JNLE: case Mnemonic::JG: {
+        VarNode sf = VarNode::temp(42,1), of = VarNode::temp(43,1), zf = VarNode::temp(44,1);
+        VarNode ne = VarNode::temp(45,1);
+        ops.push_back(make_op2(Opcode::GET_SF, sf, VarNode::flags()));
+        ops.push_back(make_op2(Opcode::GET_OF, of, VarNode::flags()));
+        ops.push_back(make_op2(Opcode::GET_ZF, zf, VarNode::flags()));
+        ops.push_back(make_op3(Opcode::XOR, ne, sf, of));
+        ops.push_back(make_op3(Opcode::OR, cond, zf, ne)); invert(cond); break; }
+    default: ops.push_back(make_op2(Opcode::COPY, cond, VarNode::constant(1, 1))); break;
+    }
+    return cond;
+}
+
 uint8_t op_size_bytes(OpSize sz, bool rex_w, bool has_66) {
     switch (sz) {
     case OpSize::Byte: return 1;
@@ -508,7 +576,8 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
             if (di.desc->operands[i].addr == AddrMode::RelOffset) {
                 VarNode target = VarNode::constant((int64_t)(address + n + di.immediate), 8);
                 VarNode fallthrough = VarNode::constant((int64_t)(address + n), 8);
-                l.ops.push_back(make_op3(Opcode::CBRANCH, target, target, fallthrough));
+                VarNode cond = emit_jcc_cond(l.ops, m);
+                l.ops.push_back(make_op4(Opcode::CBRANCH, target, cond, target, fallthrough));
                 return true;
             }
         }
@@ -1018,7 +1087,22 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
             if (di.desc->operands[i].addr == AddrMode::RelOffset) {
                 VarNode target = VarNode::constant((int64_t)(address + n + di.immediate), 8);
                 VarNode fallthrough = VarNode::constant((int64_t)(address + n), 8);
-                l.ops.push_back(make_op3(Opcode::CBRANCH, target, target, fallthrough));
+                VarNode cond = VarNode::temp(46, 1);
+                l.ops.push_back(make_op3(Opcode::CMP_NE, cond, rcx, VarNode::constant(0, 8)));
+                if (m == Mnemonic::LOOPE || m == Mnemonic::LOOPZ) {
+                    VarNode zf = VarNode::temp(47, 1);
+                    l.ops.push_back(make_op2(Opcode::GET_ZF, zf, VarNode::flags()));
+                    VarNode c2 = VarNode::temp(48, 1);
+                    l.ops.push_back(make_op3(Opcode::AND, c2, cond, zf)); cond = c2;
+                } else if (m == Mnemonic::LOOPNE || m == Mnemonic::LOOPNZ) {
+                    VarNode zf = VarNode::temp(47, 1);
+                    l.ops.push_back(make_op2(Opcode::GET_ZF, zf, VarNode::flags()));
+                    VarNode nz = VarNode::temp(48, 1);
+                    l.ops.push_back(make_op3(Opcode::XOR, nz, zf, VarNode::constant(1, 1)));
+                    VarNode c2 = VarNode::temp(49, 1);
+                    l.ops.push_back(make_op3(Opcode::AND, c2, cond, nz)); cond = c2;
+                }
+                l.ops.push_back(make_op4(Opcode::CBRANCH, target, cond, target, fallthrough));
                 return true;
             }
         }
@@ -1774,7 +1858,8 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
             if (di.desc->operands[i].addr == AddrMode::RelOffset) {
                 VarNode target = VarNode::constant((int64_t)(address + n + di.immediate), 8);
                 VarNode fallthrough = VarNode::constant((int64_t)(address + n), 8);
-                l.ops.push_back(make_op3(Opcode::CBRANCH, target, target, fallthrough));
+                VarNode cond = emit_jcc_cond(l.ops, m);
+                l.ops.push_back(make_op4(Opcode::CBRANCH, target, cond, target, fallthrough));
                 return true;
             }
         }
