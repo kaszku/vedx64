@@ -2680,11 +2680,68 @@ static void execute_once(Context& ctx, const Lifted& lifted) {
         case Opcode::RDTSC: write_var(op.output, 0); break;
         case Opcode::SYSCALL: break; // host-specific, no-op in pure interp
         case Opcode::VADD: case Opcode::VSUB: case Opcode::VMUL:
-        case Opcode::VAND: case Opcode::VOR: case Opcode::VXOR:
-        case Opcode::VSHL: case Opcode::VSHR: case Opcode::VCMP:
-        case Opcode::VEXTRACT_ELEM: case Opcode::VINSERT_ELEM: case Opcode::VBROADCAST:
+        case Opcode::VAND: case Opcode::VOR:  case Opcode::VXOR:
+        case Opcode::VSHL: case Opcode::VSHR: case Opcode::VCMP: {
+            if (op.output.space == Space::XMM && op.inputs[0].space == Space::XMM && op.inputs[1].space == Space::XMM) {
+                uint8_t lw = (op.num_inputs >= 3 && op.inputs[2].space == Space::Const && op.inputs[2].value > 0 && op.inputs[2].value <= 8) ? (uint8_t)op.inputs[2].value : 4;
+                const uint8_t* pa = &ctx.xmm[op.inputs[0].offset & 15][0];
+                const uint8_t* pb = &ctx.xmm[op.inputs[1].offset & 15][0];
+                uint8_t* pd = &ctx.xmm[op.output.offset & 15][0];
+                for (uint8_t i = 0; i < 16; i += lw) {
+                    uint64_t va = 0, vb = 0; memcpy(&va, pa + i, lw); memcpy(&vb, pb + i, lw);
+                    uint64_t vr = 0;
+                    switch (op.opcode) {
+                    case Opcode::VADD: vr = va + vb; break;
+                    case Opcode::VSUB: vr = va - vb; break;
+                    case Opcode::VMUL: vr = va * vb; break;
+                    case Opcode::VAND: vr = va & vb; break;
+                    case Opcode::VOR:  vr = va | vb; break;
+                    case Opcode::VXOR: vr = va ^ vb; break;
+                    case Opcode::VSHL: vr = va << (vb & (lw*8-1)); break;
+                    case Opcode::VSHR: vr = va >> (vb & (lw*8-1)); break;
+                    case Opcode::VCMP: vr = (va == vb) ? ~0ULL : 0ULL; break;
+                    default: break;
+                    }
+                    uint64_t mask = (lw >= 8) ? ~0ULL : ((1ULL << (lw*8)) - 1);
+                    uint64_t cur = 0; memcpy(&cur, pd + i, lw);
+                    cur = (cur & ~mask) | (vr & mask);
+                    memcpy(pd + i, &cur, lw);
+                }
+            } else { write_var(op.output, a); }
+            break;
+        }
+        case Opcode::VEXTRACT_ELEM: {
+            if (op.inputs[0].space == Space::XMM && op.num_inputs >= 2 && op.inputs[1].space == Space::Const) {
+                uint8_t lw = op.output.size ? op.output.size : 4;
+                size_t off = (size_t)(op.inputs[1].value * lw);
+                if (off + lw <= 16) {
+                    uint64_t v = 0; memcpy(&v, &ctx.xmm[op.inputs[0].offset & 15][off], lw);
+                    write_var(op.output, v);
+                }
+            } else { write_var(op.output, a); }
+            break;
+        }
+        case Opcode::VINSERT_ELEM: {
+            if (op.output.space == Space::XMM && op.inputs[0].space == Space::XMM && op.num_inputs >= 3 && op.inputs[2].space == Space::Const) {
+                uint8_t lw = op.inputs[1].size ? op.inputs[1].size : 4;
+                size_t off = (size_t)(op.inputs[2].value * lw);
+                if (op.output.offset != op.inputs[0].offset)
+                    memcpy(&ctx.xmm[op.output.offset & 15][0], &ctx.xmm[op.inputs[0].offset & 15][0], 16);
+                if (off + lw <= 16) { uint64_t v = read_var(op.inputs[1]); memcpy(&ctx.xmm[op.output.offset & 15][off], &v, lw); }
+            } else { write_var(op.output, a); }
+            break;
+        }
+        case Opcode::VBROADCAST: {
+            if (op.output.space == Space::XMM) {
+                uint8_t lw = (op.num_inputs >= 2 && op.inputs[1].space == Space::Const && op.inputs[1].value > 0 && op.inputs[1].value <= 8) ? (uint8_t)op.inputs[1].value : (op.inputs[0].size ? op.inputs[0].size : 4);
+                uint64_t v = a;
+                uint8_t* pd = &ctx.xmm[op.output.offset & 15][0];
+                for (uint8_t i = 0; i < 16; i += lw) memcpy(pd + i, &v, lw);
+            }
+            break;
+        }
         case Opcode::ARCH_X64:
-            write_var(op.output, a); break; // placeholder
+            write_var(op.output, a); break; // opaque x86 escape
         default: break;
         }
     }
