@@ -3255,6 +3255,20 @@ bool emit(const Op& op, CodeGen& cg) {
         if (op.output.size == 8) { cg.sqrtsd(d, s); return true; }
         return false;
     }
+    case Opcode::LOAD: {
+        if (!is_gpr(op.output) || !is_gpr(op.inputs[0]) || op.inputs[0].size != 8) return false;
+        Mem m; m.base = ir_gpr(op.inputs[0]); m.has_base = true; m.size_hint = op.output.size;
+        cg.mov(ir_gpr(op.output), m); return true;
+    }
+    case Opcode::STORE: {
+        if (!is_gpr(op.inputs[0]) || op.inputs[0].size != 8 || !is_gpr(op.inputs[1])) return false;
+        Mem m; m.base = ir_gpr(op.inputs[0]); m.has_base = true; m.size_hint = op.inputs[1].size;
+        cg.mov(m, ir_gpr(op.inputs[1])); return true;
+    }
+    case Opcode::LEA: {
+        if (!is_gpr(op.output) || !is_gpr(op.inputs[0]) || op.output.size != op.inputs[0].size) return false;
+        cg.mov(ir_gpr(op.output), ir_gpr(op.inputs[0])); return true;
+    }
     default: return false;
     }
 }
