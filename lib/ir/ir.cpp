@@ -2968,6 +2968,26 @@ bool emit(const Op& op, CodeGen& cg) {
         }
         return false; // XMM↔GPR movq would need dedicated overloads
     }
+    case Opcode::SUB_FLAGS: {
+        if (!is_flags(op.output) || op.num_inputs < 2) return false;
+        if (is_gpr(op.inputs[0]) && is_gpr(op.inputs[1]) && op.inputs[0].size == op.inputs[1].size) {
+            cg.cmp(ir_gpr(op.inputs[0]), ir_gpr(op.inputs[1])); return true;
+        }
+        if (is_gpr(op.inputs[0]) && is_const(op.inputs[1])) {
+            cg.cmp(ir_gpr(op.inputs[0]), (int64_t)op.inputs[1].value); return true;
+        }
+        return false;
+    }
+    case Opcode::AND_FLAGS: {
+        if (!is_flags(op.output) || op.num_inputs < 2) return false;
+        if (is_gpr(op.inputs[0]) && is_gpr(op.inputs[1]) && op.inputs[0].size == op.inputs[1].size) {
+            cg.test(ir_gpr(op.inputs[0]), ir_gpr(op.inputs[1])); return true;
+        }
+        if (is_gpr(op.inputs[0]) && is_const(op.inputs[1])) {
+            cg.test(ir_gpr(op.inputs[0]), (int64_t)op.inputs[1].value); return true;
+        }
+        return false;
+    }
     case Opcode::TEST: {
         if (!is_flags(op.output) || op.num_inputs < 2) return false;
         if (is_gpr(op.inputs[0]) && is_gpr(op.inputs[1]) && op.inputs[0].size == op.inputs[1].size) {
@@ -3053,6 +3073,38 @@ bool emit(const Op& op, CodeGen& cg) {
             }
         }
         return false;
+    }
+    case Opcode::I2F: {
+        if (!is_xmm(op.output) || !is_gpr(op.inputs[0])) return false;
+        Xmm d = ir_xmm(op.output); Reg s = ir_gpr(op.inputs[0]);
+        if (op.output.size == 4) { cg.cvtsi2ss(d, s); return true; }
+        if (op.output.size == 8) { cg.cvtsi2sd(d, s); return true; }
+        return false;
+    }
+    case Opcode::F2I: {
+        if (!is_gpr(op.output) || !is_xmm(op.inputs[0])) return false;
+        Reg d = ir_gpr(op.output); Xmm s = ir_xmm(op.inputs[0]);
+        if (op.inputs[0].size == 4) { cg.cvttss2si(d, s); return true; }
+        if (op.inputs[0].size == 8) { cg.cvttsd2si(d, s); return true; }
+        return false;
+    }
+    case Opcode::F2F: {
+        if (!is_xmm(op.output) || !is_xmm(op.inputs[0])) return false;
+        Xmm d = ir_xmm(op.output), s = ir_xmm(op.inputs[0]);
+        if (op.inputs[0].size == 4 && op.output.size == 8) { cg.cvtss2sd(d, s); return true; }
+        if (op.inputs[0].size == 8 && op.output.size == 4) { cg.cvtsd2ss(d, s); return true; }
+        return false;
+    }
+    case Opcode::SELECT: {
+        if (op.num_inputs < 3) return false;
+        if (!is_gpr(op.output) || !is_gpr(op.inputs[1]) || !is_gpr(op.inputs[2])) return false;
+        if (op.output.offset != op.inputs[2].offset || op.output.size != op.inputs[2].size) return false;
+        if (op.output.size != op.inputs[1].size || op.output.size < 2) return false; // CMOV needs >=16b dst
+        if (!is_gpr(op.inputs[0]) || op.inputs[0].size != 1) return false;
+        Reg c = ir_gpr(op.inputs[0]);
+        cg.test(c, c);
+        cg.cmovnz(ir_gpr(op.output), ir_gpr(op.inputs[1]));
+        return true;
     }
     case Opcode::FSQRT: {
         if (!is_xmm(op.output) || !is_xmm(op.inputs[0])) return false;
