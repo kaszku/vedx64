@@ -6,6 +6,7 @@
 #include "vedx64/core.hpp"
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #define CHECK(cond, msg) do { if (!(cond)) { printf("FAIL: %s\n", msg); return 1; } } while(0)
 
