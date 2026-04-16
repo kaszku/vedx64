@@ -50,6 +50,7 @@ const char* reg32[] = {"eax","ecx","edx","ebx","esp","ebp","esi","edi","r8d","r9
 const char* reg64[] = {"rax","rcx","rdx","rbx","rsp","rbp","rsi","rdi","r8","r9","r10","r11","r12","r13","r14","r15","r16","r17","r18","r19","r20","r21","r22","r23","r24","r25","r26","r27","r28","r29","r30","r31"};
 const char* xmm[]   = {"xmm0","xmm1","xmm2","xmm3","xmm4","xmm5","xmm6","xmm7","xmm8","xmm9","xmm10","xmm11","xmm12","xmm13","xmm14","xmm15"};
 const char* ymm[]   = {"ymm0","ymm1","ymm2","ymm3","ymm4","ymm5","ymm6","ymm7","ymm8","ymm9","ymm10","ymm11","ymm12","ymm13","ymm14","ymm15"};
+const char* zmm[]   = {"zmm0","zmm1","zmm2","zmm3","zmm4","zmm5","zmm6","zmm7","zmm8","zmm9","zmm10","zmm11","zmm12","zmm13","zmm14","zmm15"};
 const char* mmx_r[] = {"mm0","mm1","mm2","mm3","mm4","mm5","mm6","mm7"};
 const char* seg_r[] = {"es","cs","ss","ds","fs","gs","??","??"};
 const char* scale_tab[] = {"1","2","4","8"};
@@ -80,11 +81,27 @@ const char** reg_table(OpSize sz, bool rex_w, bool opsz, bool def64) {
     }
 }
 
+static bool is_vsib_mnemonic(Mnemonic m) {
+    switch (m) {
+    case Mnemonic::VGATHERDPS: case Mnemonic::VGATHERDPD:
+    case Mnemonic::VGATHERQPS: case Mnemonic::VGATHERQPD:
+    case Mnemonic::VPGATHERDD: case Mnemonic::VPGATHERDQ:
+    case Mnemonic::VPGATHERQD: case Mnemonic::VPGATHERQQ:
+    case Mnemonic::VSCATTERDPS: case Mnemonic::VSCATTERDPD:
+    case Mnemonic::VSCATTERQPS: case Mnemonic::VSCATTERQPD:
+    case Mnemonic::VPSCATTERDD: case Mnemonic::VPSCATTERDQ:
+    case Mnemonic::VPSCATTERQD: case Mnemonic::VPSCATTERQQ:
+        return true;
+    default: return false;
+    }
+}
+
 int fmt_sib(const DecodedInstr& di, uint8_t mod_, char* buf, int max) {
     uint8_t scale = di.sib >> 6;
     uint8_t index = ((di.sib >> 3) & 7) | ((di.rex & 0x02) ? 8 : 0) | (di.has_rex2 ? (di.rex2_x4 << 4) : 0);
     uint8_t base  = (di.sib & 7) | ((di.rex & 0x01) ? 8 : 0) | (di.has_rex2 ? (di.rex2_b4 << 4) : 0);
-    bool has_index = (index != 4); // RSP can't be index
+    bool vsib = di.desc && is_vsib_mnemonic(di.desc->mnemonic);
+    bool has_index = vsib || (index != 4); // RSP can't be index (except VSIB)
     bool has_base = !(mod_ == 0 && (di.sib & 7) == 5);
     uint8_t rmask = di.has_rex2 ? 31 : 15;
     int off = 0;
@@ -96,7 +113,12 @@ int fmt_sib(const DecodedInstr& di, uint8_t mod_, char* buf, int max) {
     }
     if (has_index) {
         if (need_plus) off += emit_ch(buf+off, max-off, '+');
-        off += emit_str(buf+off, max-off, reg64[index & rmask]);
+        if (vsib) {
+            const char** vtab = (di.vex_L == 2) ? (const char**)zmm : (di.vex_L == 1 ? (const char**)ymm : (const char**)xmm);
+            off += emit_str(buf+off, max-off, vtab[index & 15]);
+        } else {
+            off += emit_str(buf+off, max-off, reg64[index & rmask]);
+        }
         off += emit_ch(buf+off, max-off, '*');
         off += emit_str(buf+off, max-off, scale_tab[scale]);
         need_plus = true;
@@ -123,6 +145,27 @@ static bool is_bmi_gpr_vvvv(Mnemonic m) {
     case Mnemonic::SARX: case Mnemonic::SHLX: case Mnemonic::SHRX:
     case Mnemonic::BLSI: case Mnemonic::BLSMSK: case Mnemonic::BLSR:
     case Mnemonic::RORX:
+        return true;
+    default: return false;
+    }
+}
+
+static bool mnem_has_no_vvvv(Mnemonic m) {
+    switch (m) {
+    case Mnemonic::VBROADCASTSS: case Mnemonic::VBROADCASTSD:
+    case Mnemonic::VBROADCASTF128:
+    case Mnemonic::VBROADCASTF32X2: case Mnemonic::VBROADCASTF32X4: case Mnemonic::VBROADCASTF32X8:
+    case Mnemonic::VBROADCASTF64X2: case Mnemonic::VBROADCASTF64X4:
+    case Mnemonic::VBROADCASTI32X2: case Mnemonic::VBROADCASTI32X4: case Mnemonic::VBROADCASTI32X8:
+    case Mnemonic::VBROADCASTI64X2: case Mnemonic::VBROADCASTI64X4:
+    case Mnemonic::VPBROADCASTB: case Mnemonic::VPBROADCASTW:
+    case Mnemonic::VPBROADCASTD: case Mnemonic::VPBROADCASTQ:
+    case Mnemonic::VEXTRACTF128: case Mnemonic::VEXTRACTI128:
+    case Mnemonic::VEXTRACTF32X4: case Mnemonic::VEXTRACTF32X8:
+    case Mnemonic::VEXTRACTF64X2: case Mnemonic::VEXTRACTF64X4:
+    case Mnemonic::VEXTRACTI32X4: case Mnemonic::VEXTRACTI32X8:
+    case Mnemonic::VEXTRACTI64X2: case Mnemonic::VEXTRACTI64X4:
+    case Mnemonic::RORX: case Mnemonic::ROUNDPS: case Mnemonic::ROUNDPD:
         return true;
     default: return false;
     }
@@ -742,8 +785,8 @@ size_t disassemble(const uint8_t* code, size_t len, char* buf, size_t buf_len_, 
         }
         if (di.has_vex && !vex_vvvv_emitted && !has_vex_operand(*di.desc)) {
             Mnemonic m = di.desc->mnemonic;
-            const char* vmn = mnemonic_name(m);
-            bool skip_vvvv = (strstr(vmn, "broadcast") || strstr(vmn, "extractf128") || strstr(vmn, "extracti128") || m == Mnemonic::RORX || m == Mnemonic::ROUNDPS || m == Mnemonic::ROUNDPD);
+            bool evex_2op_skip = di.has_evex && di.desc->num_operands == 2;
+            bool skip_vvvv = evex_2op_skip || mnem_has_no_vvvv(m);
             bool vvvv_last = (m == Mnemonic::BEXTR || m == Mnemonic::BZHI || m == Mnemonic::SARX || m == Mnemonic::SHLX || m == Mnemonic::SHRX);
             bool vvvv_first = (m == Mnemonic::BLSI || m == Mnemonic::BLSMSK || m == Mnemonic::BLSR);
             if (!skip_vvvv) {

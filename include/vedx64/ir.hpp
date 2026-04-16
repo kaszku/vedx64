@@ -191,9 +191,15 @@ namespace vedx64 { namespace ir {
 
 /// Lower a single IR op to x86-64 bytes using the given CodeGen.
 /// Returns true on success, false if the op has no direct lowering.
-/// Currently supports: COPY, ADD, SUB, AND, OR, XOR, LOAD, STORE, NOP, RET (for GPR operands).
-/// Most ops — especially flag/vector/FP — return false; callers must keep original bytes.
 bool emit(const Op& op, CodeGen& cg);
+
+/// Lower an entire Lifted instruction sequence to x86-64 bytes.
+/// Returns the number of ops successfully lowered. If all ops lowered,
+/// result == lifted.ops.size(). The CodeGen accumulates the encoded bytes.
+size_t emit_lifted(const Lifted& lifted, CodeGen& cg);
+
+/// Try to lower an entire Lifted sequence. Returns true only if every op lowered.
+bool emit_all(const Lifted& lifted, CodeGen& cg);
 
 #ifdef VEDX64_STRINGS
 #include <string>

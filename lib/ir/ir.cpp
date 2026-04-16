@@ -3014,6 +3014,9 @@ bool emit(const Op& op, CodeGen& cg) {
         if (is_gpr(op.output) && is_const(op.inputs[0])) {
             cg.mov(ir_gpr(op.output), (int64_t)op.inputs[0].value); return true;
         }
+        if (is_xmm(op.output) && is_xmm(op.inputs[0])) {
+            cg.movaps(ir_xmm(op.output), ir_xmm(op.inputs[0])); return true;
+        }
         return false;
     }
     case Opcode::ADD: case Opcode::SUB: case Opcode::AND:
@@ -3057,16 +3060,42 @@ bool emit(const Op& op, CodeGen& cg) {
     }
     case Opcode::SHL: case Opcode::SHR: case Opcode::SAR:
     case Opcode::ROL: case Opcode::ROR: {
-        if (!same_gpr(op.output, op.inputs[0]) || op.num_inputs < 2 || !is_const(op.inputs[1])) return false;
-        Reg d = ir_gpr(op.output); int64_t n = op.inputs[1].value;
-        switch (op.opcode) {
-        case Opcode::SHL: cg.shl(d, n); return true;
-        case Opcode::SHR: cg.shr(d, n); return true;
-        case Opcode::SAR: cg.sar(d, n); return true;
-        case Opcode::ROL: cg.rol(d, n); return true;
-        case Opcode::ROR: cg.ror(d, n); return true;
-        default: return false;
+        if (!same_gpr(op.output, op.inputs[0]) || op.num_inputs < 2) return false;
+        Reg d = ir_gpr(op.output);
+        if (is_const(op.inputs[1])) {
+            int64_t n = op.inputs[1].value;
+            switch (op.opcode) {
+            case Opcode::SHL: cg.shl(d, n); return true;
+            case Opcode::SHR: cg.shr(d, n); return true;
+            case Opcode::SAR: cg.sar(d, n); return true;
+            case Opcode::ROL: cg.rol(d, n); return true;
+            case Opcode::ROR: cg.ror(d, n); return true;
+            default: return false;
+            }
         }
+        if (is_gpr(op.inputs[1]) && op.inputs[1].offset == 1 && op.inputs[1].size == 1) {
+            // SHL/SHR/SAR/ROL/ROR r, cl — emit D2/D3 family
+            uint8_t ext = 0;
+            switch (op.opcode) {
+            case Opcode::SHL: ext = 4; break;
+            case Opcode::SHR: ext = 5; break;
+            case Opcode::SAR: ext = 7; break;
+            case Opcode::ROL: ext = 0; break;
+            case Opcode::ROR: ext = 1; break;
+            default: return false;
+            }
+            if (d.bits == 8) {
+                if (d.id >= 8) cg.db(0x41);
+                cg.db(0xD2); cg.db(0xC0 | (ext << 3) | (d.id & 7));
+            } else {
+                bool w = d.bits == 64;
+                if (d.bits == 16) cg.db(0x66);
+                if (w || d.id >= 8) cg.db(0x40 | (w?8:0) | ((d.id>=8)?1:0));
+                cg.db(0xD3); cg.db(0xC0 | (ext << 3) | (d.id & 7));
+            }
+            return true;
+        }
+        return false;
     }
     case Opcode::POPCNT: case Opcode::CTZ: case Opcode::CLZ: {
         if (!is_gpr(op.output) || !is_gpr(op.inputs[0]) || op.output.size != op.inputs[0].size) return false;
@@ -3269,8 +3298,351 @@ bool emit(const Op& op, CodeGen& cg) {
         if (!is_gpr(op.output) || !is_gpr(op.inputs[0]) || op.output.size != op.inputs[0].size) return false;
         cg.mov(ir_gpr(op.output), ir_gpr(op.inputs[0])); return true;
     }
+    case Opcode::DIV: case Opcode::MOD: {
+        if (op.num_inputs < 2 || !is_gpr(op.output) || !is_gpr(op.inputs[1])) return false;
+        if (op.output.size < 4) return false; // only 32/64-bit
+        Reg out_r = ir_gpr(op.output), divisor = ir_gpr(op.inputs[1]);
+        Reg rax{0, out_r.bits}, rdx{2, out_r.bits};
+        cg.xor_(rdx, rdx);
+        if (is_gpr(op.inputs[0])) cg.mov(rax, ir_gpr(op.inputs[0]));
+        else if (is_const(op.inputs[0])) cg.mov(rax, op.inputs[0].value);
+        else return false;
+        cg.div(divisor);
+        Reg result = (op.opcode == Opcode::MOD) ? rdx : rax;
+        if (out_r.id != result.id) cg.mov(out_r, result);
+        return true;
+    }
+    case Opcode::IDIV: case Opcode::SMOD: {
+        if (op.num_inputs < 2 || !is_gpr(op.output) || !is_gpr(op.inputs[1])) return false;
+        if (op.output.size < 4) return false;
+        Reg out_r = ir_gpr(op.output), divisor = ir_gpr(op.inputs[1]);
+        Reg rax{0, out_r.bits}, rdx{2, out_r.bits};
+        if (is_gpr(op.inputs[0])) cg.mov(rax, ir_gpr(op.inputs[0]));
+        else if (is_const(op.inputs[0])) cg.mov(rax, op.inputs[0].value);
+        else return false;
+        if (out_r.bits == 64) cg.cqo(); else { cg.db(0x99); } // cdq
+        cg.idiv(divisor);
+        Reg result = (op.opcode == Opcode::SMOD) ? rdx : rax;
+        if (out_r.id != result.id) cg.mov(out_r, result);
+        return true;
+    }
+    case Opcode::MUL: {
+        if (op.num_inputs < 2 || !is_gpr(op.output)) return false;
+        Reg d = ir_gpr(op.output);
+        if (is_gpr(op.inputs[0]) && same_gpr(op.output, op.inputs[0]) && is_gpr(op.inputs[1])) {
+            cg.imul(d, ir_gpr(op.inputs[1])); return true;
+        }
+        if (is_gpr(op.inputs[0]) && same_gpr(op.output, op.inputs[0]) && is_const(op.inputs[1])) {
+            cg.imul(d, d, op.inputs[1].value); return true;
+        }
+        return false;
+    }
+    case Opcode::ADD_FLAGS: {
+        if (!is_flags(op.output) || op.num_inputs < 2) return false;
+        // Emit as: push rax; mov rax, a; add rax, b; pop rax
+        // Or simpler: if both GPR, just emit add in-place on a copy. We can't
+        // clobber regs, so use a push/pop pair around a scratch computation.
+        // For the common case where inputs[0] is GPR, just duplicate it.
+        if (is_gpr(op.inputs[0]) && is_gpr(op.inputs[1]) && op.inputs[0].size == op.inputs[1].size) {
+            // Save RAX, compute there, restore
+            Reg rax_64{0, 64};
+            Reg scratch{0, (uint8_t)(op.inputs[0].size*8)};
+            cg.push(rax_64);
+            cg.mov(scratch, ir_gpr(op.inputs[0]));
+            cg.add(scratch, ir_gpr(op.inputs[1]));
+            // Flags are set; save them across the pop via lahf or just accept
+            // that pop doesn't modify arithmetic flags
+            cg.pop(rax_64);
+            return true;
+        }
+        if (is_gpr(op.inputs[0]) && is_const(op.inputs[1])) {
+            Reg rax_64{0, 64};
+            Reg scratch{0, (uint8_t)(op.inputs[0].size*8)};
+            cg.push(rax_64);
+            cg.mov(scratch, ir_gpr(op.inputs[0]));
+            cg.add(scratch, (int64_t)op.inputs[1].value);
+            cg.pop(rax_64);
+            return true;
+        }
+        return false;
+    }
+    case Opcode::SET_ZF: {
+        if (!is_const(op.inputs[0])) return false;
+        // ZF=1: test with matching values. ZF=0: cmp 0,1
+        // Use: push rax; xor eax,eax; cmp eax,val; pop rax
+        // val=0 → ZF=1 (equal), val=1 → ZF=0 (not equal)
+        Reg rax_64{0, 64}, eax{0, 32};
+        cg.push(rax_64);
+        cg.xor_(eax, eax);
+        int64_t want = op.inputs[0].value & 1;
+        cg.cmp(eax, (int64_t)(want ? 0 : 1)); // ZF=1 when 0==0, ZF=0 when 0!=1
+        cg.pop(rax_64);
+        return true;
+    }
+    case Opcode::SET_SF: {
+        if (!is_const(op.inputs[0])) return false;
+        // SF is set from the sign bit of the result.
+        // SF=1: test negative → cmp 0,1 (result -1, SF=1). SF=0: test 0 (SF=0).
+        Reg rax_64{0, 64}, al{0, 8};
+        cg.push(rax_64);
+        int64_t want = op.inputs[0].value & 1;
+        cg.mov(al, want ? (int64_t)0x80 : (int64_t)0);
+        cg.test(al, al); // SF = sign bit of al
+        cg.pop(rax_64);
+        return true;
+    }
+    case Opcode::SET_OF: {
+        if (!is_const(op.inputs[0])) return false;
+        // OF=1: trigger overflow. OF=0: any non-overflowing op.
+        // push rax; mov al, 0x7F/0; add al, val; pop rax
+        Reg rax_64{0, 64}, al{0, 8};
+        cg.push(rax_64);
+        int64_t want = op.inputs[0].value & 1;
+        if (want) {
+            cg.mov(al, (int64_t)0x7F); cg.add(al, (int64_t)1); // 0x7F+1 overflows signed byte
+        } else {
+            cg.xor_(al, al); cg.add(al, (int64_t)0); // no overflow
+        }
+        cg.pop(rax_64);
+        return true;
+    }
+    case Opcode::SET_PF: {
+        if (!is_const(op.inputs[0])) return false;
+        // PF=1: result with even parity. PF=0: odd parity.
+        // test al, al: PF from al bits. 0x00→PF=1, 0x01→PF=0.
+        Reg rax_64{0, 64}, al{0, 8};
+        cg.push(rax_64);
+        int64_t want = op.inputs[0].value & 1;
+        cg.mov(al, want ? (int64_t)0 : (int64_t)1); // 0→even parity(PF=1), 1→odd(PF=0)
+        cg.test(al, al);
+        cg.pop(rax_64);
+        return true;
+    }
+    case Opcode::GET_DF: {
+        if (!is_gpr(op.output)) return false;
+        Reg d = ir_gpr(op.output);
+        Reg rax_64{0, 64};
+        cg.push(rax_64); // save rax
+        cg.db(0x9C); // pushfq
+        cg.pop(rax_64); // rflags → rax
+        cg.shr(rax_64, (int64_t)10); // DF is bit 10
+        cg.and_(rax_64, (int64_t)1);
+        if (d.id != 0) cg.mov(d, rax_64);
+        if (d.id == 0 && d.bits != 64) { Reg low{0, d.bits}; (void)low; } // already in rax
+        // Restore caller's rax via xchg-stack trick if output != rax
+        if (d.id != 0) {
+            cg.pop(rax_64); // restore saved rax
+        } else {
+            cg.add(Reg{4, 64}, (int64_t)8); // drop the saved rax from stack
+        }
+        return true;
+    }
+    case Opcode::BRANCH: {
+        if (op.num_inputs < 1) return false;
+        if (is_const(op.inputs[0])) {
+            // Emit E9 + rel32 placeholder (0). Caller must patch.
+            cg.db(0xE9);
+            int32_t dummy = 0;
+            cg.db((uint8_t)(dummy & 0xFF));
+            cg.db((uint8_t)((dummy >> 8) & 0xFF));
+            cg.db((uint8_t)((dummy >> 16) & 0xFF));
+            cg.db((uint8_t)((dummy >> 24) & 0xFF));
+            return true;
+        }
+        if (is_gpr(op.inputs[0]) && op.inputs[0].size == 8) {
+            cg.jmp(ir_gpr(op.inputs[0])); return true;
+        }
+        return false;
+    }
+    case Opcode::CBRANCH: {
+        if (op.num_inputs < 2) return false;
+        if (!is_gpr(op.inputs[0]) || op.inputs[0].size != 1) return false;
+        // test cond, cond; jnz target
+        Reg c = ir_gpr(op.inputs[0]);
+        cg.test(c, c);
+        if (is_const(op.inputs[1])) {
+            // JNZ rel32 placeholder
+            cg.db(0x0F); cg.db(0x85);
+            cg.db(0); cg.db(0); cg.db(0); cg.db(0);
+            return true;
+        }
+        if (is_gpr(op.inputs[1]) && op.inputs[1].size == 8) {
+            // Conditional indirect: jnz requires label, so use: jz $+3; jmp reg
+            cg.db(0x74); cg.db(0x02); // jz skip (2 bytes for jmp reg)
+            cg.jmp(ir_gpr(op.inputs[1]));
+            return true;
+        }
+        return false;
+    }
+    // (COPY xmm extension — appended after existing COPY case skips here via return)
+    case Opcode::VADD: case Opcode::VSUB: case Opcode::VMUL:
+    case Opcode::VAND: case Opcode::VOR: case Opcode::VXOR: {
+        if (!is_xmm(op.output) || !is_xmm(op.inputs[0]) || op.num_inputs < 2 || !is_xmm(op.inputs[1])) return false;
+        if (op.output.offset != op.inputs[0].offset) return false; // dst == src1
+        Xmm d = ir_xmm(op.output), s = ir_xmm(op.inputs[1]);
+        uint8_t lane_sz = op.inputs[2].size ? op.inputs[2].size : 4; // lane size from inputs[2] or default 4
+        // Dispatch packed FP vs integer by lane size and opcode
+        if (op.opcode == Opcode::VAND) { cg.pand(d, s); return true; }
+        if (op.opcode == Opcode::VOR)  { cg.por(d, s);  return true; }
+        if (op.opcode == Opcode::VXOR) { cg.pxor(d, s); return true; }
+        // Integer packed ops by lane size
+        switch (op.opcode) {
+        case Opcode::VADD:
+            if (lane_sz == 1) { cg.paddb(d, s); return true; }
+            if (lane_sz == 2) { cg.paddw(d, s); return true; }
+            if (lane_sz == 4) { cg.paddd(d, s); return true; }
+            if (lane_sz == 8) { cg.paddq(d, s); return true; }
+            return false;
+        case Opcode::VSUB:
+            if (lane_sz == 1) { cg.psubb(d, s); return true; }
+            if (lane_sz == 2) { cg.psubw(d, s); return true; }
+            if (lane_sz == 4) { cg.psubd(d, s); return true; }
+            if (lane_sz == 8) { cg.psubq(d, s); return true; }
+            return false;
+        case Opcode::VMUL:
+            if (lane_sz == 2) { cg.pmullw(d, s); return true; }
+            if (lane_sz == 4) { cg.pmulld(d, s); return true; }
+            return false;
+        default: return false;
+        }
+    }
+    case Opcode::VSHL: case Opcode::VSHR: {
+        if (!is_xmm(op.output) || !is_xmm(op.inputs[0]) || op.num_inputs < 2) return false;
+        if (op.output.offset != op.inputs[0].offset) return false;
+        Xmm d = ir_xmm(op.output);
+        uint8_t lane_sz = op.inputs[2].size ? op.inputs[2].size : 4;
+        if (is_const(op.inputs[1])) {
+            uint8_t n = (uint8_t)(op.inputs[1].value & 0xFF);
+            if (op.opcode == Opcode::VSHL) {
+                if (lane_sz == 2) { cg.psllw(d, n); return true; }
+                if (lane_sz == 4) { cg.pslld(d, n); return true; }
+                if (lane_sz == 8) { cg.psllq(d, n); return true; }
+            } else {
+                if (lane_sz == 2) { cg.psrlw(d, n); return true; }
+                if (lane_sz == 4) { cg.psrld(d, n); return true; }
+                if (lane_sz == 8) { cg.psrlq(d, n); return true; }
+            }
+        }
+        if (is_xmm(op.inputs[1])) {
+            Xmm s = ir_xmm(op.inputs[1]);
+            if (op.opcode == Opcode::VSHL) {
+                if (lane_sz == 2) { cg.psllw(d, s); return true; }
+                if (lane_sz == 4) { cg.pslld(d, s); return true; }
+                if (lane_sz == 8) { cg.psllq(d, s); return true; }
+            } else {
+                if (lane_sz == 2) { cg.psrlw(d, s); return true; }
+                if (lane_sz == 4) { cg.psrld(d, s); return true; }
+                if (lane_sz == 8) { cg.psrlq(d, s); return true; }
+            }
+        }
+        return false;
+    }
+    case Opcode::VCMP: {
+        if (!is_xmm(op.output) || !is_xmm(op.inputs[0]) || op.num_inputs < 2 || !is_xmm(op.inputs[1])) return false;
+        if (op.output.offset != op.inputs[0].offset) return false;
+        Xmm d = ir_xmm(op.output), s = ir_xmm(op.inputs[1]);
+        uint8_t lane_sz = op.inputs[2].size ? op.inputs[2].size : 4;
+        if (lane_sz == 1) { cg.pcmpeqb(d, s); return true; }
+        if (lane_sz == 2) { cg.pcmpeqw(d, s); return true; }
+        if (lane_sz == 4) { cg.pcmpeqd(d, s); return true; }
+        return false;
+    }
+    case Opcode::VBROADCAST: {
+        if (!is_xmm(op.output) || op.num_inputs < 1) return false;
+        // XMM→XMM broadcast: movaps + pshufd with all-same selector (0x00)
+        if (is_xmm(op.inputs[0])) {
+            Xmm d = ir_xmm(op.output), s = ir_xmm(op.inputs[0]);
+            if (d.id != s.id) cg.movaps(d, s);
+            // pshufd xmm, xmm, 0x00 — broadcast dword 0 to all lanes
+            cg.db(0x66); // prefix for pshufd
+            if (d.id >= 8) cg.db(0x45); else if (d.id != s.id) {} // REX if needed
+            cg.db(0x0F); cg.db(0x70);
+            cg.db(0xC0 | ((d.id & 7) << 3) | (d.id & 7)); cg.db(0x00);
+            return true;
+        }
+        return false;
+    }
+    case Opcode::EXTRACT: {
+        // EXTRACT(dst, src, bit_offset) — (src >> bit_offset) & mask
+        if (!is_gpr(op.output) || !is_gpr(op.inputs[0]) || !is_const(op.inputs[1])) return false;
+        Reg d = ir_gpr(op.output), s = ir_gpr(op.inputs[0]);
+        if (d.id != s.id) cg.mov(d, s);
+        int64_t shift = op.inputs[1].value;
+        if (shift > 0) cg.shr(d, shift);
+        // Mask to output size
+        if (op.output.size < op.inputs[0].size) {
+            int64_t mask = ((int64_t)1 << (op.output.size * 8)) - 1;
+            cg.and_(d, mask);
+        }
+        return true;
+    }
+    case Opcode::INSERT: {
+        // INSERT(dst, src, bit_offset) — dst = (dst & ~(mask<<off)) | ((src&mask)<<off)
+        // Simplified: requires dst == output, src is value to insert
+        if (!is_gpr(op.output) || !is_gpr(op.inputs[1]) || !is_const(op.inputs[2])) return false;
+        if (!same_gpr(op.output, op.inputs[0])) return false;
+        Reg d = ir_gpr(op.output);
+        Reg rax_64{0, 64}, scratch{0, d.bits};
+        int64_t shift = op.inputs[2].value;
+        uint8_t ins_sz = op.inputs[1].size;
+        int64_t mask = ((int64_t)1 << (ins_sz * 8)) - 1;
+        // Clear the target bits in dst
+        cg.push(rax_64);
+        cg.mov(scratch, ir_gpr(op.inputs[1]));
+        cg.and_(scratch, mask);
+        if (shift > 0) cg.shl(scratch, shift);
+        cg.and_(d, ~(mask << shift));
+        cg.or_(d, scratch);
+        cg.pop(rax_64);
+        return true;
+    }
+    case Opcode::CONCAT: {
+        // CONCAT(dst, hi, lo) — dst = (hi << (lo.size*8)) | lo
+        if (!is_gpr(op.output) || !is_gpr(op.inputs[0]) || !is_gpr(op.inputs[1])) return false;
+        Reg d = ir_gpr(op.output), hi = ir_gpr(op.inputs[0]);
+        Reg lo_r = ir_gpr(op.inputs[1]);
+        uint8_t lo_bits = op.inputs[1].size * 8;
+        cg.mov(d, hi);
+        cg.shl(d, (int64_t)lo_bits);
+        cg.or_(d, lo_r);
+        return true;
+    }
+    case Opcode::BITSEL: {
+        // BITSEL(dst, mask, a, b) = (a & mask) | (b & ~mask)
+        if (op.num_inputs < 3 || !is_gpr(op.output)) return false;
+        if (!is_gpr(op.inputs[0]) || !is_gpr(op.inputs[1]) || !is_gpr(op.inputs[2])) return false;
+        Reg d = ir_gpr(op.output);
+        Reg rax_64{0, 64}, tmp{0, d.bits};
+        // d = (inputs[1] & inputs[0]) | (inputs[2] & ~inputs[0])
+        cg.push(rax_64);
+        cg.mov(d, ir_gpr(op.inputs[1]));
+        cg.and_(d, ir_gpr(op.inputs[0]));
+        cg.mov(tmp, ir_gpr(op.inputs[0]));
+        cg.not_(tmp);
+        cg.and_(tmp, ir_gpr(op.inputs[2]));
+        cg.or_(d, tmp);
+        cg.pop(rax_64);
+        return true;
+    }
     default: return false;
     }
+}
+} }
+
+namespace vedx64 { namespace ir {
+size_t emit_lifted(const Lifted& lifted, CodeGen& cg) {
+    size_t count = 0;
+    for (const auto& op : lifted.ops) {
+        if (emit(op, cg)) count++;
+    }
+    return count;
+}
+
+bool emit_all(const Lifted& lifted, CodeGen& cg) {
+    for (const auto& op : lifted.ops) {
+        if (!emit(op, cg)) return false;
+    }
+    return true;
 }
 } }
 #endif // VEDX64_IR

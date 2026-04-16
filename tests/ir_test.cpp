@@ -4,6 +4,7 @@
 #ifdef VEDX64_IR
 #include "vedx64/ir.hpp"
 #include "vedx64/core.hpp"
+#include "vedx64/codegen.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -550,6 +551,91 @@ int main() {
     }
     printf("    Semantic: %d/%d\n", sem_pass, sem_total);
     CHECK(sem_pass == sem_total, "all semantic checks pass");
+
+    printf("  Emit lowering...\n");
+    {
+        int emit_pass = 0, emit_total = 0;
+        auto emit_ok = [&](const char* name, ir::Opcode opc, ir::VarNode dst, ir::VarNode s0, ir::VarNode s1 = {}, ir::VarNode s2 = {}) {
+            emit_total++;
+            ir::Op op; op.opcode = opc; op.output = dst;
+            op.inputs[0] = s0; op.inputs[1] = s1; op.inputs[2] = s2;
+            op.num_inputs = (s2.size?3:s1.size?2:1);
+            CodeGen cg;
+            if (ir::emit(op, cg) && cg.size() > 0) emit_pass++;
+            else printf("    FAIL emit %s\n", name);
+        };
+        auto R = [](uint16_t id, uint8_t sz) { return ir::VarNode::gpr(id, sz); };
+        auto C = [](int64_t v, uint8_t sz) { return ir::VarNode::constant(v, sz); };
+        auto X = [](uint16_t id, uint8_t sz) { return ir::VarNode::xmm(id, sz); };
+        auto F = []() { return ir::VarNode::flags(); };
+
+        emit_ok("COPY gpr", ir::Opcode::COPY, R(0,8), R(1,8));
+        emit_ok("COPY imm", ir::Opcode::COPY, R(0,8), C(42,8));
+        emit_ok("COPY xmm", ir::Opcode::COPY, X(0,16), X(1,16));
+        emit_ok("ADD reg", ir::Opcode::ADD, R(0,8), R(0,8), R(1,8));
+        emit_ok("SUB imm", ir::Opcode::SUB, R(0,4), R(0,4), C(10,4));
+        emit_ok("IMUL", ir::Opcode::IMUL, R(0,8), R(0,8), R(1,8));
+        emit_ok("SHL imm", ir::Opcode::SHL, R(0,8), R(0,8), C(4,1));
+        emit_ok("SHR CL", ir::Opcode::SHR, R(0,8), R(0,8), R(1,1));
+        emit_ok("SAR CL", ir::Opcode::SAR, R(3,4), R(3,4), R(1,1));
+        emit_ok("ROL CL", ir::Opcode::ROL, R(0,8), R(0,8), R(1,1));
+        emit_ok("DIV", ir::Opcode::DIV, R(0,4), R(0,4), R(1,4));
+        emit_ok("IDIV", ir::Opcode::IDIV, R(0,8), R(0,8), R(1,8));
+        emit_ok("MOD", ir::Opcode::MOD, R(2,4), R(0,4), R(1,4));
+        emit_ok("MUL", ir::Opcode::MUL, R(0,8), R(0,8), R(1,8));
+        emit_ok("SUB_FLAGS", ir::Opcode::SUB_FLAGS, F(), R(0,8), R(1,8));
+        emit_ok("AND_FLAGS", ir::Opcode::AND_FLAGS, F(), R(0,4), C(0xFF,4));
+        emit_ok("ADD_FLAGS", ir::Opcode::ADD_FLAGS, F(), R(0,8), R(1,8));
+        emit_ok("GET_CF", ir::Opcode::GET_CF, R(0,1), F());
+        emit_ok("GET_ZF", ir::Opcode::GET_ZF, R(0,4), F());
+        emit_ok("SET_CF 1", ir::Opcode::SET_CF, F(), C(1,1));
+        emit_ok("SET_DF 0", ir::Opcode::SET_DF, F(), C(0,1));
+        emit_ok("SET_ZF 1", ir::Opcode::SET_ZF, F(), C(1,1));
+        emit_ok("SET_SF 1", ir::Opcode::SET_SF, F(), C(1,1));
+        emit_ok("SET_OF 0", ir::Opcode::SET_OF, F(), C(0,1));
+        emit_ok("SET_PF 1", ir::Opcode::SET_PF, F(), C(1,1));
+        emit_ok("BRANCH const", ir::Opcode::BRANCH, {}, C(0x1000,8));
+        { // CBRANCH: cond reg + const target
+            emit_total++;
+            ir::Op op; op.opcode = ir::Opcode::CBRANCH; op.num_inputs = 2;
+            op.inputs[0] = R(0,1); op.inputs[1] = C(0x2000,8);
+            CodeGen cg; if (ir::emit(op, cg) && cg.size() > 0) emit_pass++;
+            else printf("    FAIL emit CBRANCH\n");
+        }
+        emit_ok("VADD dw", ir::Opcode::VADD, X(0,16), X(0,16), X(1,16), C(0,4));
+        emit_ok("VSUB w", ir::Opcode::VSUB, X(0,16), X(0,16), X(1,16), C(0,2));
+        emit_ok("VAND", ir::Opcode::VAND, X(2,16), X(2,16), X(3,16));
+        emit_ok("VXOR", ir::Opcode::VXOR, X(0,16), X(0,16), X(0,16));
+        emit_ok("VCMP b", ir::Opcode::VCMP, X(0,16), X(0,16), X(1,16), C(0,1));
+        emit_ok("FADD ss", ir::Opcode::FADD, X(0,4), X(0,4), X(1,4));
+        emit_ok("FSQRT sd", ir::Opcode::FSQRT, X(0,8), X(1,8));
+        emit_ok("I2F", ir::Opcode::I2F, X(0,4), R(0,4));
+        emit_ok("F2I", ir::Opcode::F2I, R(0,4), X(0,4));
+        emit_ok("EXTRACT", ir::Opcode::EXTRACT, R(0,4), R(1,8), C(8,1));
+        emit_ok("CONCAT", ir::Opcode::CONCAT, R(0,8), R(1,4), R(2,4));
+        { // emit_lifted on NOP
+            uint8_t nop[] = {0x90};
+            auto l = ir::lift(nop, 1);
+            emit_total++;
+            if (l) {
+                CodeGen cg; bool ok = ir::emit_all(*l, cg);
+                if (ok && cg.size() > 0) emit_pass++;
+                else printf("    FAIL emit_all NOP\n");
+            }
+        }
+        { // emit_lifted on MOV rax, rcx
+            uint8_t mov[] = {0x48, 0x89, 0xC8};
+            auto l = ir::lift(mov, 3);
+            emit_total++;
+            if (l) {
+                CodeGen cg; size_t n = ir::emit_lifted(*l, cg);
+                if (n == l->ops.size() && cg.size() > 0) emit_pass++;
+                else printf("    FAIL emit_lifted MOV: %zu/%zu\n", n, l->ops.size());
+            }
+        }
+        printf("    Emit: %d/%d\n", emit_pass, emit_total);
+        CHECK(emit_pass == emit_total, "all emit checks pass");
+    }
 
     printf("All IR tests passed!\n");
     return 0;
