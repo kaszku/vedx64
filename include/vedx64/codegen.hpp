@@ -29,8 +29,11 @@ struct Mmx {
     uint8_t id;
 };
 
+struct CL_Reg {
+    constexpr operator Reg() const noexcept { return Reg{1, 8}; }
+};
 inline constexpr Reg al{0, 8};
-inline constexpr Reg cl{1, 8};
+inline constexpr CL_Reg cl{};
 inline constexpr Reg dl{2, 8};
 inline constexpr Reg bl{3, 8};
 inline constexpr Reg spl{4, 8};
@@ -9007,6 +9010,61 @@ public:
     CodeGen& pextrq(Reg dst, Xmm src, uint8_t imm) { emit8(0x66); emit8(0x48); emit_rex_if_needed(true, src.id, 0, dst.id); emit8(0x0F); emit8(0x3A); emit8(0x16); emit_modrm(3, src.id, dst.id); emit8(imm); return *this; }
     CodeGen& pinsrq(Xmm dst, Reg src, uint8_t imm) { emit8(0x66); emit8(0x48); emit_rex_if_needed(true, dst.id, 0, src.id); emit8(0x0F); emit8(0x3A); emit8(0x22); emit_modrm(3, dst.id, src.id); emit8(imm); return *this; }
     CodeGen& pshufw(Mmx dst, Mmx src, uint8_t imm) { emit8(0x0F); emit8(0x70); emit_modrm(3, dst.id, src.id); emit8(imm); return *this; }
+
+    // Shift/rotate by CL — D2 /ext (byte) | D3 /ext (16/32/64-bit).
+    CodeGen& shl(Reg dst, CL_Reg) {
+        if (dst.bits == 16) emit8(0x66);
+        emit_rex_if_needed(dst.bits==64, 0, 0, dst.id);
+        emit8(dst.bits == 8 ? 0xD2 : 0xD3);
+        emit_modrm(3, 4, dst.id);
+        return *this;
+    }
+    CodeGen& shl(Mem dst, CL_Reg) {
+        if (dst.size_hint == 2) emit8(0x66);
+        emit_rex_mem(dst.size_hint==8, 0, dst);
+        emit8(dst.size_hint == 1 ? 0xD2 : 0xD3);
+        emit_mem(4, dst);
+        return *this;
+    }
+    CodeGen& shr(Reg dst, CL_Reg) {
+        if (dst.bits == 16) emit8(0x66);
+        emit_rex_if_needed(dst.bits==64, 0, 0, dst.id);
+        emit8(dst.bits == 8 ? 0xD2 : 0xD3);
+        emit_modrm(3, 5, dst.id);
+        return *this;
+    }
+    CodeGen& shr(Mem dst, CL_Reg) {
+        if (dst.size_hint == 2) emit8(0x66);
+        emit_rex_mem(dst.size_hint==8, 0, dst);
+        emit8(dst.size_hint == 1 ? 0xD2 : 0xD3);
+        emit_mem(5, dst);
+        return *this;
+    }
+    CodeGen& sar(Reg dst, CL_Reg) {
+        if (dst.bits == 16) emit8(0x66);
+        emit_rex_if_needed(dst.bits==64, 0, 0, dst.id);
+        emit8(dst.bits == 8 ? 0xD2 : 0xD3);
+        emit_modrm(3, 7, dst.id);
+        return *this;
+    }
+    CodeGen& sar(Mem dst, CL_Reg) {
+        if (dst.size_hint == 2) emit8(0x66);
+        emit_rex_mem(dst.size_hint==8, 0, dst);
+        emit8(dst.size_hint == 1 ? 0xD2 : 0xD3);
+        emit_mem(7, dst);
+        return *this;
+    }
+
+    // Raw-displacement JMP: EB cb | 66 E9 cw | E9 cd.
+    CodeGen& jmp(int8_t rel)  { emit8(0xEB); emit_imm(rel, 1); return *this; }
+    CodeGen& jmp(int16_t rel) { emit8(0x66); emit8(0xE9); emit_imm(rel, 2); return *this; }
+    CodeGen& jmp(int32_t rel) { emit8(0xE9); emit_imm(rel, 4); return *this; }
+    CodeGen& jmp_rel8(int8_t rel)   { return jmp(rel); }
+    CodeGen& jmp_rel16(int16_t rel) { return jmp(rel); }
+    CodeGen& jmp_rel32(int32_t rel) { return jmp(rel); }
+    // Raw-displacement CALL: E8 cd (only rel32 exists).
+    CodeGen& call(int32_t rel) { emit8(0xE8); emit_imm(rel, 4); return *this; }
+    CodeGen& call_rel32(int32_t rel) { return call(rel); }
 
     // BMI1
     CodeGen& andn(Reg dst, Reg src1, Reg src2) { emit_vex_rr(2, 0, 0xF2, dst.id, src2.id, src1.id, 0, dst.bits==64?1:0); return *this; }
