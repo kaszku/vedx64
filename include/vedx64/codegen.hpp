@@ -841,9 +841,9 @@ public:
     CodeGen& bt(Reg dst, int64_t imm) {
         if (dst.bits == 16) emit8(0x66);
         emit_rex_if_needed(dst.bits==64, 0, 0, dst.id);
-        emit8(0x0F); emit8(0xA3);
-        emit_modrm(3, 0, dst.id);
-        emit_imm(imm, dst.bits == 64 ? 4 : dst.bits/8);
+        emit8(0x0F); emit8(0xBA);
+        emit_modrm(3, 4, dst.id);
+        emit_imm(imm, 1);
         return *this;
     }
     CodeGen& bt(Mem dst, int64_t imm) {
@@ -871,7 +871,7 @@ public:
         emit_rex_if_needed(dst.bits==64, 0, 0, dst.id);
         emit8(0x0F); emit8(0xBA);
         emit_modrm(3, 7, dst.id);
-        emit_imm(imm, dst.bits == 64 ? 4 : dst.bits/8);
+        emit_imm(imm, 1);
         return *this;
     }
     CodeGen& btc(Mem dst, int64_t imm) {
@@ -897,9 +897,9 @@ public:
     CodeGen& btr(Reg dst, int64_t imm) {
         if (dst.bits == 16) emit8(0x66);
         emit_rex_if_needed(dst.bits==64, 0, 0, dst.id);
-        emit8(0x0F); emit8(0xB3);
-        emit_modrm(3, 0, dst.id);
-        emit_imm(imm, dst.bits == 64 ? 4 : dst.bits/8);
+        emit8(0x0F); emit8(0xBA);
+        emit_modrm(3, 6, dst.id);
+        emit_imm(imm, 1);
         return *this;
     }
     CodeGen& btr(Mem dst, int64_t imm) {
@@ -925,9 +925,9 @@ public:
     CodeGen& bts(Reg dst, int64_t imm) {
         if (dst.bits == 16) emit8(0x66);
         emit_rex_if_needed(dst.bits==64, 0, 0, dst.id);
-        emit8(0x0F); emit8(0xAB);
-        emit_modrm(3, 0, dst.id);
-        emit_imm(imm, dst.bits == 64 ? 4 : dst.bits/8);
+        emit8(0x0F); emit8(0xBA);
+        emit_modrm(3, 5, dst.id);
+        emit_imm(imm, 1);
         return *this;
     }
     CodeGen& bts(Mem dst, int64_t imm) {
@@ -7497,7 +7497,11 @@ public:
     CodeGen& rcl(Reg dst, int64_t imm) {
         if (dst.bits == 16) emit8(0x66);
         emit_rex_if_needed(dst.bits==64, 0, 0, dst.id);
-        emit8(0xC0);
+        if (dst.bits == 8) {
+            emit8(0xC0);
+        } else {
+            emit8(0xC1);
+        }
         emit_modrm(3, 2, dst.id);
         emit_imm(imm, 1);
         return *this;
@@ -7545,7 +7549,11 @@ public:
     CodeGen& rcr(Reg dst, int64_t imm) {
         if (dst.bits == 16) emit8(0x66);
         emit_rex_if_needed(dst.bits==64, 0, 0, dst.id);
-        emit8(0xC0);
+        if (dst.bits == 8) {
+            emit8(0xC0);
+        } else {
+            emit8(0xC1);
+        }
         emit_modrm(3, 3, dst.id);
         emit_imm(imm, 1);
         return *this;
@@ -7593,7 +7601,11 @@ public:
     CodeGen& rol(Reg dst, int64_t imm) {
         if (dst.bits == 16) emit8(0x66);
         emit_rex_if_needed(dst.bits==64, 0, 0, dst.id);
-        emit8(0xC0);
+        if (dst.bits == 8) {
+            emit8(0xC0);
+        } else {
+            emit8(0xC1);
+        }
         emit_modrm(3, 0, dst.id);
         emit_imm(imm, 1);
         return *this;
@@ -7609,7 +7621,11 @@ public:
     CodeGen& ror(Reg dst, int64_t imm) {
         if (dst.bits == 16) emit8(0x66);
         emit_rex_if_needed(dst.bits==64, 0, 0, dst.id);
-        emit8(0xC0);
+        if (dst.bits == 8) {
+            emit8(0xC0);
+        } else {
+            emit8(0xC1);
+        }
         emit_modrm(3, 1, dst.id);
         emit_imm(imm, 1);
         return *this;
@@ -7751,7 +7767,11 @@ public:
     CodeGen& sal(Reg dst, int64_t imm) {
         if (dst.bits == 16) emit8(0x66);
         emit_rex_if_needed(dst.bits==64, 0, 0, dst.id);
-        emit8(0xC0);
+        if (dst.bits == 8) {
+            emit8(0xC0);
+        } else {
+            emit8(0xC1);
+        }
         emit_modrm(3, 6, dst.id);
         emit_imm(imm, 1);
         return *this;
@@ -7772,7 +7792,11 @@ public:
     CodeGen& sar(Reg dst, int64_t imm) {
         if (dst.bits == 16) emit8(0x66);
         emit_rex_if_needed(dst.bits==64, 0, 0, dst.id);
-        emit8(0xC0);
+        if (dst.bits == 8) {
+            emit8(0xC0);
+        } else {
+            emit8(0xC1);
+        }
         emit_modrm(3, 7, dst.id);
         emit_imm(imm, 1);
         return *this;
@@ -8058,7 +8082,11 @@ public:
     CodeGen& shl(Reg dst, int64_t imm) {
         if (dst.bits == 16) emit8(0x66);
         emit_rex_if_needed(dst.bits==64, 0, 0, dst.id);
-        emit8(0xC0);
+        if (dst.bits == 8) {
+            emit8(0xC0);
+        } else {
+            emit8(0xC1);
+        }
         emit_modrm(3, 4, dst.id);
         emit_imm(imm, 1);
         return *this;
@@ -8082,7 +8110,11 @@ public:
     CodeGen& shr(Reg dst, int64_t imm) {
         if (dst.bits == 16) emit8(0x66);
         emit_rex_if_needed(dst.bits==64, 0, 0, dst.id);
-        emit8(0xC0);
+        if (dst.bits == 8) {
+            emit8(0xC0);
+        } else {
+            emit8(0xC1);
+        }
         emit_modrm(3, 5, dst.id);
         emit_imm(imm, 1);
         return *this;
