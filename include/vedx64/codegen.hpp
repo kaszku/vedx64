@@ -4186,19 +4186,6 @@ public:
         return *this;
     }
 
-    CodeGen& movsx(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
-        emit8(0x0F); emit8(0xBE);
-        emit_modrm(3, dst.id, src.id);
-        return *this;
-    }
-    CodeGen& movsx(Reg dst, Mem src) {
-        emit_rex_mem(dst.bits==64, dst.id, src);
-        emit8(0x0F); emit8(0xBE);
-        emit_mem(dst.id, src);
-        return *this;
-    }
-
     CodeGen& movsxd(Reg dst, Reg src) {
         emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x63);
@@ -4256,19 +4243,6 @@ public:
         emit8(0x0F);
         emit8(0x10);
         emit_mem(src.id, dst);
-        return *this;
-    }
-
-    CodeGen& movzx(Reg dst, Reg src) {
-        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
-        emit8(0x0F); emit8(0xB6);
-        emit_modrm(3, dst.id, src.id);
-        return *this;
-    }
-    CodeGen& movzx(Reg dst, Mem src) {
-        emit_rex_mem(dst.bits==64, dst.id, src);
-        emit8(0x0F); emit8(0xB6);
-        emit_mem(dst.id, src);
         return *this;
     }
 
@@ -9090,6 +9064,40 @@ public:
     CodeGen& pextrq(Reg dst, Xmm src, uint8_t imm) { emit8(0x66); emit8(0x48); emit_rex_if_needed(true, src.id, 0, dst.id); emit8(0x0F); emit8(0x3A); emit8(0x16); emit_modrm(3, src.id, dst.id); emit8(imm); return *this; }
     CodeGen& pinsrq(Xmm dst, Reg src, uint8_t imm) { emit8(0x66); emit8(0x48); emit_rex_if_needed(true, dst.id, 0, src.id); emit8(0x0F); emit8(0x3A); emit8(0x22); emit_modrm(3, dst.id, src.id); emit8(imm); return *this; }
     CodeGen& pshufw(Mmx dst, Mmx src, uint8_t imm) { emit8(0x0F); emit8(0x70); emit_modrm(3, dst.id, src.id); emit8(imm); return *this; }
+
+    // MOVSX/MOVZX — pick 0F BE/B6 (byte src) vs 0F BF/B7 (word src).
+    CodeGen& movsx(Reg dst, Reg src) {
+        if (dst.bits == 16) emit8(0x66);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
+        emit8(0x0F);
+        emit8(src.bits == 16 ? 0xBF : 0xBE);
+        emit_modrm(3, dst.id, src.id);
+        return *this;
+    }
+    CodeGen& movsx(Reg dst, Mem src) {
+        if (dst.bits == 16) emit8(0x66);
+        emit_rex_mem(dst.bits==64, dst.id, src);
+        emit8(0x0F);
+        emit8(src.size_hint == 2 ? 0xBF : 0xBE);
+        emit_mem(dst.id, src);
+        return *this;
+    }
+    CodeGen& movzx(Reg dst, Reg src) {
+        if (dst.bits == 16) emit8(0x66);
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
+        emit8(0x0F);
+        emit8(src.bits == 16 ? 0xB7 : 0xB6);
+        emit_modrm(3, dst.id, src.id);
+        return *this;
+    }
+    CodeGen& movzx(Reg dst, Mem src) {
+        if (dst.bits == 16) emit8(0x66);
+        emit_rex_mem(dst.bits==64, dst.id, src);
+        emit8(0x0F);
+        emit8(src.size_hint == 2 ? 0xB7 : 0xB6);
+        emit_mem(dst.id, src);
+        return *this;
+    }
 
     // Shift/rotate by CL — D2 /ext (byte) | D3 /ext (16/32/64-bit).
     CodeGen& shl(Reg dst, CL_Reg) {
