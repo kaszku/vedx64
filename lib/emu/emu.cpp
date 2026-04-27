@@ -6124,4 +6124,21 @@ size_t emu_run(CpuState& cpu, size_t max_steps) {
     return max_steps;
 }
 
+size_t emu_run_n(CpuState& cpu, size_t n) {
+    for (size_t i = 0; i < n; ++i) {
+        StepResult r = emu_step(cpu);
+        if (r != StepResult::OK) return i + 1;
+    }
+    return n;
+}
+
+size_t emu_run_until(CpuState& cpu, bool (*stop)(const CpuState&, void*), void* user, size_t step_limit) {
+    for (size_t i = 0; i < step_limit; ++i) {
+        if (stop && stop(cpu, user)) return i;
+        StepResult r = emu_step(cpu);
+        if (r != StepResult::OK) return i + 1;
+    }
+    return step_limit;
+}
+
 } // namespace vedx64

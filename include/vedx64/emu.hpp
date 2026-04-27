@@ -70,4 +70,13 @@ StepResult emu_step(CpuState& cpu);
 // Run until halt/error/max_steps. Returns number of steps executed.
 size_t emu_run(CpuState& cpu, size_t max_steps = 1000000);
 
+// Run exactly `n` instructions (or until halt/error). Returns steps executed.
+size_t emu_run_n(CpuState& cpu, size_t n);
+
+// Run until `stop(cpu)` returns true, halt/error fires, or `step_limit`
+// is reached. The predicate is evaluated *before* each step, so passing a
+// predicate that always returns true executes zero steps. Returns the
+// number of steps executed.
+size_t emu_run_until(CpuState& cpu, bool (*stop)(const CpuState&, void*), void* user, size_t step_limit = 1000000);
+
 } // namespace vedx64
