@@ -51,7 +51,7 @@ pub mod ffi {
     }
 
     unsafe extern "C++" {
-        include!("vedx64_bridge.h");
+        include!("vedx64_bridge.hpp");
 
         type Decoded;
         type Emu;

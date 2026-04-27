@@ -135,7 +135,6 @@ FlowResult classify_flow(rust::Slice<const uint8_t> code, uint64_t addr) {
     return FlowResult{static_cast<uint8_t>(fi.type), fi.address, fi.target, fi.is_indirect, fi.has_fallthrough, fi.length};
 }
 
-#ifdef VEDX64_SEMANTICS
 struct SemResult {
     uint8_t flags_read;
     uint8_t flags_written;
@@ -154,7 +153,6 @@ SemResult get_semantics(const Decoded& d) {
         static_cast<uint8_t>(s->flow), static_cast<uint8_t>(s->category),
         s->ring, s->lock_valid, s->is_privileged};
 }
-#endif // VEDX64_SEMANTICS
 
 #ifdef VEDX64_EMU
 struct Emu {
