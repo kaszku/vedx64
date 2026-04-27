@@ -10,6 +10,7 @@
 #include "vedx64/instruction.hpp"
 #include "vedx64/relocation.hpp"
 #include "vedx64/branch_follow.hpp"
+#include "vedx64/analysis.hpp"
 #ifdef VEDX64_CODEGEN
 #include "vedx64/codegen.hpp"
 #endif

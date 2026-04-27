@@ -6,6 +6,8 @@
 #include <cstddef>
 #include <cstring>
 #include <vector>
+#include <string>
+#include <initializer_list>
 #include <stdexcept>
 
 namespace vedx64 {
@@ -14,6 +16,17 @@ struct Reg {
     uint8_t id;
     uint8_t bits; // 8, 16, 32, 64
     bool operator==(const Reg& o) const { return id == o.id && bits == o.bits; }
+    /// Lowercase canonical name (e.g. "rax", "r10d", "cl").
+    /// Returns "?" for invalid id/bits combinations.
+    const char* name() const {
+        static const char* n8[]  = {"al","cl","dl","bl","spl","bpl","sil","dil","r8b","r9b","r10b","r11b","r12b","r13b","r14b","r15b"};
+        static const char* n16[] = {"ax","cx","dx","bx","sp","bp","si","di","r8w","r9w","r10w","r11w","r12w","r13w","r14w","r15w"};
+        static const char* n32[] = {"eax","ecx","edx","ebx","esp","ebp","esi","edi","r8d","r9d","r10d","r11d","r12d","r13d","r14d","r15d"};
+        static const char* n64[] = {"rax","rcx","rdx","rbx","rsp","rbp","rsi","rdi","r8","r9","r10","r11","r12","r13","r14","r15"};
+        if (id >= 16) return "?";
+        switch (bits) { case 8: return n8[id]; case 16: return n16[id]; case 32: return n32[id]; case 64: return n64[id]; }
+        return "?";
+    }
 };
 
 struct Xmm {
@@ -232,6 +245,12 @@ class CodeGen {
     struct Patch { size_t offset; uint32_t label_id; uint8_t size; };
     std::vector<Patch> patches_;
     std::vector<Label*> labels_;
+public:
+    struct Anchor { std::string name; size_t offset; };
+    struct Reloc  { std::string name; size_t offset; uint8_t size; };
+private:
+    std::vector<Anchor> anchors_;
+    std::vector<Reloc>  relocs_;
 
     void emit8(uint8_t v) { buf_.push_back(v); }
     void emit16(uint16_t v) { emit8((uint8_t)v); emit8((uint8_t)(v>>8)); }
@@ -375,7 +394,7 @@ public:
     CodeGen() = default;
     const uint8_t* data() const { return buf_.data(); }
     size_t size() const { return buf_.size(); }
-    void clear() { buf_.clear(); patches_.clear(); label_count_ = 0; }
+    void clear() { buf_.clear(); patches_.clear(); anchors_.clear(); relocs_.clear(); label_count_ = 0; }
 
     Label label() { Label l; l.id = label_count_++; return l; }
     void bind(Label& lab) { lab.offset = (int64_t)buf_.size(); lab.bound = true;
@@ -395,6 +414,57 @@ public:
     CodeGen& dw(uint16_t v) { emit16(v); return *this; }
     CodeGen& dd(uint32_t v) { emit32(v); return *this; }
     CodeGen& dq(uint64_t v) { emit64(v); return *this; }
+
+    /// Record `{name, current size()}` in the anchor list.
+    CodeGen& add_anchor(std::string name) {
+        anchors_.push_back({std::move(name), buf_.size()});
+        return *this;
+    }
+    const std::vector<Anchor>& anchors() const { return anchors_; }
+
+    /// Emit a 4-byte placeholder zero and record a relocation entry
+    /// referring to it. Caller patches later via `data()[offset..offset+4]`.
+    CodeGen& emit_rel32_placeholder(std::string name) {
+        relocs_.push_back({std::move(name), buf_.size(), 4});
+        emit32(0);
+        return *this;
+    }
+    const std::vector<Reloc>& relocations() const { return relocs_; }
+
+    /// Emit `Jcc rel32` (0F 8x cd) where `cc` is a 4-bit condition code.
+    CodeGen& jcc(uint8_t cc, int32_t rel) {
+        emit8(0x0F); emit8(0x80 | (cc & 0xF)); emit_imm(rel, 4); return *this;
+    }
+    /// Emit `Jcc Label` (0F 8x cd, patched at bind).
+    CodeGen& jcc(uint8_t cc, Label& label) {
+        emit8(0x0F); emit8(0x80 | (cc & 0xF));
+        if (label.bound) {
+            int32_t rel = (int32_t)(label.offset - (int64_t)(buf_.size() + 4));
+            emit32((uint32_t)rel);
+        } else {
+            patches_.push_back({buf_.size(), label.id, 4});
+            emit32(0);
+        }
+        return *this;
+    }
+
+    /// Shorthand `LEA rbp, [rsp + disp]` — common in Win64 prologues.
+    CodeGen& lea_rbp(int32_t disp) { return lea(rbp, ptr(rsp, disp)); }
+
+    /// Emit a SysV/Win64-style frame setup: `push reg…; sub rsp, size`.
+    /// `regs` are pushed in the order given.
+    CodeGen& frame_setup(uint32_t size, std::initializer_list<Reg> regs) {
+        for (auto r : regs) push(r);
+        if (size != 0) sub(rsp, (int64_t)size);
+        return *this;
+    }
+    /// Emit the matching teardown: `add rsp, size; pop reg…` (reverse order).
+    CodeGen& frame_teardown(uint32_t size, std::initializer_list<Reg> regs) {
+        if (size != 0) add(rsp, (int64_t)size);
+        // pop in reverse
+        for (auto it = regs.end(); it != regs.begin(); ) { --it; pop(*it); }
+        return *this;
+    }
 
     CodeGen& aaa() {
         emit8(0x37);
