@@ -36,6 +36,7 @@ set(VEDX64_CORE_SOURCES
     lib/core/instruction.cpp
     lib/relocation/relocation.cpp
     lib/branch_follow/branch_follow.cpp
+    lib/semantics/semantics.cpp
 )
 
 if(VEDX64_EMU)
@@ -151,6 +152,11 @@ if(VEDX64_TESTS)
     set_target_properties(analysis_test PROPERTIES FOLDER "tests")
     add_test(NAME analysis_test COMMAND analysis_test)
 
+    add_executable(semantics_test tests/semantics_test.cpp)
+    target_link_libraries(semantics_test PRIVATE vedx64_core)
+    set_target_properties(semantics_test PROPERTIES FOLDER "tests")
+    add_test(NAME semantics_test COMMAND semantics_test)
+
     if(VEDX64_IR)
         add_executable(ir_test tests/ir_test.cpp)
         target_link_libraries(ir_test PRIVATE vedx64_core)
@@ -201,6 +207,16 @@ if(VEDX64_EXAMPLES)
     add_executable(branch_follow_example examples/branch_follow_example.cpp)
     target_link_libraries(branch_follow_example PRIVATE vedx64_core)
     set_target_properties(branch_follow_example PROPERTIES FOLDER "examples")
+
+    add_executable(semantics_example examples/semantics_example.cpp)
+    target_link_libraries(semantics_example PRIVATE vedx64_core)
+    set_target_properties(semantics_example PROPERTIES FOLDER "examples")
+
+    if(VEDX64_CODEGEN)
+        add_executable(analysis_example examples/analysis_example.cpp)
+        target_link_libraries(analysis_example PRIVATE vedx64_core)
+        set_target_properties(analysis_example PROPERTIES FOLDER "examples")
+    endif()
 
     if(VEDX64_ASSEMBLER)
         add_executable(assembler_example examples/assembler_example.cpp)
