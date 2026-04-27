@@ -20,7 +20,6 @@
 #endif
 
 #ifdef __GNUC__
-#pragma GCC diagnostic ignored "-Wmismatched-new-delete"
 #pragma GCC diagnostic ignored "-Wmissing-declarations"
 #ifdef __clang__
 #pragma clang diagnostic ignored "-Wdollar-in-identifier-extension"
@@ -797,26 +796,6 @@ std::size_t align_of() {
 }
 #endif // CXXBRIDGE1_LAYOUT
 
-namespace detail {
-template <typename T, typename = void *>
-struct operator_new {
-  void *operator()(::std::size_t sz) { return ::operator new(sz); }
-};
-
-template <typename T>
-struct operator_new<T, decltype(T::operator new(sizeof(T)))> {
-  void *operator()(::std::size_t sz) { return T::operator new(sz); }
-};
-} // namespace detail
-
-template <typename T>
-union MaybeUninit {
-  T value;
-  void *operator new(::std::size_t sz) { return detail::operator_new<T>{}(sz); }
-  MaybeUninit() {}
-  ~MaybeUninit() {}
-};
-
 namespace {
 template <bool> struct deleter_if {
   template <typename T> void operator()(T *) {}
@@ -838,11 +817,9 @@ namespace vedx64 {
   namespace bridge {
     struct FlowResult;
     struct SemResult;
-    struct IrVarNode;
-    struct IrOp;
-    struct IrLifted;
     using Decoded = ::vedx64::bridge::Decoded;
     using Emu = ::vedx64::bridge::Emu;
+    using IrLifted = ::vedx64::bridge::IrLifted;
   }
 }
 
@@ -877,43 +854,6 @@ struct SemResult final {
   using IsRelocatable = ::std::true_type;
 };
 #endif // CXXBRIDGE1_STRUCT_vedx64$bridge$SemResult
-
-#ifndef CXXBRIDGE1_STRUCT_vedx64$bridge$IrVarNode
-#define CXXBRIDGE1_STRUCT_vedx64$bridge$IrVarNode
-struct IrVarNode final {
-  ::std::uint8_t space CXX_DEFAULT_VALUE(0);
-  ::std::uint16_t offset CXX_DEFAULT_VALUE(0);
-  ::std::uint8_t size CXX_DEFAULT_VALUE(0);
-  ::std::int64_t value CXX_DEFAULT_VALUE(0);
-
-  using IsRelocatable = ::std::true_type;
-};
-#endif // CXXBRIDGE1_STRUCT_vedx64$bridge$IrVarNode
-
-#ifndef CXXBRIDGE1_STRUCT_vedx64$bridge$IrOp
-#define CXXBRIDGE1_STRUCT_vedx64$bridge$IrOp
-struct IrOp final {
-  ::std::uint8_t opcode CXX_DEFAULT_VALUE(0);
-  ::vedx64::bridge::IrVarNode output;
-  ::vedx64::bridge::IrVarNode input0;
-  ::vedx64::bridge::IrVarNode input1;
-  ::vedx64::bridge::IrVarNode input2;
-  ::std::uint8_t num_inputs CXX_DEFAULT_VALUE(0);
-
-  using IsRelocatable = ::std::true_type;
-};
-#endif // CXXBRIDGE1_STRUCT_vedx64$bridge$IrOp
-
-#ifndef CXXBRIDGE1_STRUCT_vedx64$bridge$IrLifted
-#define CXXBRIDGE1_STRUCT_vedx64$bridge$IrLifted
-struct IrLifted final {
-  ::rust::Vec<::vedx64::bridge::IrOp> ops;
-  ::std::uint64_t address CXX_DEFAULT_VALUE(0);
-  ::std::uint8_t length CXX_DEFAULT_VALUE(0);
-
-  using IsRelocatable = ::std::true_type;
-};
-#endif // CXXBRIDGE1_STRUCT_vedx64$bridge$IrLifted
 
 extern "C" {
 ::vedx64::bridge::Decoded *vedx64$bridge$cxxbridge1$194$decode(::rust::Slice<::std::uint8_t const> code) noexcept {
@@ -1090,20 +1030,36 @@ void vedx64$bridge$cxxbridge1$194$emu_read_mem(::vedx64::bridge::Emu const &e, :
   ::std::unique_ptr<::vedx64::bridge::IrLifted> (*ir_lift$)(::rust::Slice<::std::uint8_t const>, ::std::uint64_t) = ::vedx64::bridge::ir_lift;
   return ir_lift$(code, addr).release();
 }
+
+::std::uint64_t vedx64$bridge$cxxbridge1$194$ir_lifted_address(::vedx64::bridge::IrLifted const &l) noexcept {
+  ::std::uint64_t (*ir_lifted_address$)(::vedx64::bridge::IrLifted const &) = ::vedx64::bridge::ir_lifted_address;
+  return ir_lifted_address$(l);
+}
+
+::std::uint8_t vedx64$bridge$cxxbridge1$194$ir_lifted_length(::vedx64::bridge::IrLifted const &l) noexcept {
+  ::std::uint8_t (*ir_lifted_length$)(::vedx64::bridge::IrLifted const &) = ::vedx64::bridge::ir_lifted_length;
+  return ir_lifted_length$(l);
+}
+
+::std::size_t vedx64$bridge$cxxbridge1$194$ir_lifted_op_count(::vedx64::bridge::IrLifted const &l) noexcept {
+  ::std::size_t (*ir_lifted_op_count$)(::vedx64::bridge::IrLifted const &) = ::vedx64::bridge::ir_lifted_op_count;
+  return ir_lifted_op_count$(l);
+}
+
+::std::uint8_t vedx64$bridge$cxxbridge1$194$ir_lifted_op_opcode(::vedx64::bridge::IrLifted const &l, ::std::size_t i) noexcept {
+  ::std::uint8_t (*ir_lifted_op_opcode$)(::vedx64::bridge::IrLifted const &, ::std::size_t) = ::vedx64::bridge::ir_lifted_op_opcode;
+  return ir_lifted_op_opcode$(l, i);
+}
+
+::std::uint8_t vedx64$bridge$cxxbridge1$194$ir_lifted_op_num_inputs(::vedx64::bridge::IrLifted const &l, ::std::size_t i) noexcept {
+  ::std::uint8_t (*ir_lifted_op_num_inputs$)(::vedx64::bridge::IrLifted const &, ::std::size_t) = ::vedx64::bridge::ir_lifted_op_num_inputs;
+  return ir_lifted_op_num_inputs$(l, i);
+}
 } // extern "C"
 } // namespace bridge
 } // namespace vedx64
 
 extern "C" {
-void cxxbridge1$rust_vec$vedx64$bridge$IrOp$new(::rust::Vec<::vedx64::bridge::IrOp> const *ptr) noexcept;
-void cxxbridge1$rust_vec$vedx64$bridge$IrOp$drop(::rust::Vec<::vedx64::bridge::IrOp> *ptr) noexcept;
-::std::size_t cxxbridge1$rust_vec$vedx64$bridge$IrOp$len(::rust::Vec<::vedx64::bridge::IrOp> const *ptr) noexcept;
-::std::size_t cxxbridge1$rust_vec$vedx64$bridge$IrOp$capacity(::rust::Vec<::vedx64::bridge::IrOp> const *ptr) noexcept;
-::vedx64::bridge::IrOp const *cxxbridge1$rust_vec$vedx64$bridge$IrOp$data(::rust::Vec<::vedx64::bridge::IrOp> const *ptr) noexcept;
-void cxxbridge1$rust_vec$vedx64$bridge$IrOp$reserve_total(::rust::Vec<::vedx64::bridge::IrOp> *ptr, ::std::size_t new_cap) noexcept;
-void cxxbridge1$rust_vec$vedx64$bridge$IrOp$set_len(::rust::Vec<::vedx64::bridge::IrOp> *ptr, ::std::size_t len) noexcept;
-void cxxbridge1$rust_vec$vedx64$bridge$IrOp$truncate(::rust::Vec<::vedx64::bridge::IrOp> *ptr, ::std::size_t len) noexcept;
-
 static_assert(::rust::detail::is_complete<::std::remove_extent<::vedx64::bridge::Decoded>::type>::value, "definition of `::vedx64::bridge::Decoded` is required");
 static_assert(sizeof(::std::unique_ptr<::vedx64::bridge::Decoded>) == sizeof(void *), "");
 static_assert(alignof(::std::unique_ptr<::vedx64::bridge::Decoded>) == alignof(void *), "");
@@ -1148,11 +1104,6 @@ static_assert(alignof(::std::unique_ptr<::vedx64::bridge::IrLifted>) == alignof(
 void cxxbridge1$unique_ptr$vedx64$bridge$IrLifted$null(::std::unique_ptr<::vedx64::bridge::IrLifted> *ptr) noexcept {
   ::new (ptr) ::std::unique_ptr<::vedx64::bridge::IrLifted>();
 }
-::vedx64::bridge::IrLifted *cxxbridge1$unique_ptr$vedx64$bridge$IrLifted$uninit(::std::unique_ptr<::vedx64::bridge::IrLifted> *ptr) noexcept {
-  ::vedx64::bridge::IrLifted *uninit = reinterpret_cast<::vedx64::bridge::IrLifted *>(new ::rust::MaybeUninit<::vedx64::bridge::IrLifted>);
-  ::new (ptr) ::std::unique_ptr<::vedx64::bridge::IrLifted>(uninit);
-  return uninit;
-}
 void cxxbridge1$unique_ptr$vedx64$bridge$IrLifted$raw(::std::unique_ptr<::vedx64::bridge::IrLifted> *ptr, ::std::unique_ptr<::vedx64::bridge::IrLifted>::pointer raw) noexcept {
   ::new (ptr) ::std::unique_ptr<::vedx64::bridge::IrLifted>(raw);
 }
@@ -1166,40 +1117,3 @@ void cxxbridge1$unique_ptr$vedx64$bridge$IrLifted$drop(::std::unique_ptr<::vedx6
   ::rust::deleter_if<::rust::detail::is_complete<::vedx64::bridge::IrLifted>::value>{}(ptr);
 }
 } // extern "C"
-
-namespace rust {
-inline namespace cxxbridge1 {
-template <>
-Vec<::vedx64::bridge::IrOp>::Vec() noexcept {
-  cxxbridge1$rust_vec$vedx64$bridge$IrOp$new(this);
-}
-template <>
-void Vec<::vedx64::bridge::IrOp>::drop() noexcept {
-  return cxxbridge1$rust_vec$vedx64$bridge$IrOp$drop(this);
-}
-template <>
-::std::size_t Vec<::vedx64::bridge::IrOp>::size() const noexcept {
-  return cxxbridge1$rust_vec$vedx64$bridge$IrOp$len(this);
-}
-template <>
-::std::size_t Vec<::vedx64::bridge::IrOp>::capacity() const noexcept {
-  return cxxbridge1$rust_vec$vedx64$bridge$IrOp$capacity(this);
-}
-template <>
-::vedx64::bridge::IrOp const *Vec<::vedx64::bridge::IrOp>::data() const noexcept {
-  return cxxbridge1$rust_vec$vedx64$bridge$IrOp$data(this);
-}
-template <>
-void Vec<::vedx64::bridge::IrOp>::reserve_total(::std::size_t new_cap) noexcept {
-  return cxxbridge1$rust_vec$vedx64$bridge$IrOp$reserve_total(this, new_cap);
-}
-template <>
-void Vec<::vedx64::bridge::IrOp>::set_len(::std::size_t len) noexcept {
-  return cxxbridge1$rust_vec$vedx64$bridge$IrOp$set_len(this, len);
-}
-template <>
-void Vec<::vedx64::bridge::IrOp>::truncate(::std::size_t len) {
-  return cxxbridge1$rust_vec$vedx64$bridge$IrOp$truncate(this, len);
-}
-} // namespace cxxbridge1
-} // namespace rust

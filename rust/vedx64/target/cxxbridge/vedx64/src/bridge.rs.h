@@ -807,11 +807,9 @@ namespace vedx64 {
   namespace bridge {
     struct FlowResult;
     struct SemResult;
-    struct IrVarNode;
-    struct IrOp;
-    struct IrLifted;
     using Decoded = ::vedx64::bridge::Decoded;
     using Emu = ::vedx64::bridge::Emu;
+    using IrLifted = ::vedx64::bridge::IrLifted;
   }
 }
 
@@ -846,43 +844,6 @@ struct SemResult final {
   using IsRelocatable = ::std::true_type;
 };
 #endif // CXXBRIDGE1_STRUCT_vedx64$bridge$SemResult
-
-#ifndef CXXBRIDGE1_STRUCT_vedx64$bridge$IrVarNode
-#define CXXBRIDGE1_STRUCT_vedx64$bridge$IrVarNode
-struct IrVarNode final {
-  ::std::uint8_t space CXX_DEFAULT_VALUE(0);
-  ::std::uint16_t offset CXX_DEFAULT_VALUE(0);
-  ::std::uint8_t size CXX_DEFAULT_VALUE(0);
-  ::std::int64_t value CXX_DEFAULT_VALUE(0);
-
-  using IsRelocatable = ::std::true_type;
-};
-#endif // CXXBRIDGE1_STRUCT_vedx64$bridge$IrVarNode
-
-#ifndef CXXBRIDGE1_STRUCT_vedx64$bridge$IrOp
-#define CXXBRIDGE1_STRUCT_vedx64$bridge$IrOp
-struct IrOp final {
-  ::std::uint8_t opcode CXX_DEFAULT_VALUE(0);
-  ::vedx64::bridge::IrVarNode output;
-  ::vedx64::bridge::IrVarNode input0;
-  ::vedx64::bridge::IrVarNode input1;
-  ::vedx64::bridge::IrVarNode input2;
-  ::std::uint8_t num_inputs CXX_DEFAULT_VALUE(0);
-
-  using IsRelocatable = ::std::true_type;
-};
-#endif // CXXBRIDGE1_STRUCT_vedx64$bridge$IrOp
-
-#ifndef CXXBRIDGE1_STRUCT_vedx64$bridge$IrLifted
-#define CXXBRIDGE1_STRUCT_vedx64$bridge$IrLifted
-struct IrLifted final {
-  ::rust::Vec<::vedx64::bridge::IrOp> ops;
-  ::std::uint64_t address CXX_DEFAULT_VALUE(0);
-  ::std::uint8_t length CXX_DEFAULT_VALUE(0);
-
-  using IsRelocatable = ::std::true_type;
-};
-#endif // CXXBRIDGE1_STRUCT_vedx64$bridge$IrLifted
 } // namespace bridge
 } // namespace vedx64
 

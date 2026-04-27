@@ -8,3 +8,6 @@ build/
 corpus.*
 comparison.txt
 CMakeUserPresets.json
+# Rust crate build artifacts
+rust/vedx64/target/
+rust/vedx64/Cargo.lock

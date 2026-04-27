@@ -25,36 +25,12 @@ pub mod ffi {
         is_privileged: bool,
     }
 
-    #[derive(Debug, Clone, Default)]
-    struct IrVarNode {
-        space: u8,
-        offset: u16,
-        size: u8,
-        value: i64,
-    }
-
-    #[derive(Debug, Clone)]
-    struct IrOp {
-        opcode: u8,
-        output: IrVarNode,
-        input0: IrVarNode,
-        input1: IrVarNode,
-        input2: IrVarNode,
-        num_inputs: u8,
-    }
-
-    #[derive(Debug)]
-    struct IrLifted {
-        ops: Vec<IrOp>,
-        address: u64,
-        length: u8,
-    }
-
     unsafe extern "C++" {
         include!("vedx64_bridge.hpp");
 
         type Decoded;
         type Emu;
+        type IrLifted;
 
         // Core
         fn decode(code: &[u8]) -> UniquePtr<Decoded>;
@@ -105,6 +81,11 @@ pub mod ffi {
 
         // IR
         fn ir_lift(code: &[u8], addr: u64) -> UniquePtr<IrLifted>;
+        fn ir_lifted_address(l: &IrLifted) -> u64;
+        fn ir_lifted_length(l: &IrLifted) -> u8;
+        fn ir_lifted_op_count(l: &IrLifted) -> usize;
+        fn ir_lifted_op_opcode(l: &IrLifted, i: usize) -> u8;
+        fn ir_lifted_op_num_inputs(l: &IrLifted, i: usize) -> u8;
     }
 }
 
