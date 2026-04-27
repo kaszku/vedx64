@@ -14,6 +14,8 @@
 #endif
 #include "vedx64/relocation.hpp"
 #include "vedx64/branch_follow.hpp"
+#include "vedx64/semantics.hpp"
+#include "vedx64/analysis.hpp"
 #ifdef VEDX64_ASSEMBLER
 #include "vedx64/assembler.hpp"
 #endif
@@ -947,6 +949,80 @@ NB_MODULE(vedx64_py, m) {
         size_t len = data.size();
         return vedx64::classify_flow(ptr, len, rip);
     }, nb::arg("data"), nb::arg("rip") = 0, "Classify the control flow of an instruction");
+
+    // analysis submodule
+    nb::module_ analysis_m = m.def_submodule("analysis",
+        "Mnemonic-level queries (Jcc/CMOV/EFLAGS), patchers, condition codes.");
+
+    nb::enum_<vedx64::analysis::CondCode>(analysis_m, "CondCode")
+        .value("O", vedx64::analysis::CondCode::O)
+        .value("NO", vedx64::analysis::CondCode::NO)
+        .value("B", vedx64::analysis::CondCode::B)
+        .value("NB", vedx64::analysis::CondCode::NB)
+        .value("Z", vedx64::analysis::CondCode::Z)
+        .value("NZ", vedx64::analysis::CondCode::NZ)
+        .value("BE", vedx64::analysis::CondCode::BE)
+        .value("NBE", vedx64::analysis::CondCode::NBE)
+        .value("S", vedx64::analysis::CondCode::S)
+        .value("NS", vedx64::analysis::CondCode::NS)
+        .value("P", vedx64::analysis::CondCode::P)
+        .value("NP", vedx64::analysis::CondCode::NP)
+        .value("L", vedx64::analysis::CondCode::L)
+        .value("NL", vedx64::analysis::CondCode::NL)
+        .value("LE", vedx64::analysis::CondCode::LE)
+        .value("NLE", vedx64::analysis::CondCode::NLE)
+        .export_values();
+
+    analysis_m.def("is_jcc", &vedx64::analysis::is_jcc, nb::arg("m"));
+    analysis_m.def("is_cmov", &vedx64::analysis::is_cmov, nb::arg("m"));
+    analysis_m.def("is_call", &vedx64::analysis::is_call, nb::arg("m"));
+    analysis_m.def("is_ret", &vedx64::analysis::is_ret, nb::arg("m"));
+    analysis_m.def("is_unconditional_branch", &vedx64::analysis::is_unconditional_branch, nb::arg("m"));
+    analysis_m.def("is_relative_branch", &vedx64::analysis::is_relative_branch, nb::arg("m"));
+    analysis_m.def("changes_rip", &vedx64::analysis::changes_rip, nb::arg("m"));
+    analysis_m.def("is_arith", &vedx64::analysis::is_arith, nb::arg("m"));
+    analysis_m.def("is_logical", &vedx64::analysis::is_logical, nb::arg("m"));
+    analysis_m.def("is_shift", &vedx64::analysis::is_shift, nb::arg("m"));
+    analysis_m.def("sets_eflags", &vedx64::analysis::sets_eflags, nb::arg("m"));
+    analysis_m.def("reads_eflags", &vedx64::analysis::reads_eflags, nb::arg("m"));
+    analysis_m.def("canonical_size", &vedx64::analysis::canonical_size, nb::arg("m"));
+    analysis_m.def("jcc_condition", [](Mnemonic m) -> nb::object {
+        if (!vedx64::analysis::is_jcc(m)) return nb::none();
+        return nb::cast(vedx64::analysis::jcc_condition(m));
+    }, nb::arg("m"), "4-bit condition code for a Jcc; None if not Jcc.");
+    analysis_m.def("cmov_condition", [](Mnemonic m) -> nb::object {
+        if (!vedx64::analysis::is_cmov(m)) return nb::none();
+        return nb::cast(vedx64::analysis::cmov_condition(m));
+    }, nb::arg("m"), "4-bit condition code for a CMOVcc; None if not CMOV.");
+    analysis_m.def("jcc_for_condition", &vedx64::analysis::jcc_for_condition,
+        nb::arg("cc"), "Canonical Jcc Mnemonic for a condition code.");
+
+    analysis_m.attr("EF_CF") = (uint8_t)vedx64::analysis::EF_CF;
+    analysis_m.attr("EF_PF") = (uint8_t)vedx64::analysis::EF_PF;
+    analysis_m.attr("EF_AF") = (uint8_t)vedx64::analysis::EF_AF;
+    analysis_m.attr("EF_ZF") = (uint8_t)vedx64::analysis::EF_ZF;
+    analysis_m.attr("EF_SF") = (uint8_t)vedx64::analysis::EF_SF;
+    analysis_m.attr("EF_OF") = (uint8_t)vedx64::analysis::EF_OF;
+    analysis_m.attr("EF_DF") = (uint8_t)vedx64::analysis::EF_DF;
+    analysis_m.attr("EF_IF") = (uint8_t)vedx64::analysis::EF_IF;
+
+    analysis_m.def("build_jmp_rel32", [](int32_t disp) {
+        uint8_t buf[5]{}; vedx64::analysis::patch_jmp_rel32(buf, disp);
+        return nb::bytes((const char*)buf, sizeof(buf));
+    }, nb::arg("disp"));
+    analysis_m.def("build_jcc_rel32", [](uint8_t cc, int32_t disp) {
+        uint8_t buf[6]{};
+        vedx64::analysis::patch_jcc_rel32(buf, static_cast<vedx64::analysis::CondCode>(cc & 0xF), disp);
+        return nb::bytes((const char*)buf, sizeof(buf));
+    }, nb::arg("cc"), nb::arg("disp"));
+    analysis_m.def("build_call_rel32", [](int32_t disp) {
+        uint8_t buf[5]{}; vedx64::analysis::patch_call_rel32(buf, disp);
+        return nb::bytes((const char*)buf, sizeof(buf));
+    }, nb::arg("disp"));
+    analysis_m.def("build_mov_imm64", [](uint8_t reg_id, uint64_t imm) {
+        uint8_t buf[10]{}; vedx64::analysis::patch_mov_imm64(buf, reg_id, imm);
+        return nb::bytes((const char*)buf, sizeof(buf));
+    }, nb::arg("reg_id"), nb::arg("imm"));
 
 #ifdef VEDX64_EMU
     // Emulator subsystem

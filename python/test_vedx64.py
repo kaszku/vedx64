@@ -115,6 +115,44 @@ def test_branch_flow():
     assert flow is not None
     assert flow.type == v.FlowType.Return  # BranchFlowType in C++, exposed as FlowType in Python
 
+def test_analysis_mnemonic_queries():
+    a = v.analysis
+    M = v.Mnemonic
+    assert a.is_jcc(M.JE)
+    assert a.is_jcc(M.JNE)
+    assert not a.is_jcc(M.JMP)
+    assert a.is_unconditional_branch(M.JMP)
+    assert a.is_call(M.CALL)
+    assert a.is_ret(M.RETN)
+    assert a.changes_rip(M.HLT)
+    assert not a.changes_rip(M.ADD)
+    assert a.is_arith(M.ADD)
+    assert a.is_logical(M.AND)
+    assert a.is_shift(M.SHL)
+    # Condition codes
+    assert a.jcc_condition(M.JE) == a.CondCode.Z
+    assert a.jcc_condition(M.JMP) is None
+    assert a.cmov_condition(M.CMOVE) == a.CondCode.Z
+    assert a.jcc_for_condition(a.CondCode.Z) == M.JZ
+    # EFLAGS
+    assert a.sets_eflags(M.ADD) & a.EF_CF
+    assert a.sets_eflags(M.ADD) & a.EF_ZF
+    assert not (a.sets_eflags(M.INC) & a.EF_CF)  # INC doesn't write CF
+    assert a.reads_eflags(M.JE) & a.EF_ZF
+    assert a.reads_eflags(M.ADC) & a.EF_CF
+    # Sizes
+    assert a.canonical_size(M.MOVSB) == 1
+    assert a.canonical_size(M.MOVSQ) == 8
+    assert a.canonical_size(M.ADD) == 0
+
+def test_analysis_patchers():
+    a = v.analysis
+    assert a.build_jmp_rel32(0x12345678) == bytes([0xE9, 0x78, 0x56, 0x34, 0x12])
+    jcc = a.build_jcc_rel32(int(a.CondCode.Z), -16)
+    assert jcc[:2] == bytes([0x0F, 0x84])
+    mov = a.build_mov_imm64(1, 0xCAFEBABE_DEADBEEF)  # RCX
+    assert mov[:2] == bytes([0x48, 0xB9])
+
 def test_assemble():
     if not hasattr(v, 'assemble'):
         return  # VEDX64_ASSEMBLER not enabled
