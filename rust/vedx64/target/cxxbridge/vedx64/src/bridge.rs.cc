@@ -816,6 +816,7 @@ template <> struct deleter_if<true> {
 namespace vedx64 {
   namespace bridge {
     struct FlowResult;
+    struct IndirectBranchInfo;
     struct SemResult;
     using Decoded = ::vedx64::bridge::Decoded;
     using Emu = ::vedx64::bridge::Emu;
@@ -838,6 +839,17 @@ struct FlowResult final {
   using IsRelocatable = ::std::true_type;
 };
 #endif // CXXBRIDGE1_STRUCT_vedx64$bridge$FlowResult
+
+#ifndef CXXBRIDGE1_STRUCT_vedx64$bridge$IndirectBranchInfo
+#define CXXBRIDGE1_STRUCT_vedx64$bridge$IndirectBranchInfo
+struct IndirectBranchInfo final {
+  ::std::uint8_t reg_id CXX_DEFAULT_VALUE(0);
+  bool is_mem CXX_DEFAULT_VALUE(false);
+  bool valid CXX_DEFAULT_VALUE(false);
+
+  using IsRelocatable = ::std::true_type;
+};
+#endif // CXXBRIDGE1_STRUCT_vedx64$bridge$IndirectBranchInfo
 
 #ifndef CXXBRIDGE1_STRUCT_vedx64$bridge$SemResult
 #define CXXBRIDGE1_STRUCT_vedx64$bridge$SemResult
@@ -1069,6 +1081,51 @@ void vedx64$bridge$cxxbridge1$194$build_call_rel32(::std::int32_t disp, ::rust::
 void vedx64$bridge$cxxbridge1$194$build_mov_imm64(::std::uint8_t reg_id, ::std::uint64_t imm, ::rust::Vec<::std::uint8_t> *return$) noexcept {
   ::rust::Vec<::std::uint8_t> (*build_mov_imm64$)(::std::uint8_t, ::std::uint64_t) = ::vedx64::bridge::build_mov_imm64;
   new (return$) ::rust::Vec<::std::uint8_t>(build_mov_imm64$(reg_id, imm));
+}
+
+void vedx64$bridge$cxxbridge1$194$build_jmp_reg(::std::uint8_t reg_id, ::rust::Vec<::std::uint8_t> *return$) noexcept {
+  ::rust::Vec<::std::uint8_t> (*build_jmp_reg$)(::std::uint8_t) = ::vedx64::bridge::build_jmp_reg;
+  new (return$) ::rust::Vec<::std::uint8_t>(build_jmp_reg$(reg_id));
+}
+
+void vedx64$bridge$cxxbridge1$194$build_call_reg(::std::uint8_t reg_id, ::rust::Vec<::std::uint8_t> *return$) noexcept {
+  ::rust::Vec<::std::uint8_t> (*build_call_reg$)(::std::uint8_t) = ::vedx64::bridge::build_call_reg;
+  new (return$) ::rust::Vec<::std::uint8_t>(build_call_reg$(reg_id));
+}
+
+bool vedx64$bridge$cxxbridge1$194$is_count_conditional_branch(::std::uint16_t m) noexcept {
+  bool (*is_count_conditional_branch$)(::std::uint16_t) = ::vedx64::bridge::is_count_conditional_branch;
+  return is_count_conditional_branch$(m);
+}
+
+bool vedx64$bridge$cxxbridge1$194$is_int_or_ud(::std::uint16_t m) noexcept {
+  bool (*is_int_or_ud$)(::std::uint16_t) = ::vedx64::bridge::is_int_or_ud;
+  return is_int_or_ud$(m);
+}
+
+void vedx64$bridge$cxxbridge1$194$indirect_branch_info(::vedx64::bridge::Decoded const &d, ::vedx64::bridge::IndirectBranchInfo *return$) noexcept {
+  ::vedx64::bridge::IndirectBranchInfo (*indirect_branch_info$)(::vedx64::bridge::Decoded const &) = ::vedx64::bridge::indirect_branch_info;
+  new (return$) ::vedx64::bridge::IndirectBranchInfo(indirect_branch_info$(d));
+}
+
+bool vedx64$bridge$cxxbridge1$194$has_relative_target(::vedx64::bridge::Decoded const &d) noexcept {
+  bool (*has_relative_target$)(::vedx64::bridge::Decoded const &) = ::vedx64::bridge::has_relative_target;
+  return has_relative_target$(d);
+}
+
+::std::uint64_t vedx64$bridge$cxxbridge1$194$relative_target(::vedx64::bridge::Decoded const &d, ::std::uint64_t insn_va) noexcept {
+  ::std::uint64_t (*relative_target$)(::vedx64::bridge::Decoded const &, ::std::uint64_t) = ::vedx64::bridge::relative_target;
+  return relative_target$(d, insn_va);
+}
+
+bool vedx64$bridge$cxxbridge1$194$has_first_immediate(::vedx64::bridge::Decoded const &d) noexcept {
+  bool (*has_first_immediate$)(::vedx64::bridge::Decoded const &) = ::vedx64::bridge::has_first_immediate;
+  return has_first_immediate$(d);
+}
+
+::std::int64_t vedx64$bridge$cxxbridge1$194$first_immediate(::vedx64::bridge::Decoded const &d) noexcept {
+  ::std::int64_t (*first_immediate$)(::vedx64::bridge::Decoded const &) = ::vedx64::bridge::first_immediate;
+  return first_immediate$(d);
 }
 
 ::vedx64::bridge::Emu *vedx64$bridge$cxxbridge1$194$emu_new(::std::size_t mem_size) noexcept {

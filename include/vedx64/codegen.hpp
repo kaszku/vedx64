@@ -466,6 +466,21 @@ public:
         return *this;
     }
 
+    /// Emit `CMOVcc dst, src` (0F 40+cc /r) with a runtime 4-bit condition code.
+    /// Lets emitters dispatch on a CondCode without a 16-way switch.
+    CodeGen& cmov(uint8_t cc, Reg dst, Reg src) {
+        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
+        emit8(0x0F); emit8(0x40 | (cc & 0xF));
+        emit_modrm(3, dst.id, src.id);
+        return *this;
+    }
+    CodeGen& cmov(uint8_t cc, Reg dst, Mem src) {
+        emit_rex_mem(dst.bits==64, dst.id, src);
+        emit8(0x0F); emit8(0x40 | (cc & 0xF));
+        emit_mem(dst.id, src);
+        return *this;
+    }
+
     CodeGen& aaa() {
         emit8(0x37);
         return *this;

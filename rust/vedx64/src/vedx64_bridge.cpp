@@ -103,6 +103,32 @@ uint16_t jcc_for_condition(uint8_t cc) {
 uint8_t sets_eflags(uint16_t m)    { return vedx64::analysis::sets_eflags(static_cast<Mnemonic>(m)); }
 uint8_t reads_eflags(uint16_t m)   { return vedx64::analysis::reads_eflags(static_cast<Mnemonic>(m)); }
 uint8_t canonical_size(uint16_t m) { return vedx64::analysis::canonical_size(static_cast<Mnemonic>(m)); }
+bool is_count_conditional_branch(uint16_t m) { return vedx64::analysis::is_count_conditional_branch(static_cast<Mnemonic>(m)); }
+bool is_int_or_ud(uint16_t m) { return vedx64::analysis::is_int_or_ud(static_cast<Mnemonic>(m)); }
+IndirectBranchInfo indirect_branch_info(const Decoded& d) {
+    auto info = vedx64::analysis::indirect_branch_info(d.di);
+    return IndirectBranchInfo{info.reg_id, info.is_mem, info.valid};
+}
+bool has_relative_target(const Decoded& d) {
+    uint64_t t; return vedx64::analysis::find_relative_target(d.di, 0, &t);
+}
+uint64_t relative_target(const Decoded& d, uint64_t insn_va) {
+    uint64_t t = 0; vedx64::analysis::find_relative_target(d.di, insn_va, &t); return t;
+}
+bool has_first_immediate(const Decoded& d) {
+    int64_t v; return vedx64::analysis::find_first_immediate(d.di, &v);
+}
+int64_t first_immediate(const Decoded& d) {
+    int64_t v = 0; vedx64::analysis::find_first_immediate(d.di, &v); return v;
+}
+rust::Vec<uint8_t> build_jmp_reg(uint8_t reg_id) {
+    uint8_t buf[3]{}; size_t n = vedx64::analysis::patch_jmp_reg(buf, reg_id);
+    rust::Vec<uint8_t> out; for (size_t i = 0; i < n; ++i) out.push_back(buf[i]); return out;
+}
+rust::Vec<uint8_t> build_call_reg(uint8_t reg_id) {
+    uint8_t buf[3]{}; size_t n = vedx64::analysis::patch_call_reg(buf, reg_id);
+    rust::Vec<uint8_t> out; for (size_t i = 0; i < n; ++i) out.push_back(buf[i]); return out;
+}
 
 rust::Vec<uint8_t> build_jmp_rel32(int32_t disp) {
     uint8_t buf[5]{}; vedx64::analysis::patch_jmp_rel32(buf, disp);

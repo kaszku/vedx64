@@ -60,7 +60,7 @@ pub fn ir_lift(code: &[u8], addr: u64) -> Option<cxx::UniquePtr<ffi::IrLifted>> 
     if ptr.is_null() { None } else { Some(ptr) }
 }
 
-pub use ffi::{FlowResult, SemResult, IrLifted};
+pub use ffi::{FlowResult, SemResult, IrLifted, IndirectBranchInfo};
 
 /// Mnemonic-level analysis helpers.
 /// Each takes a Mnemonic id (`Instruction::mnemonic_id()`).
@@ -98,6 +98,28 @@ pub mod analysis {
     pub fn build_jcc_rel32(cc: u8, disp: i32) -> Vec<u8> { ffi::build_jcc_rel32(cc, disp) }
     pub fn build_call_rel32(disp: i32) -> Vec<u8> { ffi::build_call_rel32(disp) }
     pub fn build_mov_imm64(reg_id: u8, imm: u64) -> Vec<u8> { ffi::build_mov_imm64(reg_id, imm) }
+    pub fn build_jmp_reg(reg_id: u8) -> Vec<u8> { ffi::build_jmp_reg(reg_id) }
+    pub fn build_call_reg(reg_id: u8) -> Vec<u8> { ffi::build_call_reg(reg_id) }
+    pub fn is_count_conditional_branch(m: u16) -> bool { ffi::is_count_conditional_branch(m) }
+    pub fn is_int_or_ud(m: u16) -> bool { ffi::is_int_or_ud(m) }
+
+    /// Indirect-branch info; None if `i` is not an indirect JMP/CALL.
+    pub fn indirect_branch_info(i: &super::Instruction) -> Option<ffi::IndirectBranchInfo> {
+        let info = ffi::indirect_branch_info(&i.inner);
+        if info.valid { Some(info) } else { None }
+    }
+    /// Absolute target VA for a relative branch / call. None for indirect / non-branch.
+    pub fn relative_target(i: &super::Instruction, insn_va: u64) -> Option<u64> {
+        if ffi::has_relative_target(&i.inner) {
+            Some(ffi::relative_target(&i.inner, insn_va))
+        } else { None }
+    }
+    /// First immediate operand value, if any.
+    pub fn first_immediate(i: &super::Instruction) -> Option<i64> {
+        if ffi::has_first_immediate(&i.inner) {
+            Some(ffi::first_immediate(&i.inner))
+        } else { None }
+    }
 }
 
 #[cfg(test)]
@@ -126,5 +148,27 @@ mod tests {
         assert_eq!(bytes, vec![0xE9, 0x78, 0x56, 0x34, 0x12]);
         let mov = analysis::build_mov_imm64(1 /* RCX */, 0xCAFEBABEu64);
         assert_eq!(mov[0..2], [0x48, 0xB9]);
+        // jmp rax → FF E0 (2 bytes); jmp r10 → 41 FF E2 (3 bytes).
+        assert_eq!(analysis::build_jmp_reg(0), vec![0xFF, 0xE0]);
+        assert_eq!(analysis::build_jmp_reg(10), vec![0x41, 0xFF, 0xE2]);
+    }
+    #[test] fn test_analysis_indirect_branch_info() {
+        // JMP rax → FF E0
+        let i = decode(&[0xFF, 0xE0]).unwrap();
+        let info = analysis::indirect_branch_info(&i).unwrap();
+        assert_eq!(info.reg_id, 0);
+        assert!(!info.is_mem);
+        // JMP rel8 → not indirect
+        let i = decode(&[0xEB, 0x05]).unwrap();
+        assert!(analysis::indirect_branch_info(&i).is_none());
+        assert_eq!(analysis::relative_target(&i, 0x1000), Some(0x1007));
+    }
+    #[test] fn test_analysis_first_immediate() {
+        // SUB rsp, 0x20 → 48 83 EC 20
+        let i = decode(&[0x48, 0x83, 0xEC, 0x20]).unwrap();
+        assert_eq!(analysis::first_immediate(&i), Some(0x20));
+        // NOP → no immediate
+        let i = decode(&[0x90]).unwrap();
+        assert_eq!(analysis::first_immediate(&i), None);
     }
 }

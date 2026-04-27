@@ -108,6 +108,17 @@ uint16_t jcc_for_condition(uint8_t cc); // CondCode -> Mnemonic
 uint8_t sets_eflags(uint16_t m);
 uint8_t reads_eflags(uint16_t m);
 uint8_t canonical_size(uint16_t m);
+bool is_count_conditional_branch(uint16_t m);
+bool is_int_or_ud(uint16_t m);
+struct IndirectBranchInfo;
+IndirectBranchInfo indirect_branch_info(const Decoded& d);
+// Two-call form for cxx: caller checks the bool first, then reads the value.
+bool     has_relative_target(const Decoded& d);
+uint64_t relative_target(const Decoded& d, uint64_t insn_va);
+bool     has_first_immediate(const Decoded& d);
+int64_t  first_immediate(const Decoded& d);
+rust::Vec<uint8_t> build_jmp_reg(uint8_t reg_id);
+rust::Vec<uint8_t> build_call_reg(uint8_t reg_id);
 
 // In-place byte patchers (return the new buffer as a Vec since cxx's
 // rust::Slice<uint8_t> can't be written through, and we don't want to

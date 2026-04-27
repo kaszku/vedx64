@@ -128,6 +128,9 @@ int main() {
     }
     TEST_ASM("prefix(Addr32) mov", g.prefix(Prefix::Addr32).mov(eax, ptr(ecx)), 0x67, 0x8B, 0x01);
     TEST_ASM("mov ss:[rbx],eax", g.mov(ss(ptr(rbx)), eax), 0x36, 0x89, 0x03);
+    TEST_ASM("cmov(Z,ecx,eax)",  g.cmov(0x4, ecx, eax), 0x0F, 0x44, 0xC8);
+    TEST_ASM("cmov(NZ,ecx,eax)", g.cmov(0x5, ecx, eax), 0x0F, 0x45, 0xC8);
+    TEST_ASM("cmov(Z,rcx,rax)",  g.cmov(0x4, rcx, rax), 0x48, 0x0F, 0x44, 0xC8);
 
     printf("\n%d/%d codegen tests passed\n", g_pass, g_pass+g_fail);
     return g_fail > 0 ? 1 : 0;

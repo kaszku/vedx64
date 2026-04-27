@@ -806,6 +806,7 @@ std::size_t align_of() {
 namespace vedx64 {
   namespace bridge {
     struct FlowResult;
+    struct IndirectBranchInfo;
     struct SemResult;
     using Decoded = ::vedx64::bridge::Decoded;
     using Emu = ::vedx64::bridge::Emu;
@@ -828,6 +829,17 @@ struct FlowResult final {
   using IsRelocatable = ::std::true_type;
 };
 #endif // CXXBRIDGE1_STRUCT_vedx64$bridge$FlowResult
+
+#ifndef CXXBRIDGE1_STRUCT_vedx64$bridge$IndirectBranchInfo
+#define CXXBRIDGE1_STRUCT_vedx64$bridge$IndirectBranchInfo
+struct IndirectBranchInfo final {
+  ::std::uint8_t reg_id CXX_DEFAULT_VALUE(0);
+  bool is_mem CXX_DEFAULT_VALUE(false);
+  bool valid CXX_DEFAULT_VALUE(false);
+
+  using IsRelocatable = ::std::true_type;
+};
+#endif // CXXBRIDGE1_STRUCT_vedx64$bridge$IndirectBranchInfo
 
 #ifndef CXXBRIDGE1_STRUCT_vedx64$bridge$SemResult
 #define CXXBRIDGE1_STRUCT_vedx64$bridge$SemResult

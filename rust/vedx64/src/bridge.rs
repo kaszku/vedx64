@@ -13,6 +13,13 @@ pub mod ffi {
         length: u8,
     }
 
+    #[derive(Debug, Clone, Copy)]
+    struct IndirectBranchInfo {
+        reg_id: u8,
+        is_mem: bool,
+        valid: bool,
+    }
+
     #[derive(Debug, Clone)]
     struct SemResult {
         flags_read: u8,
@@ -87,6 +94,15 @@ pub mod ffi {
         fn build_jcc_rel32(cc: u8, disp: i32) -> Vec<u8>;
         fn build_call_rel32(disp: i32) -> Vec<u8>;
         fn build_mov_imm64(reg_id: u8, imm: u64) -> Vec<u8>;
+        fn build_jmp_reg(reg_id: u8) -> Vec<u8>;
+        fn build_call_reg(reg_id: u8) -> Vec<u8>;
+        fn is_count_conditional_branch(m: u16) -> bool;
+        fn is_int_or_ud(m: u16) -> bool;
+        fn indirect_branch_info(d: &Decoded) -> IndirectBranchInfo;
+        fn has_relative_target(d: &Decoded) -> bool;
+        fn relative_target(d: &Decoded, insn_va: u64) -> u64;
+        fn has_first_immediate(d: &Decoded) -> bool;
+        fn first_immediate(d: &Decoded) -> i64;
 
         // Emulator
         fn emu_new(mem_size: usize) -> UniquePtr<Emu>;

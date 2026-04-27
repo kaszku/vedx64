@@ -986,6 +986,8 @@ NB_MODULE(vedx64_py, m) {
     analysis_m.def("sets_eflags", &vedx64::analysis::sets_eflags, nb::arg("m"));
     analysis_m.def("reads_eflags", &vedx64::analysis::reads_eflags, nb::arg("m"));
     analysis_m.def("canonical_size", &vedx64::analysis::canonical_size, nb::arg("m"));
+    analysis_m.def("is_count_conditional_branch", &vedx64::analysis::is_count_conditional_branch, nb::arg("m"));
+    analysis_m.def("is_int_or_ud", &vedx64::analysis::is_int_or_ud, nb::arg("m"));
     analysis_m.def("jcc_condition", [](Mnemonic m) -> nb::object {
         if (!vedx64::analysis::is_jcc(m)) return nb::none();
         return nb::cast(vedx64::analysis::jcc_condition(m));
@@ -1023,6 +1025,39 @@ NB_MODULE(vedx64_py, m) {
         uint8_t buf[10]{}; vedx64::analysis::patch_mov_imm64(buf, reg_id, imm);
         return nb::bytes((const char*)buf, sizeof(buf));
     }, nb::arg("reg_id"), nb::arg("imm"));
+    analysis_m.def("build_jmp_reg", [](uint8_t reg_id) {
+        uint8_t buf[3]{}; size_t n = vedx64::analysis::patch_jmp_reg(buf, reg_id);
+        return nb::bytes((const char*)buf, n);
+    }, nb::arg("reg_id"));
+    analysis_m.def("build_call_reg", [](uint8_t reg_id) {
+        uint8_t buf[3]{}; size_t n = vedx64::analysis::patch_call_reg(buf, reg_id);
+        return nb::bytes((const char*)buf, n);
+    }, nb::arg("reg_id"));
+
+    analysis_m.def("indirect_branch_info", [](nb::bytes data) -> nb::object {
+        DecodedInstr di;
+        if (decode((const uint8_t*)data.c_str(), data.size(), di) == 0) return nb::none();
+        auto info = vedx64::analysis::indirect_branch_info(di);
+        if (!info.valid) return nb::none();
+        nb::dict d;
+        d["reg_id"] = info.reg_id;
+        d["is_mem"] = info.is_mem;
+        return d;
+    }, nb::arg("data"), "Returns dict {reg_id, is_mem} for indirect JMP/CALL, else None.");
+    analysis_m.def("relative_target", [](nb::bytes data, uint64_t insn_va) -> nb::object {
+        DecodedInstr di;
+        if (decode((const uint8_t*)data.c_str(), data.size(), di) == 0) return nb::none();
+        uint64_t t = 0;
+        if (!vedx64::analysis::find_relative_target(di, insn_va, &t)) return nb::none();
+        return nb::cast(t);
+    }, nb::arg("data"), nb::arg("insn_va"), "Absolute target VA for a rel branch/call, else None.");
+    analysis_m.def("first_immediate", [](nb::bytes data) -> nb::object {
+        DecodedInstr di;
+        if (decode((const uint8_t*)data.c_str(), data.size(), di) == 0) return nb::none();
+        int64_t v = 0;
+        if (!vedx64::analysis::find_first_immediate(di, &v)) return nb::none();
+        return nb::cast(v);
+    }, nb::arg("data"), "First immediate operand value, else None.");
 
 #ifdef VEDX64_EMU
     // Emulator subsystem

@@ -138,6 +138,78 @@ int main() {
     CHECK(std::strcmp(Reg{1,8}.name(),  "cl")  == 0,         "Reg{1,8}.name=cl");
     CHECK(std::strcmp(Reg{15,32}.name(),"r15d")== 0,         "Reg{15,32}.name=r15d");
 
+    // ----- New: indirect_branch_info / find_relative_target / find_first_immediate -----
+    {
+        // JMP rax → FF E0
+        uint8_t code[] = {0xFF, 0xE0};
+        DecodedInstr di;
+        CHECK(decode(code, sizeof(code), di) == 2,           "decode JMP rax");
+        IndirectBranchInfo info = indirect_branch_info(di);
+        CHECK(info.valid && !info.is_mem && info.reg_id == 0,"indirect_branch_info JMP rax");
+    }
+    {
+        // JMP [rax+8] → FF 60 08
+        uint8_t code[] = {0xFF, 0x60, 0x08};
+        DecodedInstr di;
+        CHECK(decode(code, sizeof(code), di) == 3,           "decode JMP [rax+8]");
+        IndirectBranchInfo info = indirect_branch_info(di);
+        CHECK(info.valid && info.is_mem && info.reg_id == 0,"indirect_branch_info JMP [rax+8]");
+    }
+    {
+        // JMP rel8 +5 → EB 05 (direct, not indirect)
+        uint8_t code[] = {0xEB, 0x05};
+        DecodedInstr di;
+        CHECK(decode(code, sizeof(code), di) == 2,           "decode JMP rel8");
+        CHECK(!indirect_branch_info(di).valid,                "JMP rel8 is not indirect");
+        uint64_t target = 0;
+        CHECK(find_relative_target(di, 0x1000, &target),     "find_relative_target JMP rel8");
+        CHECK(target == 0x1007,                                "JMP rel8 target = 0x1007");
+    }
+    {
+        // CALL rel32 → E8 disp32
+        uint8_t code[] = {0xE8, 0x00, 0x10, 0x00, 0x00};
+        DecodedInstr di;
+        CHECK(decode(code, sizeof(code), di) == 5,           "decode CALL rel32");
+        uint64_t target = 0;
+        CHECK(find_relative_target(di, 0x1000, &target),     "find_relative_target CALL");
+        CHECK(target == 0x2005,                                "CALL target");
+    }
+    {
+        // SUB rsp, 0x20 → first immediate is 0x20
+        uint8_t code[] = {0x48, 0x83, 0xEC, 0x20};
+        DecodedInstr di;
+        decode(code, sizeof(code), di);
+        int64_t imm = 0;
+        CHECK(find_first_immediate(di, &imm),                "find_first_immediate SUB rsp,0x20");
+        CHECK(imm == 0x20,                                     "first immediate = 0x20");
+    }
+
+    // ----- New: is_count_conditional_branch / is_int_or_ud -----
+    CHECK(is_count_conditional_branch(Mnemonic::JCXZ),       "is_count_conditional_branch(JCXZ)");
+    CHECK(is_count_conditional_branch(Mnemonic::LOOP),       "is_count_conditional_branch(LOOP)");
+    CHECK(!is_count_conditional_branch(Mnemonic::JE),         "!is_count_conditional_branch(JE)");
+    CHECK(is_int_or_ud(Mnemonic::INT),                        "is_int_or_ud(INT)");
+    CHECK(is_int_or_ud(Mnemonic::UD2),                        "is_int_or_ud(UD2)");
+    CHECK(is_int_or_ud(Mnemonic::IRET),                       "is_int_or_ud(IRET)");
+    CHECK(!is_int_or_ud(Mnemonic::ADD),                       "!is_int_or_ud(ADD)");
+
+    // ----- New: patch_jmp_reg / patch_call_reg -----
+    {
+        uint8_t buf[3]{};
+        // JMP rax (reg 0) → 2 bytes: FF E0
+        size_t n = patch_jmp_reg(buf, 0);
+        CHECK(n == 2 && buf[0] == 0xFF && buf[1] == 0xE0,    "patch_jmp_reg rax");
+        // JMP rbp (reg 5) → FF E5
+        n = patch_jmp_reg(buf, 5);
+        CHECK(n == 2 && buf[0] == 0xFF && buf[1] == 0xE5,    "patch_jmp_reg rbp");
+        // JMP r10 (reg 10) → 41 FF E2
+        n = patch_jmp_reg(buf, 10);
+        CHECK(n == 3 && buf[0] == 0x41 && buf[1] == 0xFF && buf[2] == 0xE2, "patch_jmp_reg r10");
+        // CALL rax → FF D0
+        n = patch_call_reg(buf, 0);
+        CHECK(n == 2 && buf[0] == 0xFF && buf[1] == 0xD0,    "patch_call_reg rax");
+    }
+
     // ----- DemandPagedMemory -----
     {
         DemandPagedMemory mem;

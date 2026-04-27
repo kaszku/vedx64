@@ -291,6 +291,94 @@ inline bool is_indirect_branch(const DecodedInstr& di) {
     return false;
 }
 
+// Forward declarations for helpers defined later in the header.
+inline uint8_t mem_base(const DecodedInstr& di);
+
+/// Description of an indirect branch's operand. `is_mem` is true for
+/// memory-indirect (e.g. `JMP [rax+8]`), false for register-direct
+/// (`JMP rax`). When `is_mem` is true, `reg_id` is the *base* register
+/// (0xFF if RIP-relative or pure-disp absolute). When `is_mem` is false,
+/// `reg_id` is the destination register (0..15).
+struct IndirectBranchInfo {
+    uint8_t reg_id = 0xFF;
+    bool    is_mem = false;
+    bool    valid  = false;
+};
+
+inline IndirectBranchInfo indirect_branch_info(const DecodedInstr& di) {
+    IndirectBranchInfo info;
+    if (!is_indirect_branch(di)) return info;
+    info.valid = true;
+    info.is_mem = (di.modrm >> 6) != 3;
+    if (info.is_mem) {
+        info.reg_id = mem_base(di);  // 0xFF for RIP-relative / pure-disp
+    } else {
+        info.reg_id = (di.modrm & 0x7) | ((di.rex & 0x1) ? 8u : 0u);
+    }
+    return info;
+}
+
+/// True for the count-conditional branches: JCXZ, JECXZ, JRCXZ,
+/// LOOP, LOOPE/LOOPZ, LOOPNE/LOOPNZ. Distinguishes them from EFLAGS-based
+/// Jcc — these read RCX/ECX/CX instead of (or in addition to) EFLAGS.
+inline bool is_count_conditional_branch(Mnemonic m) {
+    using M = Mnemonic;
+    switch (m) {
+    case M::JCXZ: case M::JECXZ: case M::JRCXZ:
+    case M::LOOP: case M::LOOPE: case M::LOOPZ:
+    case M::LOOPNE: case M::LOOPNZ:
+        return true;
+    default: return false;
+    }
+}
+
+/// True for INT, INT1, INT3, INTO, UD, UD2, IRET, IRETD, IRETQ.
+/// These are the "interrupt / undefined" terminator family — typical
+/// handler-analysis halt conditions.
+inline bool is_int_or_ud(Mnemonic m) {
+    using M = Mnemonic;
+    switch (m) {
+    case M::INT: case M::INT1: case M::INTO:
+    case M::UD: case M::UD2:
+    case M::IRET: case M::IRETD: case M::IRETQ:
+        return true;
+    default: return false;
+    }
+}
+
+/// Resolve the absolute target VA of a relative branch / call. Returns 0
+/// (and false) for indirect branches, non-branches, or instructions whose
+/// rel operand isn't decoded as RelOffset. `insn_va` is the address of the
+/// instruction itself; the target is `insn_va + length + immediate` (the
+/// decoder stores the rel as a signed `immediate`).
+inline bool find_relative_target(const DecodedInstr& di, uint64_t insn_va, uint64_t* out_target) {
+    if (!di.desc) return false;
+    Mnemonic m = di.desc->mnemonic;
+    if (!is_relative_branch(m) && !is_call(m)) return false;
+    bool found_rel = false;
+    for (uint8_t i = 0; i < di.desc->num_operands; ++i) {
+        if (di.desc->operands[i].addr == AddrMode::RelOffset) { found_rel = true; break; }
+    }
+    if (!found_rel) return false;
+    if (out_target) *out_target = insn_va + di.length + static_cast<uint64_t>(di.immediate);
+    return true;
+}
+
+/// Find the first immediate operand and return its value. Returns false
+/// if the instruction has no immediate. Use this when you don't care
+/// which operand index carries the immediate (most x86 forms have at
+/// most one).
+inline bool find_first_immediate(const DecodedInstr& di, int64_t* out_imm) {
+    if (!di.desc) return false;
+    for (uint8_t i = 0; i < di.desc->num_operands; ++i) {
+        if (di.desc->operands[i].addr == AddrMode::Immediate) {
+            if (out_imm) *out_imm = di.immediate;
+            return true;
+        }
+    }
+    return false;
+}
+
 
 // ============================================================
 //  EFLAGS read/write masks
@@ -468,6 +556,26 @@ inline void patch_mov_imm64(uint8_t* p, uint8_t reg_id, uint64_t imm) {
     p[0] = rex;
     p[1] = static_cast<uint8_t>(0xB8 + (reg_id & 7));
     std::memcpy(p + 2, &imm, 8);
+}
+
+/// Patch an indirect-register JMP at `p` (`JMP rN` = FF /4 with mod=3).
+/// Returns the number of bytes written (2 for r0..r7, 3 with REX.B for r8..r15).
+/// Examples: rax → `FF E0`, rbp → `FF E5`, r8 → `41 FF E0`, r15 → `41 FF E7`.
+inline size_t patch_jmp_reg(uint8_t* p, uint8_t reg_id) {
+    size_t off = 0;
+    if (reg_id >= 8) p[off++] = 0x41;          // REX.B for r8..r15
+    p[off++] = 0xFF;
+    p[off++] = static_cast<uint8_t>(0xE0 | (reg_id & 0x7));  // mod=3, /4, rm=reg
+    return off;
+}
+
+/// Same encoding as patch_jmp_reg but for `CALL rN` (FF /2): `FF D0+(reg & 7)`.
+inline size_t patch_call_reg(uint8_t* p, uint8_t reg_id) {
+    size_t off = 0;
+    if (reg_id >= 8) p[off++] = 0x41;
+    p[off++] = 0xFF;
+    p[off++] = static_cast<uint8_t>(0xD0 | (reg_id & 0x7));
+    return off;
 }
 
 /// Read the rel32 displacement from a 5-byte rel32 JMP/CALL or 6-byte rel32 Jcc.

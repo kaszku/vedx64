@@ -152,6 +152,30 @@ def test_analysis_patchers():
     assert jcc[:2] == bytes([0x0F, 0x84])
     mov = a.build_mov_imm64(1, 0xCAFEBABE_DEADBEEF)  # RCX
     assert mov[:2] == bytes([0x48, 0xB9])
+    # Indirect register JMP / CALL
+    assert a.build_jmp_reg(0) == bytes([0xFF, 0xE0])  # jmp rax
+    assert a.build_jmp_reg(10) == bytes([0x41, 0xFF, 0xE2])  # jmp r10
+    assert a.build_call_reg(0) == bytes([0xFF, 0xD0])
+
+def test_analysis_decoded_queries():
+    a = v.analysis
+    M = v.Mnemonic
+    # Count-conditional + interrupt mnemonic queries
+    assert a.is_count_conditional_branch(M.JCXZ)
+    assert a.is_count_conditional_branch(M.LOOP)
+    assert not a.is_count_conditional_branch(M.JE)
+    assert a.is_int_or_ud(M.UD2)
+    assert a.is_int_or_ud(M.IRET)
+    # Indirect branch info
+    info = a.indirect_branch_info(b'\xFF\xE0')  # jmp rax
+    assert info == {'reg_id': 0, 'is_mem': False}
+    assert a.indirect_branch_info(b'\xEB\x05') is None  # rel8 jmp
+    # Relative target
+    assert a.relative_target(b'\xEB\x05', 0x1000) == 0x1007
+    assert a.relative_target(b'\xFF\xE0', 0x1000) is None  # indirect
+    # First immediate
+    assert a.first_immediate(b'\x48\x83\xEC\x20') == 0x20  # SUB rsp,0x20
+    assert a.first_immediate(b'\x90') is None  # nop
 
 def test_assemble():
     if not hasattr(v, 'assemble'):
