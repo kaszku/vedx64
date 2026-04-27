@@ -146,6 +146,11 @@ if(VEDX64_TESTS)
     set_target_properties(avx512_test PROPERTIES FOLDER "tests")
     add_test(NAME avx512_test COMMAND avx512_test)
 
+    add_executable(analysis_test tests/analysis_test.cpp)
+    target_link_libraries(analysis_test PRIVATE vedx64_core)
+    set_target_properties(analysis_test PROPERTIES FOLDER "tests")
+    add_test(NAME analysis_test COMMAND analysis_test)
+
     if(VEDX64_IR)
         add_executable(ir_test tests/ir_test.cpp)
         target_link_libraries(ir_test PRIVATE vedx64_core)

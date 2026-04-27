@@ -657,14 +657,20 @@ inline size_t skip_epilogue_before(const uint8_t* p, size_t end) {
 /// runtime address that `p` will live at, plus 5 (size of the push).
 inline bool match_push_imm_call(const uint8_t* p, size_t n, uint64_t va_at_push,
                                 int64_t* out_imm, uint64_t* out_target) {
+    auto has_op = [](const DecodedInstr& di, AddrMode a) {
+        if (!di.desc) return false;
+        for (uint8_t i = 0; i < di.desc->num_operands; ++i)
+            if (di.desc->operands[i].addr == a) return true;
+        return false;
+    };
     DecodedInstr a, b;
     size_t la = decode(p, n, a);
     if (la == 0 || !a.desc || a.desc->mnemonic != Mnemonic::PUSH ||
-        a.desc->num_operands < 1 || a.desc->operands[0].addr != AddrMode::Immediate)
+        !has_op(a, AddrMode::Immediate))
         return false;
     size_t lb = decode(p + la, n - la, b);
     if (lb == 0 || !b.desc || b.desc->mnemonic != Mnemonic::CALL ||
-        b.desc->num_operands < 1 || b.desc->operands[0].addr != AddrMode::RelOffset)
+        !has_op(b, AddrMode::RelOffset))
         return false;
     if (out_imm)    *out_imm = a.immediate;
     if (out_target) *out_target = va_at_push + la + lb + static_cast<uint64_t>(b.immediate);
@@ -821,6 +827,104 @@ public:
 private:
     std::unordered_map<uint64_t, std::vector<uint8_t>> pages_;
 };
+
+// ============================================================
+//  DecodedInstr operand introspection (no allocation)
+// ============================================================
+
+/// True if operand `k` of `di` carries a register encoding (ModRM.reg/rm
+/// reg-direct, opcode register, or a fixed register).
+inline bool is_reg_op(const DecodedInstr& di, size_t k) {
+    if (!di.desc || k >= di.desc->num_operands) return false;
+    AddrMode a = di.desc->operands[k].addr;
+    if (a == AddrMode::ModRM_Reg) return true;
+    if (a == AddrMode::ModRM_RM)  return (di.modrm >> 6) == 3;
+    if (a == AddrMode::OpcodeReg) return true;
+    if (a == AddrMode::RegOnly)   return true;
+    if (a == AddrMode::Fixed)     return true;
+    return false;
+}
+
+/// Resolve the GPR id (0..15) for operand `k` of `di`. Returns 0xFF if the
+/// operand is not a register.
+inline uint8_t reg_op_id(const DecodedInstr& di, size_t k) {
+    if (!di.desc || k >= di.desc->num_operands) return 0xFF;
+    AddrMode a = di.desc->operands[k].addr;
+    auto rex_bit = [&](uint8_t mask) { return (di.rex & mask) ? 8u : 0u; };
+    switch (a) {
+    case AddrMode::ModRM_Reg: return ((di.modrm >> 3) & 7) | rex_bit(0x4);
+    case AddrMode::ModRM_RM:
+        if ((di.modrm >> 6) != 3) return 0xFF;
+        return (di.modrm & 7) | rex_bit(0x1);
+    case AddrMode::OpcodeReg: return di.opcode_reg;
+    case AddrMode::Fixed:     return di.desc->operands[k].fixed_reg;
+    default: return 0xFF;
+    }
+}
+
+/// True if operand `k` is an immediate.
+inline bool is_imm_op(const DecodedInstr& di, size_t k) {
+    if (!di.desc || k >= di.desc->num_operands) return false;
+    return di.desc->operands[k].addr == AddrMode::Immediate;
+}
+
+/// Read the immediate value (di.immediate). Returns 0 if no operand is an immediate.
+inline int64_t imm_value(const DecodedInstr& di) {
+    if (!di.desc) return 0;
+    for (uint8_t k = 0; k < di.desc->num_operands; ++k) {
+        if (di.desc->operands[k].addr == AddrMode::Immediate) return di.immediate;
+    }
+    return 0;
+}
+
+/// True if operand `k` references a memory location (ModRM.RM with mod!=3,
+/// or M/X/Y addressing).
+inline bool is_mem_op(const DecodedInstr& di, size_t k) {
+    if (!di.desc || k >= di.desc->num_operands) return false;
+    AddrMode a = di.desc->operands[k].addr;
+    if (a == AddrMode::ModRM_RM)  return (di.modrm >> 6) != 3;
+    if (a == AddrMode::MemOnly || a == AddrMode::Moffset ||
+        a == AddrMode::StringSrc || a == AddrMode::StringDst)
+        return true;
+    return false;
+}
+
+/// Memory-operand base register id (0..15, 0xFF if none / not a memory op).
+/// Decodes ModRM+SIB the way the encoder does: SIB.base==5 with mod==0 means
+/// no base (RIP-relative or pure disp).
+inline uint8_t mem_base(const DecodedInstr& di) {
+    if (!di.desc) return 0xFF;
+    if ((di.modrm >> 6) == 3) return 0xFF;
+    uint8_t rm = di.modrm & 7;
+    auto rex_b = (di.rex & 0x1) ? 8u : 0u;
+    if (rm != 4) {
+        // No SIB; base is rm itself, but mod==0 && rm==5 is RIP-relative.
+        if ((di.modrm >> 6) == 0 && rm == 5) return 0xFF;
+        return rm | rex_b;
+    }
+    // SIB present.
+    uint8_t base = di.sib & 7;
+    if ((di.modrm >> 6) == 0 && base == 5) return 0xFF;
+    return base | rex_b;
+}
+
+/// Memory-operand index register id (0..15, 0xFF if none).
+inline uint8_t mem_index(const DecodedInstr& di) {
+    if (!di.desc) return 0xFF;
+    if ((di.modrm >> 6) == 3) return 0xFF;
+    uint8_t rm = di.modrm & 7;
+    if (rm != 4) return 0xFF; // no SIB → no scaled index
+    uint8_t idx = (di.sib >> 3) & 7;
+    if (idx == 4 && (di.rex & 0x2) == 0) return 0xFF; // no index encoding
+    return idx | ((di.rex & 0x2) ? 8u : 0u);
+}
+
+/// Memory-operand displacement (returns di.displacement; 0 for non-memory).
+inline int64_t mem_disp(const DecodedInstr& di) {
+    return di.displacement;
+}
+
+// ============================================================
 
 /// Trace a register's source by walking backward through a list of decoded
 /// `Instruction`s until either an immediate definition or a non-trivial
