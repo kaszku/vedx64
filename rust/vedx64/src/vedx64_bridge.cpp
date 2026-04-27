@@ -79,6 +79,49 @@ SemResult get_semantics(const Decoded& d) {
                       s->ring, s->lock_valid, s->is_privileged};
 }
 
+bool is_jcc(uint16_t m)                  { return vedx64::analysis::is_jcc(static_cast<Mnemonic>(m)); }
+bool is_cmov(uint16_t m)                 { return vedx64::analysis::is_cmov(static_cast<Mnemonic>(m)); }
+bool is_call(uint16_t m)                 { return vedx64::analysis::is_call(static_cast<Mnemonic>(m)); }
+bool is_ret(uint16_t m)                  { return vedx64::analysis::is_ret(static_cast<Mnemonic>(m)); }
+bool is_unconditional_branch(uint16_t m) { return vedx64::analysis::is_unconditional_branch(static_cast<Mnemonic>(m)); }
+bool is_relative_branch(uint16_t m)      { return vedx64::analysis::is_relative_branch(static_cast<Mnemonic>(m)); }
+bool changes_rip(uint16_t m)             { return vedx64::analysis::changes_rip(static_cast<Mnemonic>(m)); }
+bool is_arith(uint16_t m)                { return vedx64::analysis::is_arith(static_cast<Mnemonic>(m)); }
+bool is_logical(uint16_t m)              { return vedx64::analysis::is_logical(static_cast<Mnemonic>(m)); }
+bool is_shift(uint16_t m)                { return vedx64::analysis::is_shift(static_cast<Mnemonic>(m)); }
+uint8_t jcc_condition(uint16_t m) {
+    auto mn = static_cast<Mnemonic>(m);
+    return vedx64::analysis::is_jcc(mn) ? static_cast<uint8_t>(vedx64::analysis::jcc_condition(mn)) : 0xFF;
+}
+uint8_t cmov_condition(uint16_t m) {
+    auto mn = static_cast<Mnemonic>(m);
+    return vedx64::analysis::is_cmov(mn) ? static_cast<uint8_t>(vedx64::analysis::cmov_condition(mn)) : 0xFF;
+}
+uint16_t jcc_for_condition(uint8_t cc) {
+    return static_cast<uint16_t>(vedx64::analysis::jcc_for_condition(static_cast<vedx64::analysis::CondCode>(cc & 0xF)));
+}
+uint8_t sets_eflags(uint16_t m)    { return vedx64::analysis::sets_eflags(static_cast<Mnemonic>(m)); }
+uint8_t reads_eflags(uint16_t m)   { return vedx64::analysis::reads_eflags(static_cast<Mnemonic>(m)); }
+uint8_t canonical_size(uint16_t m) { return vedx64::analysis::canonical_size(static_cast<Mnemonic>(m)); }
+
+rust::Vec<uint8_t> build_jmp_rel32(int32_t disp) {
+    uint8_t buf[5]{}; vedx64::analysis::patch_jmp_rel32(buf, disp);
+    rust::Vec<uint8_t> out; for (auto b : buf) out.push_back(b); return out;
+}
+rust::Vec<uint8_t> build_jcc_rel32(uint8_t cc, int32_t disp) {
+    uint8_t buf[6]{};
+    vedx64::analysis::patch_jcc_rel32(buf, static_cast<vedx64::analysis::CondCode>(cc & 0xF), disp);
+    rust::Vec<uint8_t> out; for (auto b : buf) out.push_back(b); return out;
+}
+rust::Vec<uint8_t> build_call_rel32(int32_t disp) {
+    uint8_t buf[5]{}; vedx64::analysis::patch_call_rel32(buf, disp);
+    rust::Vec<uint8_t> out; for (auto b : buf) out.push_back(b); return out;
+}
+rust::Vec<uint8_t> build_mov_imm64(uint8_t reg_id, uint64_t imm) {
+    uint8_t buf[10]{}; vedx64::analysis::patch_mov_imm64(buf, reg_id, imm);
+    rust::Vec<uint8_t> out; for (auto b : buf) out.push_back(b); return out;
+}
+
 #ifdef VEDX64_EMU
 std::unique_ptr<Emu> emu_new(size_t mem_size) {
     auto e = std::make_unique<Emu>();

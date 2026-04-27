@@ -66,6 +66,28 @@ pub mod ffi {
         // Semantics
         fn get_semantics(d: &Decoded) -> SemResult;
 
+        // Analysis (mnemonic queries take Mnemonic-as-u16; see Instruction::mnemonic_id())
+        fn is_jcc(m: u16) -> bool;
+        fn is_cmov(m: u16) -> bool;
+        fn is_call(m: u16) -> bool;
+        fn is_ret(m: u16) -> bool;
+        fn is_unconditional_branch(m: u16) -> bool;
+        fn is_relative_branch(m: u16) -> bool;
+        fn changes_rip(m: u16) -> bool;
+        fn is_arith(m: u16) -> bool;
+        fn is_logical(m: u16) -> bool;
+        fn is_shift(m: u16) -> bool;
+        fn jcc_condition(m: u16) -> u8;
+        fn cmov_condition(m: u16) -> u8;
+        fn jcc_for_condition(cc: u8) -> u16;
+        fn sets_eflags(m: u16) -> u8;
+        fn reads_eflags(m: u16) -> u8;
+        fn canonical_size(m: u16) -> u8;
+        fn build_jmp_rel32(disp: i32) -> Vec<u8>;
+        fn build_jcc_rel32(cc: u8, disp: i32) -> Vec<u8>;
+        fn build_call_rel32(disp: i32) -> Vec<u8>;
+        fn build_mov_imm64(reg_id: u8, imm: u64) -> Vec<u8>;
+
         // Emulator
         fn emu_new(mem_size: usize) -> UniquePtr<Emu>;
         fn emu_step(e: Pin<&mut Emu>) -> i32;

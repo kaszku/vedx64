@@ -14,6 +14,7 @@
 #include "vedx64/relocation.hpp"
 #include "vedx64/branch_follow.hpp"
 #include "vedx64/semantics.hpp"
+#include "vedx64/analysis.hpp"
 #ifdef VEDX64_EMU
 #include "vedx64/emu.hpp"
 #endif
@@ -88,6 +89,33 @@ bool is_rip_relative(rust::Slice<const uint8_t> code);
 // Branch following + semantics — return cxx-shared structs (defined in bridge.cpp).
 FlowResult classify_flow(rust::Slice<const uint8_t> code, uint64_t addr);
 SemResult  get_semantics(const Decoded& d);
+
+// Analysis helpers (mnemonic queries / EFLAGS / patchers).
+// All take a Mnemonic as a uint16_t (matching the enum's underlying type).
+bool is_jcc(uint16_t m);
+bool is_cmov(uint16_t m);
+bool is_call(uint16_t m);
+bool is_ret(uint16_t m);
+bool is_unconditional_branch(uint16_t m);
+bool is_relative_branch(uint16_t m);
+bool changes_rip(uint16_t m);
+bool is_arith(uint16_t m);
+bool is_logical(uint16_t m);
+bool is_shift(uint16_t m);
+uint8_t jcc_condition(uint16_t m);  // CondCode as 4-bit; 0xFF if not Jcc
+uint8_t cmov_condition(uint16_t m); // ditto for CMOVcc
+uint16_t jcc_for_condition(uint8_t cc); // CondCode -> Mnemonic
+uint8_t sets_eflags(uint16_t m);
+uint8_t reads_eflags(uint16_t m);
+uint8_t canonical_size(uint16_t m);
+
+// In-place byte patchers (return the new buffer as a Vec since cxx's
+// rust::Slice<uint8_t> can't be written through, and we don't want to
+// expose mutable raw pointers via the bridge).
+rust::Vec<uint8_t> build_jmp_rel32(int32_t disp);
+rust::Vec<uint8_t> build_jcc_rel32(uint8_t cc, int32_t disp);
+rust::Vec<uint8_t> build_call_rel32(int32_t disp);
+rust::Vec<uint8_t> build_mov_imm64(uint8_t reg_id, uint64_t imm);
 
 #ifdef VEDX64_EMU
 std::unique_ptr<Emu> emu_new(size_t mem_size);

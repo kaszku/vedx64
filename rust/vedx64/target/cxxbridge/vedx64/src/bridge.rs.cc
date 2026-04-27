@@ -971,6 +971,106 @@ void vedx64$bridge$cxxbridge1$194$get_semantics(::vedx64::bridge::Decoded const 
   new (return$) ::vedx64::bridge::SemResult(get_semantics$(d));
 }
 
+bool vedx64$bridge$cxxbridge1$194$is_jcc(::std::uint16_t m) noexcept {
+  bool (*is_jcc$)(::std::uint16_t) = ::vedx64::bridge::is_jcc;
+  return is_jcc$(m);
+}
+
+bool vedx64$bridge$cxxbridge1$194$is_cmov(::std::uint16_t m) noexcept {
+  bool (*is_cmov$)(::std::uint16_t) = ::vedx64::bridge::is_cmov;
+  return is_cmov$(m);
+}
+
+bool vedx64$bridge$cxxbridge1$194$is_call(::std::uint16_t m) noexcept {
+  bool (*is_call$)(::std::uint16_t) = ::vedx64::bridge::is_call;
+  return is_call$(m);
+}
+
+bool vedx64$bridge$cxxbridge1$194$is_ret(::std::uint16_t m) noexcept {
+  bool (*is_ret$)(::std::uint16_t) = ::vedx64::bridge::is_ret;
+  return is_ret$(m);
+}
+
+bool vedx64$bridge$cxxbridge1$194$is_unconditional_branch(::std::uint16_t m) noexcept {
+  bool (*is_unconditional_branch$)(::std::uint16_t) = ::vedx64::bridge::is_unconditional_branch;
+  return is_unconditional_branch$(m);
+}
+
+bool vedx64$bridge$cxxbridge1$194$is_relative_branch(::std::uint16_t m) noexcept {
+  bool (*is_relative_branch$)(::std::uint16_t) = ::vedx64::bridge::is_relative_branch;
+  return is_relative_branch$(m);
+}
+
+bool vedx64$bridge$cxxbridge1$194$changes_rip(::std::uint16_t m) noexcept {
+  bool (*changes_rip$)(::std::uint16_t) = ::vedx64::bridge::changes_rip;
+  return changes_rip$(m);
+}
+
+bool vedx64$bridge$cxxbridge1$194$is_arith(::std::uint16_t m) noexcept {
+  bool (*is_arith$)(::std::uint16_t) = ::vedx64::bridge::is_arith;
+  return is_arith$(m);
+}
+
+bool vedx64$bridge$cxxbridge1$194$is_logical(::std::uint16_t m) noexcept {
+  bool (*is_logical$)(::std::uint16_t) = ::vedx64::bridge::is_logical;
+  return is_logical$(m);
+}
+
+bool vedx64$bridge$cxxbridge1$194$is_shift(::std::uint16_t m) noexcept {
+  bool (*is_shift$)(::std::uint16_t) = ::vedx64::bridge::is_shift;
+  return is_shift$(m);
+}
+
+::std::uint8_t vedx64$bridge$cxxbridge1$194$jcc_condition(::std::uint16_t m) noexcept {
+  ::std::uint8_t (*jcc_condition$)(::std::uint16_t) = ::vedx64::bridge::jcc_condition;
+  return jcc_condition$(m);
+}
+
+::std::uint8_t vedx64$bridge$cxxbridge1$194$cmov_condition(::std::uint16_t m) noexcept {
+  ::std::uint8_t (*cmov_condition$)(::std::uint16_t) = ::vedx64::bridge::cmov_condition;
+  return cmov_condition$(m);
+}
+
+::std::uint16_t vedx64$bridge$cxxbridge1$194$jcc_for_condition(::std::uint8_t cc) noexcept {
+  ::std::uint16_t (*jcc_for_condition$)(::std::uint8_t) = ::vedx64::bridge::jcc_for_condition;
+  return jcc_for_condition$(cc);
+}
+
+::std::uint8_t vedx64$bridge$cxxbridge1$194$sets_eflags(::std::uint16_t m) noexcept {
+  ::std::uint8_t (*sets_eflags$)(::std::uint16_t) = ::vedx64::bridge::sets_eflags;
+  return sets_eflags$(m);
+}
+
+::std::uint8_t vedx64$bridge$cxxbridge1$194$reads_eflags(::std::uint16_t m) noexcept {
+  ::std::uint8_t (*reads_eflags$)(::std::uint16_t) = ::vedx64::bridge::reads_eflags;
+  return reads_eflags$(m);
+}
+
+::std::uint8_t vedx64$bridge$cxxbridge1$194$canonical_size(::std::uint16_t m) noexcept {
+  ::std::uint8_t (*canonical_size$)(::std::uint16_t) = ::vedx64::bridge::canonical_size;
+  return canonical_size$(m);
+}
+
+void vedx64$bridge$cxxbridge1$194$build_jmp_rel32(::std::int32_t disp, ::rust::Vec<::std::uint8_t> *return$) noexcept {
+  ::rust::Vec<::std::uint8_t> (*build_jmp_rel32$)(::std::int32_t) = ::vedx64::bridge::build_jmp_rel32;
+  new (return$) ::rust::Vec<::std::uint8_t>(build_jmp_rel32$(disp));
+}
+
+void vedx64$bridge$cxxbridge1$194$build_jcc_rel32(::std::uint8_t cc, ::std::int32_t disp, ::rust::Vec<::std::uint8_t> *return$) noexcept {
+  ::rust::Vec<::std::uint8_t> (*build_jcc_rel32$)(::std::uint8_t, ::std::int32_t) = ::vedx64::bridge::build_jcc_rel32;
+  new (return$) ::rust::Vec<::std::uint8_t>(build_jcc_rel32$(cc, disp));
+}
+
+void vedx64$bridge$cxxbridge1$194$build_call_rel32(::std::int32_t disp, ::rust::Vec<::std::uint8_t> *return$) noexcept {
+  ::rust::Vec<::std::uint8_t> (*build_call_rel32$)(::std::int32_t) = ::vedx64::bridge::build_call_rel32;
+  new (return$) ::rust::Vec<::std::uint8_t>(build_call_rel32$(disp));
+}
+
+void vedx64$bridge$cxxbridge1$194$build_mov_imm64(::std::uint8_t reg_id, ::std::uint64_t imm, ::rust::Vec<::std::uint8_t> *return$) noexcept {
+  ::rust::Vec<::std::uint8_t> (*build_mov_imm64$)(::std::uint8_t, ::std::uint64_t) = ::vedx64::bridge::build_mov_imm64;
+  new (return$) ::rust::Vec<::std::uint8_t>(build_mov_imm64$(reg_id, imm));
+}
+
 ::vedx64::bridge::Emu *vedx64$bridge$cxxbridge1$194$emu_new(::std::size_t mem_size) noexcept {
   ::std::unique_ptr<::vedx64::bridge::Emu> (*emu_new$)(::std::size_t) = ::vedx64::bridge::emu_new;
   return emu_new$(mem_size).release();
