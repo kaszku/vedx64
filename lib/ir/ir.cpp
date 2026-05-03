@@ -195,7 +195,12 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
     }
 
     if (m == Mnemonic::MOV && di.desc->num_operands >= 2 && di.desc->has_modrm) {
-        if (mod_ == 3) {
+        // Reg/reg path requires *both* operands to be ModRM-encoded registers.
+        // The C7/0 'mov r/m, imm' form has operand[1] = Immediate, not ModRM_Reg —
+        // it must fall through to the immediate handler below.
+        bool both_modrm = (di.desc->operands[0].addr == AddrMode::ModRM_RM && di.desc->operands[1].addr == AddrMode::ModRM_Reg) ||
+                          (di.desc->operands[0].addr == AddrMode::ModRM_Reg && di.desc->operands[1].addr == AddrMode::ModRM_RM);
+        if (mod_ == 3 && both_modrm) {
             VarNode dst, src;
             if (di.desc->operands[0].addr == AddrMode::ModRM_RM) {
                 dst = reg_from_modrm_rm(di, sz); src = reg_from_modrm_reg(di, sz);
@@ -203,7 +208,8 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
                 dst = reg_from_modrm_reg(di, sz); src = reg_from_modrm_rm(di, sz);
             }
             l.ops.push_back(make_op2(Opcode::COPY, dst, src));
-        } else {
+            return true;
+        } else if (mod_ != 3) {
             VarNode ea = compute_ea(l, di);
             if (di.desc->operands[0].addr == AddrMode::ModRM_RM || di.desc->operands[0].addr == AddrMode::MemOnly) {
                 // MOV [mem], reg/imm — store
@@ -217,8 +223,9 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
                 VarNode dst = reg_from_modrm_reg(di, sz);
                 l.ops.push_back(make_op3(Opcode::LOAD, dst, ea, VarNode::ram(sz)));
             }
+            return true;
         }
-        return true;
+        // mod==3 but not reg/reg → fall through to the immediate handler
     }
 
     if (m == Mnemonic::MOV && di.desc->num_operands >= 2) {

@@ -172,8 +172,9 @@ mod tests {
         // Long NOP — modeled.
         let l = ir_lift(&[0x0F, 0x1F, 0x00], 0).expect("lift long-nop");
         assert!(ir_is_fully_lifted(&l));
-        // 0x90 (xchg eax,eax opcode-reg form) — unmodeled, falls to UNDEF.
-        let u = ir_lift(&[0x90], 0).expect("lift 0x90");
+        // AAA (0x37) — has flag side effects but the lifter doesn't model
+        // them. After the SymExec-fix it emits UNDEF, not silent NOP.
+        let u = ir_lift(&[0x37], 0).expect("lift AAA");
         assert!(!ir_is_fully_lifted(&u));
     }
     #[test] fn test_analysis_first_immediate() {

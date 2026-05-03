@@ -37,6 +37,7 @@ set(VEDX64_CORE_SOURCES
     lib/relocation/relocation.cpp
     lib/branch_follow/branch_follow.cpp
     lib/semantics/semantics.cpp
+    lib/symx/symx.cpp
 )
 
 if(VEDX64_EMU)
@@ -158,6 +159,13 @@ if(VEDX64_TESTS)
     add_test(NAME semantics_test COMMAND semantics_test)
 
     if(VEDX64_IR)
+        add_executable(symx_test tests/symx_test.cpp)
+        target_link_libraries(symx_test PRIVATE vedx64_core)
+        set_target_properties(symx_test PROPERTIES FOLDER "tests")
+        add_test(NAME symx_test COMMAND symx_test)
+    endif()
+
+    if(VEDX64_IR)
         add_executable(ir_test tests/ir_test.cpp)
         target_link_libraries(ir_test PRIVATE vedx64_core)
         set_target_properties(ir_test PROPERTIES FOLDER "tests")
@@ -211,6 +219,12 @@ if(VEDX64_EXAMPLES)
     add_executable(semantics_example examples/semantics_example.cpp)
     target_link_libraries(semantics_example PRIVATE vedx64_core)
     set_target_properties(semantics_example PROPERTIES FOLDER "examples")
+
+    if(VEDX64_IR)
+        add_executable(symx_example examples/symx_example.cpp)
+        target_link_libraries(symx_example PRIVATE vedx64_core)
+        set_target_properties(symx_example PROPERTIES FOLDER "examples")
+    endif()
 
     if(VEDX64_CODEGEN)
         add_executable(analysis_example examples/analysis_example.cpp)
