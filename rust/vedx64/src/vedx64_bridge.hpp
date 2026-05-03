@@ -149,6 +149,7 @@ uint8_t  ir_lifted_length(const IrLifted& l);
 size_t   ir_lifted_op_count(const IrLifted& l);
 uint8_t  ir_lifted_op_opcode(const IrLifted& l, size_t i);
 uint8_t  ir_lifted_op_num_inputs(const IrLifted& l, size_t i);
+bool     ir_is_fully_lifted(const IrLifted& l);
 #endif // VEDX64_IR
 
 } // namespace bridge

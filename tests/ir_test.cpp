@@ -15,11 +15,22 @@ int main() {
     using namespace vedx64;
     printf("=== IR Tests ===\n");
 
-    uint8_t nop[] = {0x90};
+    uint8_t nop[] = {0x0F, 0x1F, 0x00};
     auto l = ir::lift(nop, sizeof(nop));
     CHECK(l.has_value(), "lift nop");
     CHECK(!l->ops.empty(), "nop has ops");
     CHECK(l->ops[0].opcode == ir::Opcode::NOP, "nop opcode");
+    CHECK(ir::is_fully_lifted(*l), "nop is fully lifted");
+
+    {
+        // 0x90 = XCHG eax,eax (opcode-register form). The XCHG handler only
+        // models the ModRM mod=3 form, so this falls through to the catch-all.
+        uint8_t xchg_acc[] = {0x90};
+        auto u = ir::lift(xchg_acc, sizeof(xchg_acc));
+        CHECK(u.has_value() && !u->ops.empty(), "lift 0x90");
+        CHECK(u->ops[0].opcode == ir::Opcode::UNDEF, "unmodeled XCHG-acc emits UNDEF");
+        CHECK(!ir::is_fully_lifted(*u), "0x90 is not fully lifted");
+    }
 
     uint8_t mov_rax_rcx[] = {0x48, 0x89, 0xC8};
     auto lm = ir::lift(mov_rax_rcx, sizeof(mov_rax_rcx));
@@ -613,9 +624,9 @@ int main() {
         emit_ok("F2I", ir::Opcode::F2I, R(0,4), X(0,4));
         emit_ok("EXTRACT", ir::Opcode::EXTRACT, R(0,4), R(1,8), C(8,1));
         emit_ok("CONCAT", ir::Opcode::CONCAT, R(0,8), R(1,4), R(2,4));
-        { // emit_lifted on NOP
-            uint8_t nop[] = {0x90};
-            auto l = ir::lift(nop, 1);
+        { // emit_lifted on NOP — use long-NOP so the explicit handler fires
+            uint8_t nop[] = {0x0F, 0x1F, 0x00};
+            auto l = ir::lift(nop, sizeof(nop));
             emit_total++;
             if (l) {
                 CodeGen cg; bool ok = ir::emit_all(*l, cg);
@@ -637,6 +648,49 @@ int main() {
         CHECK(emit_pass == emit_total, "all emit checks pass");
     }
 
+
+    // ADD r64, r64 → produces an ADD_FLAGS bundle. After expansion every
+    // flag is set by a primitive SET_CF/SET_ZF/SET_SF/SET_OF/SET_PF op.
+    {
+        uint8_t add_rax_rcx[] = {0x48, 0x01, 0xC8};  // add rax, rcx
+        auto la = ir::lift(add_rax_rcx, sizeof(add_rax_rcx));
+        CHECK(la.has_value(), "lift add rax,rcx");
+        size_t bundles_before = 0;
+        for (auto& o : la->ops)
+            if (o.opcode == ir::Opcode::ADD_FLAGS || o.opcode == ir::Opcode::SUB_FLAGS ||
+                o.opcode == ir::Opcode::AND_FLAGS) ++bundles_before;
+        CHECK(bundles_before > 0, "add lift contains a flag bundle");
+
+        auto expanded = ir::expand_flag_bundles(*la);
+        size_t bundles_after = 0, sets = 0;
+        for (auto& o : expanded.ops) {
+            if (o.opcode == ir::Opcode::ADD_FLAGS || o.opcode == ir::Opcode::SUB_FLAGS ||
+                o.opcode == ir::Opcode::AND_FLAGS) ++bundles_after;
+            if (o.opcode == ir::Opcode::SET_CF || o.opcode == ir::Opcode::SET_ZF ||
+                o.opcode == ir::Opcode::SET_SF || o.opcode == ir::Opcode::SET_OF ||
+                o.opcode == ir::Opcode::SET_PF) ++sets;
+        }
+        CHECK(bundles_after == 0, "no flag bundles remain after expansion");
+        CHECK(sets >= 5, "expansion emits at least 5 SET_* ops (CF/ZF/SF/OF/PF)");
+    }
+    {
+        // SUB writes CF as borrow, distinct from ADD's overflow form.
+        uint8_t sub_rax_rcx[] = {0x48, 0x29, 0xC8};
+        auto ls = ir::lift(sub_rax_rcx, sizeof(sub_rax_rcx));
+        CHECK(ls.has_value(), "lift sub rax,rcx");
+        auto e = ir::expand_flag_bundles(*ls);
+        CHECK(ir::is_fully_lifted(e), "expanded sub stays fully lifted");
+        bool has_set_cf = false;
+        for (auto& o : e.ops) if (o.opcode == ir::Opcode::SET_CF) { has_set_cf = true; break; }
+        CHECK(has_set_cf, "sub expansion emits SET_CF");
+    }
+    {
+        // expand_flag_bundles is a noop on already-primitive sequences.
+        uint8_t mov_only[] = {0x48, 0x89, 0xC8};
+        auto lo = ir::lift(mov_only, sizeof(mov_only));
+        auto e2 = ir::expand_flag_bundles(*lo);
+        CHECK(e2.ops.size() == lo->ops.size(), "mov: expansion is idempotent");
+    }
     printf("All IR tests passed!\n");
     return 0;
 }

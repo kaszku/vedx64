@@ -60,6 +60,11 @@ pub fn ir_lift(code: &[u8], addr: u64) -> Option<cxx::UniquePtr<ffi::IrLifted>> 
     if ptr.is_null() { None } else { Some(ptr) }
 }
 
+/// True if the IR sequence contains no `Opcode::UNDEF` op.
+/// Symbolic-execution callers should refuse to step past `!ir_is_fully_lifted`,
+/// since the lifter doesn't model the underlying instruction.
+pub fn ir_is_fully_lifted(l: &ffi::IrLifted) -> bool { ffi::ir_is_fully_lifted(l) }
+
 pub use ffi::{FlowResult, SemResult, IrLifted, IndirectBranchInfo};
 
 /// Mnemonic-level analysis helpers.
@@ -162,6 +167,14 @@ mod tests {
         let i = decode(&[0xEB, 0x05]).unwrap();
         assert!(analysis::indirect_branch_info(&i).is_none());
         assert_eq!(analysis::relative_target(&i, 0x1000), Some(0x1007));
+    }
+    #[test] fn test_ir_is_fully_lifted() {
+        // Long NOP — modeled.
+        let l = ir_lift(&[0x0F, 0x1F, 0x00], 0).expect("lift long-nop");
+        assert!(ir_is_fully_lifted(&l));
+        // 0x90 (xchg eax,eax opcode-reg form) — unmodeled, falls to UNDEF.
+        let u = ir_lift(&[0x90], 0).expect("lift 0x90");
+        assert!(!ir_is_fully_lifted(&u));
     }
     #[test] fn test_analysis_first_immediate() {
         // SUB rsp, 0x20 → 48 83 EC 20

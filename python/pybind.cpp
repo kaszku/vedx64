@@ -1199,6 +1199,11 @@ NB_MODULE(vedx64_py, m) {
         if (!result) return nb::none();
         return nb::cast(*result);
     }, nb::arg("data"), nb::arg("rip") = 0, "Lift instruction bytes to IR");
+
+    m.def("ir_is_fully_lifted", &ir::is_fully_lifted, nb::arg("lifted"),
+        "True if the lifted IR contains no UNDEF op (i.e. the lifter modeled it).");
+    m.def("ir_expand_flag_bundles", &ir::expand_flag_bundles, nb::arg("lifted"),
+        "Decompose ADD_FLAGS / SUB_FLAGS / AND_FLAGS into per-flag SET_* chains.");
 #endif // VEDX64_IR
 
 }

@@ -168,6 +168,30 @@ struct Lifted {
 /// Returns std::nullopt on decode failure.
 std::optional<Lifted> lift(const uint8_t* code, size_t len, uint64_t address = 0);
 
+/// True when every instruction in the source was modeled by the lifter.
+/// False when at least one Op is `Opcode::UNDEF` — i.e. the lifter doesn't
+/// know how to translate the underlying mnemonic. Symbolic-execution callers
+/// should refuse to step past `!is_fully_lifted(l)` and either havoc the
+/// affected state or abort the path.
+inline bool is_fully_lifted(const Lifted& l) {
+    for (const auto& op : l.ops) if (op.opcode == Opcode::UNDEF) return false;
+    return true;
+}
+
+/// Decompose an `ADD_FLAGS` / `SUB_FLAGS` / `AND_FLAGS` op into the per-flag
+/// `SET_CF` / `SET_ZF` / `SET_SF` / `SET_OF` / `SET_PF` chain expressed using
+/// only primitive ops (ADD/SUB/AND/XOR/SHR/CMP_EQ/CMP_ULT/POPCNT). Returns the
+/// op unchanged when it isn't a flag bundle.
+///
+/// `next_temp_id` is read-then-incremented for fresh temp slots; the caller
+/// owns it across multiple expansions to keep IDs unique.
+std::vector<Op> expand_flag_op(const Op& op, uint16_t& next_temp_id);
+
+/// Apply expand_flag_op to every op in `lifted`. Returns a new Lifted whose
+/// flag updates are all per-flag SET_* ops (no remaining ADD_FLAGS / SUB_FLAGS /
+/// AND_FLAGS bundles). Other ops pass through unchanged.
+Lifted expand_flag_bundles(const Lifted& lifted);
+
 /// Interpreter context for executing IR.
 struct Context {
     uint64_t gpr[16] = {};       ///< RAX=0, RCX=1, ..., R15=15

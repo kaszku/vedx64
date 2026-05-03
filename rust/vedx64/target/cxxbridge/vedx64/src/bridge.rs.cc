@@ -1212,6 +1212,11 @@ void vedx64$bridge$cxxbridge1$194$emu_read_mem(::vedx64::bridge::Emu const &e, :
   ::std::uint8_t (*ir_lifted_op_num_inputs$)(::vedx64::bridge::IrLifted const &, ::std::size_t) = ::vedx64::bridge::ir_lifted_op_num_inputs;
   return ir_lifted_op_num_inputs$(l, i);
 }
+
+bool vedx64$bridge$cxxbridge1$194$ir_is_fully_lifted(::vedx64::bridge::IrLifted const &l) noexcept {
+  bool (*ir_is_fully_lifted$)(::vedx64::bridge::IrLifted const &) = ::vedx64::bridge::ir_is_fully_lifted;
+  return ir_is_fully_lifted$(l);
+}
 } // extern "C"
 } // namespace bridge
 } // namespace vedx64

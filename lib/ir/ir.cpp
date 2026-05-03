@@ -2565,8 +2565,11 @@ std::optional<Lifted> lift(const uint8_t* code, size_t len, uint64_t address) {
             return l;
     }
 
-    // Fallback: emit a single NOP (unlifted)
-    l.ops.push_back({Opcode::NOP});
+    // Fallback: emit a single UNDEF for instructions the lifter doesn't model.
+    // Distinct from the explicit NOP fallback used for legitimately-no-op
+    // mnemonics (AAA/JCXZ/etc., handled inside the dispatch). Symbolic-execution
+    // callers can detect this via ir::is_fully_lifted().
+    l.ops.push_back({Opcode::UNDEF});
     return l;
 }
 
@@ -3002,6 +3005,7 @@ bool emit(const Op& op, CodeGen& cg) {
     auto same_gpr = [&](const VarNode& a, const VarNode& b) { return is_gpr(a) && is_gpr(b) && a.offset==b.offset && a.size==b.size; };
     switch (op.opcode) {
     case Opcode::NOP:     cg.nop(); return true;
+    case Opcode::UNDEF:   return false; // unmodeled — caller must handle
     case Opcode::RET:     cg.ret(); return true;
     case Opcode::UD2:     cg.db(0x0F).db(0x0B); return true;
     case Opcode::SYSCALL: cg.db(0x0F).db(0x05); return true;
@@ -3630,6 +3634,130 @@ bool emit(const Op& op, CodeGen& cg) {
 } }
 
 namespace vedx64 { namespace ir {
+
+std::vector<Op> expand_flag_op(const Op& op, uint16_t& next_temp_id) {
+    std::vector<Op> out;
+    Opcode kind = op.opcode;
+    if (kind != Opcode::ADD_FLAGS && kind != Opcode::SUB_FLAGS && kind != Opcode::AND_FLAGS) {
+        out.push_back(op); return out;
+    }
+    if (op.num_inputs < 2) { out.push_back(op); return out; }
+    VarNode a = op.inputs[0];
+    VarNode b = op.inputs[1];
+    uint8_t sz = a.size ? a.size : (b.size ? b.size : 8);
+    uint8_t bits = static_cast<uint8_t>(sz * 8);
+    auto fresh = [&](uint8_t s) { return VarNode::temp(next_temp_id++, s); };
+    auto two   = [&](Opcode o, VarNode dst, VarNode s) {
+        Op p; p.opcode = o; p.output = dst; p.inputs[0] = s; p.num_inputs = 1; out.push_back(p);
+    };
+    auto three = [&](Opcode o, VarNode dst, VarNode s0, VarNode s1) {
+        Op p; p.opcode = o; p.output = dst; p.inputs[0] = s0; p.inputs[1] = s1; p.num_inputs = 2; out.push_back(p);
+    };
+    VarNode flags = VarNode::flags();
+    VarNode k_one = VarNode::constant(1, 1);
+    VarNode k_msb = VarNode::constant(static_cast<int64_t>(bits - 1), 1);
+    VarNode k_zero = VarNode::constant(0, sz);
+    VarNode k_ff = VarNode::constant(0xFF, sz);
+
+    // 1) Compute the result the bundle conceptually represents.
+    VarNode res = fresh(sz);
+    if (kind == Opcode::ADD_FLAGS)      three(Opcode::ADD, res, a, b);
+    else if (kind == Opcode::SUB_FLAGS) three(Opcode::SUB, res, a, b);
+    else                                three(Opcode::AND, res, a, b);
+
+    // 2) CF
+    if (kind == Opcode::ADD_FLAGS) {
+        VarNode cf = fresh(1);
+        three(Opcode::CMP_ULT, cf, res, a);            // CF = (res < a) — unsigned wrap
+        two(Opcode::SET_CF, flags, cf);
+    } else if (kind == Opcode::SUB_FLAGS) {
+        VarNode cf = fresh(1);
+        three(Opcode::CMP_ULT, cf, a, b);              // CF = (a < b) — borrow
+        two(Opcode::SET_CF, flags, cf);
+    } else { // AND_FLAGS clears CF
+        two(Opcode::SET_CF, flags, VarNode::constant(0, 1));
+    }
+
+    // 3) ZF
+    {
+        VarNode zf = fresh(1);
+        three(Opcode::CMP_EQ, zf, res, k_zero);
+        two(Opcode::SET_ZF, flags, zf);
+    }
+
+    // 4) SF — high bit of result
+    {
+        VarNode shifted = fresh(sz);
+        three(Opcode::SHR, shifted, res, k_msb);
+        VarNode sf = fresh(1);
+        three(Opcode::AND, sf, shifted, k_one);
+        two(Opcode::SET_SF, flags, sf);
+    }
+
+    // 5) OF
+    if (kind == Opcode::ADD_FLAGS) {
+        // OF = ((~(a^b)) & (a^res)) >> (bits-1)
+        VarNode xab = fresh(sz);  three(Opcode::XOR, xab, a, b);
+        VarNode nx  = fresh(sz);  two(Opcode::NOT, nx, xab);
+        VarNode xar = fresh(sz);  three(Opcode::XOR, xar, a, res);
+        VarNode and_ = fresh(sz); three(Opcode::AND, and_, nx, xar);
+        VarNode sh  = fresh(sz);  three(Opcode::SHR, sh, and_, k_msb);
+        VarNode of  = fresh(1);   three(Opcode::AND, of, sh, k_one);
+        two(Opcode::SET_OF, flags, of);
+    } else if (kind == Opcode::SUB_FLAGS) {
+        // OF = ((a^b) & (a^res)) >> (bits-1)
+        VarNode xab = fresh(sz);  three(Opcode::XOR, xab, a, b);
+        VarNode xar = fresh(sz);  three(Opcode::XOR, xar, a, res);
+        VarNode and_ = fresh(sz); three(Opcode::AND, and_, xab, xar);
+        VarNode sh  = fresh(sz);  three(Opcode::SHR, sh, and_, k_msb);
+        VarNode of  = fresh(1);   three(Opcode::AND, of, sh, k_one);
+        two(Opcode::SET_OF, flags, of);
+    } else {
+        two(Opcode::SET_OF, flags, VarNode::constant(0, 1));
+    }
+
+    // 6) PF — parity of low byte. PF = 1 when popcount(low8) is even.
+    {
+        VarNode low = fresh(sz);  three(Opcode::AND, low, res, k_ff);
+        VarNode pop = fresh(sz);  two(Opcode::POPCNT, pop, low);
+        VarNode bit = fresh(1);   three(Opcode::AND, bit, pop, k_one);
+        VarNode pf  = fresh(1);   three(Opcode::XOR, pf, bit, k_one);
+        two(Opcode::SET_PF, flags, pf);
+    }
+    // AF is left undefined — vedx64 IR has no SET_AF op (the bundle didn't define it either).
+
+    return out;
+}
+
+Lifted expand_flag_bundles(const Lifted& lifted) {
+    Lifted out;
+    out.address = lifted.address;
+    out.length  = lifted.length;
+    out.rep     = lifted.rep;
+
+    // Find a high temp id that's safe across the whole sequence.
+    uint16_t next_id = 1000;
+    for (const auto& op : lifted.ops) {
+        if (op.output.space == Space::Temp && op.output.offset >= next_id)
+            next_id = static_cast<uint16_t>(op.output.offset + 1);
+        for (uint8_t i = 0; i < op.num_inputs; ++i) {
+            if (op.inputs[i].space == Space::Temp && op.inputs[i].offset >= next_id)
+                next_id = static_cast<uint16_t>(op.inputs[i].offset + 1);
+        }
+    }
+
+    for (const auto& op : lifted.ops) {
+        if (op.opcode == Opcode::ADD_FLAGS || op.opcode == Opcode::SUB_FLAGS ||
+            op.opcode == Opcode::AND_FLAGS) {
+            auto exp = expand_flag_op(op, next_id);
+            for (const auto& e : exp) out.ops.push_back(e);
+        } else {
+            out.ops.push_back(op);
+        }
+    }
+    return out;
+}
+
 size_t emit_lifted(const Lifted& lifted, CodeGen& cg) {
     size_t count = 0;
     for (const auto& op : lifted.ops) {

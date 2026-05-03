@@ -124,6 +124,7 @@ pub mod ffi {
         fn ir_lifted_op_count(l: &IrLifted) -> usize;
         fn ir_lifted_op_opcode(l: &IrLifted, i: usize) -> u8;
         fn ir_lifted_op_num_inputs(l: &IrLifted, i: usize) -> u8;
+        fn ir_is_fully_lifted(l: &IrLifted) -> bool;
     }
 }
 

@@ -205,6 +205,11 @@ uint8_t  ir_lifted_length(const IrLifted& l) { return l.length; }
 size_t   ir_lifted_op_count(const IrLifted& l) { return l.ops.size(); }
 uint8_t  ir_lifted_op_opcode(const IrLifted& l, size_t i) { return i < l.ops.size() ? l.ops[i].opcode : 0; }
 uint8_t  ir_lifted_op_num_inputs(const IrLifted& l, size_t i) { return i < l.ops.size() ? l.ops[i].num_inputs : 0; }
+bool ir_is_fully_lifted(const IrLifted& l) {
+    auto undef = static_cast<uint8_t>(vedx64::ir::Opcode::UNDEF);
+    for (auto& op : l.ops) if (op.opcode == undef) return false;
+    return true;
+}
 #endif // VEDX64_IR
 
 } // namespace bridge
