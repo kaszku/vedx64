@@ -257,6 +257,19 @@ public:
     // `stop` may return true to mark a path "finished and worth keeping".
     std::vector<State> run(uint64_t entry, std::function<bool(const State&)> stop);
 
+    // Single-instruction step. Decodes whatever is at `s.rip`, lifts, and
+    // applies all IR ops to `s` in-place. Symbolic CBRANCH still forks —
+    // the alternate path goes onto the engine's queue if there's room.
+    // Returns false on decode failure or when the path is already dead.
+    bool step(State& s);
+
+    // Straight-line run of a single state with no fork enqueueing. At a
+    // symbolic CBRANCH the engine picks the *taken* side and pushes the
+    // negated condition into `s.pc`, leaving the fall-through unexplored.
+    // Useful for "summarize this basic block" callers that don't want
+    // path enumeration. Returns the number of instructions executed.
+    size_t run_block(State& s, size_t max_instructions);
+
     Builder& builder() { return builder_; }
     Solver&  solver()  { return solver_;  }
     const std::vector<std::string>& diagnostics() const { return diagnostics_; }

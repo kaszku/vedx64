@@ -62,12 +62,29 @@ const Expr* Builder::add(const Expr* x, const Expr* y) {
     FOLD2(Add, x->k + y->k)
     if (is_const(y) && y->k == 0) return x;
     if (is_const(x) && x->k == 0) return y;
+    // Push constants right and re-associate.
+    if (is_const(x) && !is_const(y)) std::swap(x, y);
+    // (a + c1) + c2 → a + (c1 + c2)
+    if (is_const(y) && x->op == ExprOp::Add && is_const(x->b)) {
+        return add(x->a, k(x->b->k + y->k, x->width));
+    }
+    // (a - c1) + c2 → a + (c2 - c1)
+    if (is_const(y) && x->op == ExprOp::Sub && is_const(x->b)) {
+        return add(x->a, k(y->k - x->b->k, x->width));
+    }
     return intern(ExprOp::Add, x->width, 0, x, y);
 }
 const Expr* Builder::sub(const Expr* x, const Expr* y) {
     FOLD2(Sub, x->k - y->k)
     if (is_const(y) && y->k == 0) return x;
     if (x == y) return k(0, x->width);
+    // (a + b) - b → a   and   (b + a) - b → a
+    if (x->op == ExprOp::Add && x->b == y) return x->a;
+    if (x->op == ExprOp::Add && x->a == y) return x->b;
+    // (a + c1) - c2 → a + (c1 - c2)
+    if (is_const(y) && x->op == ExprOp::Add && is_const(x->b)) {
+        return add(x->a, k(x->b->k - y->k, x->width));
+    }
     return intern(ExprOp::Sub, x->width, 0, x, y);
 }
 const Expr* Builder::mul(const Expr* x, const Expr* y) {
@@ -109,6 +126,9 @@ const Expr* Builder::band(const Expr* x, const Expr* y) {
     if (is_const(y) && (y->k & mask_to(x->width)) == mask_to(x->width)) return x;
     if (is_const(x) && (x->k & mask_to(y->width)) == mask_to(y->width)) return y;
     if (x == y) return x;
+    // x & ~x → 0,  ~x & x → 0
+    if (y->op == ExprOp::Not && y->a == x) return k(0, x->width);
+    if (x->op == ExprOp::Not && x->a == y) return k(0, x->width);
     return intern(ExprOp::And, x->width, 0, x, y);
 }
 const Expr* Builder::bor(const Expr* x, const Expr* y) {
@@ -116,6 +136,9 @@ const Expr* Builder::bor(const Expr* x, const Expr* y) {
     if (is_const(y) && y->k == 0) return x;
     if (is_const(x) && x->k == 0) return y;
     if (x == y) return x;
+    // x | ~x → all-ones,  ~x | x → all-ones
+    if (y->op == ExprOp::Not && y->a == x) return k(mask_to(x->width), x->width);
+    if (x->op == ExprOp::Not && x->a == y) return k(mask_to(x->width), x->width);
     return intern(ExprOp::Or, x->width, 0, x, y);
 }
 const Expr* Builder::bxor(const Expr* x, const Expr* y) {
@@ -137,11 +160,22 @@ const Expr* Builder::neg(const Expr* x) {
 const Expr* Builder::shl(const Expr* x, const Expr* n) {
     if (is_const(n) && n->k == 0) return x;
     if (is_const(x) && is_const(n)) return k((x->k << (n->k & 63)) & mask_to(x->width), x->width);
+    // (shl (shl x a) b) → shl x (a + b) when both shift counts are constants.
+    if (x->op == ExprOp::Shl && is_const(x->b) && is_const(n)) {
+        uint64_t total = x->b->k + n->k;
+        if (total >= x->width) return k(0, x->width);    // shifted entirely out
+        return shl(x->a, k(total, n->width));
+    }
     return intern(ExprOp::Shl, x->width, 0, x, n);
 }
 const Expr* Builder::lshr(const Expr* x, const Expr* n) {
     if (is_const(n) && n->k == 0) return x;
     if (is_const(x) && is_const(n)) return k((x->k & mask_to(x->width)) >> (n->k & 63), x->width);
+    if (x->op == ExprOp::LShr && is_const(x->b) && is_const(n)) {
+        uint64_t total = x->b->k + n->k;
+        if (total >= x->width) return k(0, x->width);
+        return lshr(x->a, k(total, n->width));
+    }
     return intern(ExprOp::LShr, x->width, 0, x, n);
 }
 const Expr* Builder::ashr(const Expr* x, const Expr* n) {
@@ -258,20 +292,24 @@ const Expr* Builder::ne(const Expr* x, const Expr* y) {
 }
 const Expr* Builder::ult(const Expr* x, const Expr* y) {
     if (is_const(x) && is_const(y)) return k(x->k < y->k ? 1 : 0, 1);
+    if (x == y) return k(0, 1);  // x < x is false
     return intern(ExprOp::Ult, 1, 0, x, y);
 }
 const Expr* Builder::slt(const Expr* x, const Expr* y) {
     if (is_const(x) && is_const(y))
         return k(sext_to_i64(x->k, x->width) < sext_to_i64(y->k, y->width) ? 1 : 0, 1);
+    if (x == y) return k(0, 1);
     return intern(ExprOp::Slt, 1, 0, x, y);
 }
 const Expr* Builder::ule(const Expr* x, const Expr* y) {
     if (is_const(x) && is_const(y)) return k(x->k <= y->k ? 1 : 0, 1);
+    if (x == y) return k(1, 1);  // x ≤ x is true
     return intern(ExprOp::Ule, 1, 0, x, y);
 }
 const Expr* Builder::sle(const Expr* x, const Expr* y) {
     if (is_const(x) && is_const(y))
         return k(sext_to_i64(x->k, x->width) <= sext_to_i64(y->k, y->width) ? 1 : 0, 1);
+    if (x == y) return k(1, 1);
     return intern(ExprOp::Sle, 1, 0, x, y);
 }
 
@@ -920,6 +958,50 @@ std::vector<State> Engine::run(uint64_t entry, std::function<bool(const State&)>
         next_path:;
     }
     return finished;
+}
+
+bool Engine::step(State& s) {
+    if (s.dead) return false;
+    uint8_t code[15] = {};
+    size_t got = 0;
+    for (size_t want = 15; want >= 1; --want) {
+        if (read_code_(s.rip, code, want)) { got = want; break; }
+    }
+    if (got == 0) { s.dead = true; diagnostics_.push_back("step: read_code failed"); return false; }
+    DecodedInstr di;
+    size_t consumed = decode(code, got, di);
+    if (consumed == 0 || !di.desc) {
+        s.dead = true; diagnostics_.push_back("step: decode failed"); return false;
+    }
+    auto lifted = ir::lift(code, consumed, s.rip);
+    if (!lifted) { s.dead = true; diagnostics_.push_back("step: lift failed"); return false; }
+    auto expanded = ir::expand_flag_bundles(*lifted);
+
+    uint64_t pre_rip = s.rip;
+    s.clear_temps();
+    for (const auto& op : expanded.ops) {
+        apply_op(s, op, expanded, di);
+        if (s.dead) break;
+    }
+    if (!s.dead && s.rip == pre_rip) s.rip += expanded.length;
+    return !s.dead;
+}
+
+size_t Engine::run_block(State& s, size_t max_instructions) {
+    // run_block doesn't enqueue forks. Save the queue and restore it after,
+    // so any CBRANCH that would push an alternate path is silently dropped
+    // — the caller wanted a straight-line summary, so we keep the taken side.
+    auto saved_queue = std::move(queue_);
+    queue_.clear();
+    size_t executed = 0;
+    while (executed < max_instructions && !s.dead) {
+        if (!step(s)) break;
+        ++executed;
+        // Discard any forks step() pushed.
+        queue_.clear();
+    }
+    queue_ = std::move(saved_queue);
+    return executed;
 }
 
 std::string dump_op_with_state(const ir::Op& op, const State& s) {

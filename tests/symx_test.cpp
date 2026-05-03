@@ -193,6 +193,83 @@ int main() {
         }
     }
 
+    // --- Builder: algebraic peepholes ---
+    {
+        Builder b;
+        const Expr* x = b.sym(64);
+        // (x + 5) + 7 → x + 12
+        const Expr* lhs = b.add(b.add(x, b.k(5, 64)), b.k(7, 64));
+        CHECK(lhs->op == ExprOp::Add && lhs->a == x && is_const(lhs->b) && lhs->b->k == 12,
+            "(x+5)+7 collapses to x+12");
+        // (x + a) - a → x
+        const Expr* a = b.sym(64);
+        CHECK(b.sub(b.add(x, a), a) == x, "(x + a) - a → x");
+        // (x - 3) + 10 → x + 7
+        const Expr* l2 = b.add(b.sub(x, b.k(3, 64)), b.k(10, 64));
+        CHECK(l2->op == ExprOp::Add && l2->a == x && is_const(l2->b) && l2->b->k == 7,
+            "(x-3)+10 → x+7");
+        // x & ~x → 0,  x | ~x → all-ones
+        CHECK(is_const(b.band(x, b.bnot(x))) && b.band(x, b.bnot(x))->k == 0, "x & ~x → 0");
+        const Expr* allones = b.bor(x, b.bnot(x));
+        CHECK(is_const(allones) && allones->k == ~0ULL, "x | ~x → all-ones");
+        // ult/sle reflexive
+        CHECK(is_const(b.ult(x, x)) && b.ult(x, x)->k == 0, "x <u x → false");
+        CHECK(is_const(b.sle(x, x)) && b.sle(x, x)->k == 1, "x <=s x → true");
+        // (shl (shl x 4) 8) → shl x 12
+        const Expr* shifted = b.shl(b.shl(x, b.k(4, 8)), b.k(8, 8));
+        CHECK(shifted->op == ExprOp::Shl && shifted->a == x &&
+              is_const(shifted->b) && shifted->b->k == 12, "(shl (shl x 4) 8) coalesces");
+    }
+
+    // --- Engine: step ---
+    {
+        // mov rax, 1     48 C7 C0 01 00 00 00
+        // add rax, 2     48 83 C0 02
+        // add rax, 3     48 83 C0 03
+        static const uint8_t prog[] = {
+            0x48, 0xC7, 0xC0, 0x01, 0x00, 0x00, 0x00,
+            0x48, 0x83, 0xC0, 0x02,
+            0x48, 0x83, 0xC0, 0x03,
+        };
+        constexpr uint64_t base = 0x4000;
+        Config cfg{};
+        Engine eng(cfg, [&](uint64_t addr, uint8_t* out, size_t n) {
+            if (addr < base || addr + n > base + sizeof(prog)) return false;
+            std::memcpy(out, prog + (addr - base), n);
+            return true;
+        });
+        State s = eng.seed_state().fork();
+        s.rip = base;
+        CHECK(eng.step(s), "step #1 (mov)");
+        CHECK(eng.step(s), "step #2 (add)");
+        CHECK(eng.step(s), "step #3 (add)");
+        const Expr* rax = s.gpr[0];
+        CHECK(is_const(rax) && rax->k == 6, "rax = 1 + 2 + 3 = 6 after 3 steps");
+    }
+    // --- Engine: run_block ---
+    {
+        static const uint8_t prog[] = {
+            0x48, 0xC7, 0xC0, 0x0A, 0x00, 0x00, 0x00,  // mov rax, 10
+            0x48, 0xFF, 0xC0,                           // inc rax
+            0x48, 0xFF, 0xC0,                           // inc rax
+            0x48, 0xFF, 0xC0,                           // inc rax
+            0xC3,
+        };
+        constexpr uint64_t base = 0x5000;
+        Config cfg{};
+        Engine eng(cfg, [&](uint64_t addr, uint8_t* out, size_t n) {
+            if (addr < base || addr + n > base + sizeof(prog)) return false;
+            std::memcpy(out, prog + (addr - base), n);
+            return true;
+        });
+        State s = eng.seed_state().fork();
+        s.rip = base;
+        size_t n = eng.run_block(s, 4);
+        CHECK(n == 4, "run_block executed 4 instructions");
+        const Expr* rax = s.gpr[0];
+        CHECK(is_const(rax) && rax->k == 13, "rax = 10 + 1 + 1 + 1 = 13");
+    }
+
 #ifdef VEDX64_Z3
     // --- Z3-backed solver: actual SAT/UNSAT/concretization ---
     {
