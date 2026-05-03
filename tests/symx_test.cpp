@@ -46,6 +46,41 @@ int main() {
         CHECK(a1 == a2, "Add is hash-consed");
     }
 
+    // --- Builder: structural peepholes ---
+    {
+        Builder b;
+        const Expr* x = b.sym(64);
+        // ~~x → x
+        CHECK(b.bnot(b.bnot(x)) == x, "~~x → x");
+        // extract(hi, lo, concat(h, l)) — entirely in low half
+        const Expr* h = b.sym(32);
+        const Expr* l = b.sym(32);
+        const Expr* c = b.concat(h, l);   // 64-bit
+        CHECK(b.extract(c, 31, 0)  == l, "extract(31,0, concat(h,l)) → l");
+        CHECK(b.extract(c, 63, 32) == h, "extract(63,32, concat(h,l)) → h");
+        // Spans the boundary — should split into two extracts.
+        const Expr* spanned = b.extract(c, 47, 16);
+        CHECK(spanned->op == ExprOp::Concat, "spanning extract splits into concat");
+        // extract over zext: high bits become zero.
+        const Expr* y = b.sym(8);
+        const Expr* z = b.zext(y, 32);
+        CHECK(b.extract(z, 7, 0) == y, "extract low byte of zext → y");
+        const Expr* hi_z = b.extract(z, 23, 16);
+        CHECK(is_const(hi_z) && hi_z->k == 0, "extract high byte of zext → 0");
+        // concat(#0, x) → zext(x, w)
+        const Expr* zero = b.k(0, 32);
+        const Expr* zx = b.concat(zero, y);
+        CHECK(zx->op == ExprOp::Zext, "concat(#0:32, y:8) → zext(y, 40)");
+        // concat of adjacent extracts of same source → single extract
+        const Expr* big = b.sym(64);
+        const Expr* hi8 = b.extract(big, 15, 8);
+        const Expr* lo8 = b.extract(big, 7, 0);
+        CHECK(b.concat(hi8, lo8) == b.extract(big, 15, 0), "adjacent extract concat coalesces");
+        // trunc(zext(x)) → x  (all three regimes)
+        CHECK(b.trunc(b.zext(y, 64), 8)  == y, "trunc to original of zext → y");
+        CHECK(b.trunc(b.zext(y, 64), 16)->op == ExprOp::Zext, "trunc-narrows zext");
+    }
+
     // --- Builder: width-changing ops fold ---
     {
         Builder b;

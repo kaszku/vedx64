@@ -127,6 +127,7 @@ const Expr* Builder::bxor(const Expr* x, const Expr* y) {
 }
 const Expr* Builder::bnot(const Expr* x) {
     if (is_const(x)) return k((~x->k) & mask_to(x->width), x->width);
+    if (x->op == ExprOp::Not) return x->a;   // ~~x → x
     return intern(ExprOp::Not, x->width, 0, x, nullptr);
 }
 const Expr* Builder::neg(const Expr* x) {
@@ -155,6 +156,8 @@ const Expr* Builder::ashr(const Expr* x, const Expr* n) {
 const Expr* Builder::zext(const Expr* x, uint16_t to) {
     if (to == x->width) return x;
     if (is_const(x)) return k(x->k & mask_to(to), to);
+    if (to < x->width) return trunc(x, to);            // narrowing → trunc
+    if (x->op == ExprOp::Zext) return zext(x->a, to);  // zext stacking
     return intern(ExprOp::Zext, to, 0, x, nullptr);
 }
 const Expr* Builder::sext(const Expr* x, uint16_t to) {
@@ -168,19 +171,78 @@ const Expr* Builder::sext(const Expr* x, uint16_t to) {
 const Expr* Builder::trunc(const Expr* x, uint16_t to) {
     if (to == x->width) return x;
     if (is_const(x)) return k(x->k & mask_to(to), to);
-    // (zext y) → trunc to original width simplifies back to y.
-    if (x->op == ExprOp::Zext && x->a && x->a->width == to) return x->a;
+    if (to > x->width) return zext(x, to);                                 // widening → zext
+    // trunc(zext(y)) — three cases:
+    //   to == y.width   → y
+    //   to >  y.width   → zext(y, to)
+    //   to <  y.width   → trunc(y, to)
+    if (x->op == ExprOp::Zext) {
+        uint16_t yw = x->a->width;
+        if (to == yw) return x->a;
+        if (to >  yw) return zext (x->a, to);
+        if (to <  yw) return trunc(x->a, to);
+    }
+    // trunc(concat(h, l)) — entirely in the low part?
+    if (x->op == ExprOp::Concat && to <= x->b->width) return trunc(x->b, to);
+    // trunc(extract(hi, lo, y)) — re-express as a tighter extract.
+    if (x->op == ExprOp::Extract) {
+        uint16_t inner_lo = static_cast<uint16_t>(x->k & 0xFF);
+        return extract(x->a, static_cast<uint16_t>(inner_lo + to - 1), inner_lo);
+    }
     return intern(ExprOp::Trunc, to, 0, x, nullptr);
 }
 const Expr* Builder::extract(const Expr* x, uint16_t hi, uint16_t lo) {
     uint16_t w = static_cast<uint16_t>(hi - lo + 1);
     if (lo == 0 && hi + 1 == x->width) return x;
     if (is_const(x)) return k((x->k >> lo) & mask_to(w), w);
+    // Nested extract: extract(hi2,lo2, extract(hi1,lo1, y)) → extract(hi1+hi2, hi1+lo2... wait
+    //   inner extract returns the slice [hi1..lo1] of y as a new fresh-width value;
+    //   the outer extract picks bits [hi2..lo2] of THAT — i.e. bits [lo1+hi2..lo1+lo2] of y.
+    if (x->op == ExprOp::Extract) {
+        uint16_t inner_lo = static_cast<uint16_t>(x->k & 0xFF);
+        return extract(x->a, static_cast<uint16_t>(inner_lo + hi),
+                              static_cast<uint16_t>(inner_lo + lo));
+    }
+    // extract(hi, lo, concat(h, l)) — split based on which side the range falls.
+    if (x->op == ExprOp::Concat) {
+        uint16_t lo_w = x->b->width;
+        if (hi < lo_w) return extract(x->b, hi, lo);                          // entirely in low part
+        if (lo >= lo_w) return extract(x->a, static_cast<uint16_t>(hi - lo_w),
+                                                static_cast<uint16_t>(lo - lo_w)); // entirely in high
+        // Spans both — split into two extracts then re-concat.
+        const Expr* hi_part = extract(x->a, static_cast<uint16_t>(hi - lo_w), 0);
+        const Expr* lo_part = extract(x->b, static_cast<uint16_t>(lo_w - 1), lo);
+        return concat(hi_part, lo_part);
+    }
+    // extract(hi, lo, zext(to, y)):
+    //   bits below y->width come from y, bits above are zero.
+    if (x->op == ExprOp::Zext) {
+        uint16_t inner_w = x->a->width;
+        if (hi < inner_w) return extract(x->a, hi, lo);                       // entirely in y
+        if (lo >= inner_w) return k(0, w);                                    // entirely in zero pad
+        // Spans the boundary — pad zeros on top of an inner extract.
+        const Expr* low_slice = extract(x->a, static_cast<uint16_t>(inner_w - 1), lo);
+        return zext(low_slice, w);
+    }
+    // extract(hi, lo, sext(to, y)) when slice lies entirely below the sign extension.
+    if (x->op == ExprOp::Sext && hi < x->a->width) return extract(x->a, hi, lo);
     return intern(ExprOp::Extract, w, ((uint64_t)hi << 8) | lo, x, nullptr);
 }
+
 const Expr* Builder::concat(const Expr* hi, const Expr* lo) {
     uint16_t w = static_cast<uint16_t>(hi->width + lo->width);
     if (is_const(hi) && is_const(lo)) return k((hi->k << lo->width) | (lo->k & mask_to(lo->width)), w);
+    // concat(#0, x) where the high part is constant zero of any width → zext(x, w).
+    if (is_const(hi) && hi->k == 0) return zext(lo, w);
+    // concat(extract(a, h1, m1), extract(b, m1-1, l1)) where a == b and the
+    // ranges abut → a single extract(a, h1, l1).
+    if (hi->op == ExprOp::Extract && lo->op == ExprOp::Extract && hi->a == lo->a) {
+        uint16_t hi_lo = static_cast<uint16_t>(hi->k & 0xFF);
+        uint16_t lo_hi = static_cast<uint16_t>((lo->k >> 8) & 0xFF);
+        uint16_t lo_lo = static_cast<uint16_t>(lo->k & 0xFF);
+        uint16_t hi_hi = static_cast<uint16_t>((hi->k >> 8) & 0xFF);
+        if (hi_lo == lo_hi + 1) return extract(hi->a, hi_hi, lo_lo);
+    }
     return intern(ExprOp::Concat, w, 0, hi, lo);
 }
 
