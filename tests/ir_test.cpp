@@ -23,13 +23,11 @@ int main() {
     CHECK(ir::is_fully_lifted(*l), "nop is fully lifted");
 
     {
-        // 0x90 = XCHG eax,eax (opcode-register form). The XCHG handler only
-        // models the ModRM mod=3 form, so this falls through to the catch-all.
-        uint8_t xchg_acc[] = {0x90};
-        auto u = ir::lift(xchg_acc, sizeof(xchg_acc));
-        CHECK(u.has_value() && !u->ops.empty(), "lift 0x90");
-        CHECK(u->ops[0].opcode == ir::Opcode::UNDEF, "unmodeled XCHG-acc emits UNDEF");
-        CHECK(!ir::is_fully_lifted(*u), "0x90 is not fully lifted");
+        uint8_t aaa[] = {0x37};  // AAA — affects AF/CF, undef OF/SF/ZF/PF
+        auto u = ir::lift(aaa, sizeof(aaa));
+        CHECK(u.has_value() && !u->ops.empty(), "lift AAA");
+        CHECK(u->ops[0].opcode == ir::Opcode::UNDEF, "AAA emits UNDEF (no longer silent NOP)");
+        CHECK(!ir::is_fully_lifted(*u), "AAA is not fully lifted");
     }
 
     uint8_t mov_rax_rcx[] = {0x48, 0x89, 0xC8};
@@ -690,6 +688,141 @@ int main() {
         auto lo = ir::lift(mov_only, sizeof(mov_only));
         auto e2 = ir::expand_flag_bundles(*lo);
         CHECK(e2.ops.size() == lo->ops.size(), "mov: expansion is idempotent");
+    }
+
+    // ── New SymExec-targeted handlers ──
+    auto count_op = [](const ir::Lifted& L, ir::Opcode oc) {
+        size_t n = 0; for (auto& o : L.ops) if (o.opcode == oc) ++n; return n;
+    };
+    // ALU AL,imm accumulator forms (no ModRM): ADD AL, 0x42 → 04 42
+    {
+        uint8_t add_al[] = {0x04, 0x42};
+        auto l = ir::lift(add_al, sizeof(add_al));
+        CHECK(l && ir::is_fully_lifted(*l), "ADD AL, imm8 fully lifted");
+        CHECK(count_op(*l, ir::Opcode::ADD) >= 1, "ADD AL,imm produces ADD op");
+    }
+    // SUB EAX, imm32: 2D 78 56 34 12
+    {
+        uint8_t sub_eax[] = {0x2D, 0x78, 0x56, 0x34, 0x12};
+        auto l = ir::lift(sub_eax, sizeof(sub_eax));
+        CHECK(l && ir::is_fully_lifted(*l), "SUB EAX, imm32 fully lifted");
+        CHECK(count_op(*l, ir::Opcode::SUB) >= 1, "SUB EAX,imm produces SUB op");
+    }
+    // CMP RAX, imm32 (sign-extended): 48 3D ff ff 00 00
+    {
+        uint8_t cmp_rax[] = {0x48, 0x3D, 0xFF, 0xFF, 0x00, 0x00};
+        auto l = ir::lift(cmp_rax, sizeof(cmp_rax));
+        CHECK(l && ir::is_fully_lifted(*l), "CMP RAX, imm32 fully lifted");
+        CHECK(count_op(*l, ir::Opcode::SUB_FLAGS) >= 1, "CMP emits SUB_FLAGS");
+    }
+    // TEST AL, imm8: A8 ff
+    {
+        uint8_t test_al[] = {0xA8, 0xFF};
+        auto l = ir::lift(test_al, sizeof(test_al));
+        CHECK(l && ir::is_fully_lifted(*l), "TEST AL, imm8 fully lifted");
+        CHECK(count_op(*l, ir::Opcode::AND) >= 1, "TEST emits AND");
+    }
+
+    // MUL r/m8 (F6 /4): byte form, AX = AL * src
+    {
+        uint8_t mul_cl[] = {0xF6, 0xE1};  // mul cl
+        auto l = ir::lift(mul_cl, sizeof(mul_cl));
+        CHECK(l && ir::is_fully_lifted(*l), "MUL CL fully lifted (8-bit)");
+        CHECK(count_op(*l, ir::Opcode::MUL) >= 1, "MUL CL emits MUL op");
+    }
+    // MUL r/m32 (F7 /4): EAX*src → EDX:EAX (modeled exactly via 64-bit temp)
+    {
+        uint8_t mul_ecx[] = {0xF7, 0xE1};
+        auto l = ir::lift(mul_ecx, sizeof(mul_ecx));
+        CHECK(l && ir::is_fully_lifted(*l), "MUL ECX fully lifted (32-bit)");
+        CHECK(count_op(*l, ir::Opcode::MUL) >= 1, "MUL ECX emits MUL");
+        CHECK(count_op(*l, ir::Opcode::TRUNC) >= 2, "MUL ECX emits 2 TRUNCs (EAX, EDX)");
+    }
+    // MUL r/m64 (F7 /4 with REX.W): RDX gets UNDEF (128-bit not representable)
+    {
+        uint8_t mul_rcx[] = {0x48, 0xF7, 0xE1};
+        auto l = ir::lift(mul_rcx, sizeof(mul_rcx));
+        CHECK(l.has_value(), "lift MUL RCX");
+        CHECK(!ir::is_fully_lifted(*l), "MUL RCX flagged as not-fully-lifted (RDX = high 64)");
+    }
+    // DIV r/m8 (F6 /6): AX / src → AL=quot, AH=rem
+    {
+        uint8_t div_cl[] = {0xF6, 0xF1};
+        auto l = ir::lift(div_cl, sizeof(div_cl));
+        CHECK(l && ir::is_fully_lifted(*l), "DIV CL fully lifted");
+        CHECK(count_op(*l, ir::Opcode::DIV) >= 1, "DIV CL emits DIV");
+        CHECK(count_op(*l, ir::Opcode::MOD) >= 1, "DIV CL emits MOD");
+    }
+
+    // CMOVcc memory form: 48 0F 44 03  →  cmove rax, [rbx]
+    {
+        uint8_t cmove_mem[] = {0x48, 0x0F, 0x44, 0x03};
+        auto l = ir::lift(cmove_mem, sizeof(cmove_mem));
+        CHECK(l && ir::is_fully_lifted(*l), "CMOVE rax,[rbx] fully lifted");
+        CHECK(count_op(*l, ir::Opcode::LOAD) >= 1, "CMOVE mem emits LOAD");
+        CHECK(count_op(*l, ir::Opcode::SELECT) == 1, "CMOVE mem emits SELECT");
+    }
+
+    // XCHG opcode-register form: 91 = XCHG eax, ecx
+    {
+        uint8_t xchg_eax_ecx[] = {0x91};
+        auto l = ir::lift(xchg_eax_ecx, sizeof(xchg_eax_ecx));
+        CHECK(l && ir::is_fully_lifted(*l), "XCHG eax,ecx (opcode-reg) fully lifted");
+        CHECK(count_op(*l, ir::Opcode::COPY) == 3, "XCHG opcode-reg emits 3 COPYs");
+    }
+    // XCHG memory form: 87 03 = XCHG eax, [rbx]
+    {
+        uint8_t xchg_mem[] = {0x87, 0x03};
+        auto l = ir::lift(xchg_mem, sizeof(xchg_mem));
+        CHECK(l && ir::is_fully_lifted(*l), "XCHG mem fully lifted");
+        CHECK(count_op(*l, ir::Opcode::LOAD)  >= 1, "XCHG mem emits LOAD");
+        CHECK(count_op(*l, ir::Opcode::STORE) >= 1, "XCHG mem emits STORE");
+    }
+
+    // BT memory form: 48 0F A3 0B  →  bt qword [rbx], rcx
+    {
+        uint8_t bt_mem[] = {0x48, 0x0F, 0xA3, 0x0B};
+        auto l = ir::lift(bt_mem, sizeof(bt_mem));
+        CHECK(l && ir::is_fully_lifted(*l), "BT [rbx], rcx fully lifted");
+        CHECK(count_op(*l, ir::Opcode::LOAD)   >= 1, "BT mem emits LOAD");
+        CHECK(count_op(*l, ir::Opcode::SET_CF) >= 1, "BT mem sets CF");
+    }
+    // BTS memory form: writes back via STORE
+    {
+        uint8_t bts_mem[] = {0x48, 0x0F, 0xAB, 0x0B};
+        auto l = ir::lift(bts_mem, sizeof(bts_mem));
+        CHECK(l && ir::is_fully_lifted(*l), "BTS [rbx], rcx fully lifted");
+        CHECK(count_op(*l, ir::Opcode::STORE) >= 1, "BTS mem emits STORE");
+    }
+    // BT imm8 form: 48 0F BA E0 04  →  bt rax, 4
+    {
+        uint8_t bt_imm[] = {0x48, 0x0F, 0xBA, 0xE0, 0x04};
+        auto l = ir::lift(bt_imm, sizeof(bt_imm));
+        CHECK(l && ir::is_fully_lifted(*l), "BT rax, imm8 fully lifted");
+    }
+
+    // SHLD imm form: 48 0F A4 C8 04  →  shld rax, rcx, 4
+    {
+        uint8_t shld_imm[] = {0x48, 0x0F, 0xA4, 0xC8, 0x04};
+        auto l = ir::lift(shld_imm, sizeof(shld_imm));
+        CHECK(l && ir::is_fully_lifted(*l), "SHLD rax,rcx,imm fully lifted");
+        CHECK(count_op(*l, ir::Opcode::SHL) >= 1, "SHLD emits SHL");
+        CHECK(count_op(*l, ir::Opcode::SHR) >= 1, "SHLD also emits SHR (high-half merge)");
+        CHECK(count_op(*l, ir::Opcode::OR)  >= 1, "SHLD merges low|high via OR");
+    }
+    // SHRD CL form: 48 0F AD C8  →  shrd rax, rcx, cl
+    {
+        uint8_t shrd_cl[] = {0x48, 0x0F, 0xAD, 0xC8};
+        auto l = ir::lift(shrd_cl, sizeof(shrd_cl));
+        CHECK(l && ir::is_fully_lifted(*l), "SHRD rax,rcx,cl fully lifted");
+    }
+
+    // ADC AL,imm + flag bundle expansion smoke test
+    {
+        uint8_t adc_al[] = {0x14, 0x05};   // adc al, 5
+        auto l = ir::lift(adc_al, sizeof(adc_al));
+        CHECK(l && ir::is_fully_lifted(*l), "ADC AL, imm8 fully lifted");
+        CHECK(count_op(*l, ir::Opcode::GET_CF) >= 1, "ADC reads CF");
     }
     printf("All IR tests passed!\n");
     return 0;

@@ -238,6 +238,44 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         }
     }
 
+
+    if (!di.desc->has_modrm && di.desc->num_operands >= 2 &&
+        di.desc->operands[0].addr == AddrMode::Fixed && di.desc->operands[0].fixed_reg == 0 &&
+        di.desc->operands[1].addr == AddrMode::Immediate &&
+        (m == Mnemonic::ADD || m == Mnemonic::SUB || m == Mnemonic::ADC || m == Mnemonic::SBB ||
+         m == Mnemonic::AND || m == Mnemonic::OR  || m == Mnemonic::XOR || m == Mnemonic::CMP ||
+         m == Mnemonic::TEST)) {
+        VarNode dst = VarNode::gpr(0, sz);
+        VarNode src = VarNode::constant(di.immediate, sz);
+        Opcode opc = Opcode::ADD;
+        if (m == Mnemonic::SUB) opc = Opcode::SUB;
+        else if (m == Mnemonic::ADC) opc = Opcode::ADD;   // CF added below
+        else if (m == Mnemonic::SBB) opc = Opcode::SUB;   // CF subtracted below
+        else if (m == Mnemonic::AND || m == Mnemonic::TEST) opc = Opcode::AND;
+        else if (m == Mnemonic::OR)  opc = Opcode::OR;
+        else if (m == Mnemonic::XOR) opc = Opcode::XOR;
+        else if (m == Mnemonic::CMP) opc = Opcode::SUB;
+        bool is_logic = (m == Mnemonic::AND || m == Mnemonic::OR  || m == Mnemonic::XOR ||
+                         m == Mnemonic::TEST);
+        bool is_cmp_or_test = (m == Mnemonic::CMP || m == Mnemonic::TEST);
+        Opcode flags_opc = is_logic ? Opcode::AND_FLAGS :
+                           (m == Mnemonic::SUB || m == Mnemonic::SBB || m == Mnemonic::CMP)
+                               ? Opcode::SUB_FLAGS : Opcode::ADD_FLAGS;
+        VarNode tmp = VarNode::temp(30, sz);
+        l.ops.push_back(make_op3(opc, tmp, dst, src));
+        if (m == Mnemonic::ADC || m == Mnemonic::SBB) {
+            VarNode cf = VarNode::temp(31, sz);
+            l.ops.push_back(make_op2(Opcode::GET_CF, cf, VarNode::flags()));
+            l.ops.push_back(make_op2(Opcode::ZEXT, cf, cf));
+            Opcode adj = (m == Mnemonic::ADC) ? Opcode::ADD : Opcode::SUB;
+            l.ops.push_back(make_op3(adj, tmp, tmp, cf));
+        }
+        l.ops.push_back(make_op3(flags_opc, VarNode::flags(),
+            (flags_opc == Opcode::AND_FLAGS ? tmp : dst),
+            (flags_opc == Opcode::AND_FLAGS ? VarNode::constant(0, sz) : src)));
+        if (!is_cmp_or_test) l.ops.push_back(make_op2(Opcode::COPY, dst, tmp));
+        return true;
+    }
     if ((m == Mnemonic::ADD || m == Mnemonic::SUB || m == Mnemonic::AND ||
          m == Mnemonic::OR || m == Mnemonic::XOR) &&
         di.desc->num_operands >= 2 && di.desc->has_modrm) {
@@ -556,8 +594,9 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         return true;
     }
 
+
     if (m == Mnemonic::XCHG) {
-        if (di.desc->has_modrm && ((di.modrm >> 6) & 3) == 3) {
+        if (di.desc->has_modrm && mod_ == 3) {
             VarNode a = reg_from_modrm_rm(di, sz);
             VarNode b = reg_from_modrm_reg(di, sz);
             VarNode tmp = VarNode::temp(0, sz);
@@ -566,8 +605,30 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
             l.ops.push_back(make_op2(Opcode::COPY, b, tmp));
             return true;
         }
+        if (di.desc->has_modrm && mod_ != 3) {
+            VarNode reg = reg_from_modrm_reg(di, sz);
+            VarNode ea  = compute_ea(l, di);
+            VarNode tmp = VarNode::temp(0, sz);
+            l.ops.push_back(make_op3(Opcode::LOAD, tmp, ea, VarNode::ram(sz)));
+            l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(sz), ea, reg));
+            l.ops.push_back(make_op2(Opcode::COPY, reg, tmp));
+            return true;
+        }
+        // 0x90+r form: source register comes from the opcode low 3 bits, dest is RAX.
+        bool has_opcreg = false;
+        for (uint8_t i = 0; i < di.desc->num_operands; ++i)
+            if (di.desc->operands[i].addr == AddrMode::OpcodeReg) { has_opcreg = true; break; }
+        if (has_opcreg) {
+            uint8_t reg_id = di.opcode_reg & 0x0F;  // already includes REX.B
+            VarNode rax = VarNode::gpr(0, sz);
+            VarNode r   = VarNode::gpr(reg_id, sz);
+            VarNode tmp = VarNode::temp(0, sz);
+            l.ops.push_back(make_op2(Opcode::COPY, tmp, rax));
+            l.ops.push_back(make_op2(Opcode::COPY, rax, r));
+            l.ops.push_back(make_op2(Opcode::COPY, r, tmp));
+            return true;
+        }
     }
-
     if (m == Mnemonic::JO || m == Mnemonic::JNO || m == Mnemonic::JB || m == Mnemonic::JNB ||
         m == Mnemonic::JZ || m == Mnemonic::JNZ || m == Mnemonic::JBE || m == Mnemonic::JNBE ||
         m == Mnemonic::JS || m == Mnemonic::JNS || m == Mnemonic::JP || m == Mnemonic::JNP ||
@@ -680,22 +741,147 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         return true;
     }
 
+
     if (m == Mnemonic::MUL || m == Mnemonic::IMUL) {
-        if (di.desc->has_modrm && ((di.modrm >> 6) & 3) == 3 && di.desc->num_operands <= 2) {
+        // 2-op IMUL r, r/m (existing path) — num_operands == 2 with explicit
+        // destination via ModRM.reg. The 1-op form has 3 operands in the table:
+        // {Fixed RDX/AX-high, Fixed RAX/AL, ModRM.RM source}.
+        bool is_one_op = (di.desc->num_operands == 3);
+        bool is_two_op = (di.desc->num_operands == 2);
+        Opcode opc = (m == Mnemonic::MUL) ? Opcode::MUL : Opcode::IMUL;
+
+        if (is_two_op && di.desc->has_modrm && mod_ == 3) {
+            VarNode dst = reg_from_modrm_reg(di, sz);
             VarNode src = reg_from_modrm_rm(di, sz);
+            l.ops.push_back(make_op3(opc, dst, dst, src));
+            return true;
+        }
+        if (is_two_op && di.desc->has_modrm && mod_ != 3) {
+            VarNode dst = reg_from_modrm_reg(di, sz);
+            VarNode ea  = compute_ea(l, di);
+            VarNode tmp = VarNode::temp(11, sz);
+            l.ops.push_back(make_op3(Opcode::LOAD, tmp, ea, VarNode::ram(sz)));
+            l.ops.push_back(make_op3(opc, dst, dst, tmp));
+            return true;
+        }
+        if (is_one_op && di.desc->has_modrm) {
+            // For 1-op MUL/IMUL the explicit r/m source is at operands[2]; the
+            // outer `sz` was derived from operands[0] which is the Fixed RDX
+            // pseudo-operand and reports OpSize::None (defaulting to 4). Use
+            // operands[2]'s size so we get the right width (1/2/4/8).
+            uint8_t op_sz = op_size_bytes(di.desc->operands[2].size, rex_w, has_66);
+            sz = op_sz;
+            VarNode src;
+            if (mod_ == 3) src = reg_from_modrm_rm(di, sz);
+            else {
+                VarNode ea = compute_ea(l, di);
+                src = VarNode::temp(11, sz);
+                l.ops.push_back(make_op3(Opcode::LOAD, src, ea, VarNode::ram(sz)));
+            }
             VarNode rax = VarNode::gpr(0, sz);
-            Opcode opc = (m == Mnemonic::MUL) ? Opcode::MUL : Opcode::IMUL;
+            VarNode rdx = VarNode::gpr(2, sz);
+            // For sz < 8 we can compute the full 2N-bit product using a wider
+            // temp via ZEXT/SEXT, then split into RAX (low) and RDX (high).
+            // For sz == 8 the IR has no native 128-bit value — RAX gets the
+            // low 64 bits via the regular MUL op and RDX is marked UNDEF so
+            // is_fully_lifted() flags it for symbolic execution to handle.
+            if (sz < 8) {
+                uint8_t wide = static_cast<uint8_t>(sz * 2);
+                Opcode ext = (m == Mnemonic::MUL) ? Opcode::ZEXT : Opcode::SEXT;
+                VarNode wa = VarNode::temp(20, wide);
+                VarNode wb = VarNode::temp(21, wide);
+                VarNode wp = VarNode::temp(22, wide);
+                l.ops.push_back(make_op2(ext, wa, rax));
+                l.ops.push_back(make_op2(ext, wb, src));
+                l.ops.push_back(make_op3(opc, wp, wa, wb));
+                l.ops.push_back(make_op2(Opcode::TRUNC, rax, wp));
+                VarNode shifted = VarNode::temp(23, wide);
+                l.ops.push_back(make_op3(Opcode::SHR, shifted, wp, VarNode::constant(sz * 8, 1)));
+                if (sz == 1) {
+                    // 8-bit MUL writes AX (RAX[15:0]) — both AL and AH live in gpr(0, 2).
+                    // Model as: AX = full 16-bit result. RDX is unaffected.
+                    VarNode ax = VarNode::gpr(0, 2);
+                    l.ops.push_back(make_op2(Opcode::COPY, ax, wp));
+                } else {
+                    l.ops.push_back(make_op2(Opcode::TRUNC, rdx, shifted));
+                }
+                return true;
+            }
+            // 64-bit case: low half is exact, high half is over our IR's value width.
             l.ops.push_back(make_op3(opc, rax, rax, src));
+            l.ops.push_back({Opcode::UNDEF}); // RDX = high(RAX_old * src) — caller must model
             return true;
         }
     }
 
     if (m == Mnemonic::DIV || m == Mnemonic::IDIV) {
-        if (di.desc->has_modrm && ((di.modrm >> 6) & 3) == 3) {
-            VarNode src = reg_from_modrm_rm(di, sz);
-            VarNode rax = VarNode::gpr(0, sz);
+        // Spec: DIV/IDIV reads a 2N-bit dividend split across RDX:RAX (or AX
+        // for 8-bit form), divides by an N-bit r/m operand, and writes the
+        // quotient to RAX (or AL) and remainder to RDX (or AH). For sz < 8 we
+        // can model exactly via widening; for sz == 8 the dividend is 128-bit
+        // which the IR can't represent, so we mark RDX as UNDEF after RAX
+        // gets the (low-precision) quotient.
+        if (di.desc->has_modrm) {
             Opcode opc = (m == Mnemonic::DIV) ? Opcode::DIV : Opcode::IDIV;
+            Opcode mod_opc = (m == Mnemonic::DIV) ? Opcode::MOD : Opcode::SMOD;
+            // operand[0] is the Fixed RAX/AX pseudo with OpSize::None — pull
+            // the real width from the explicit r/m source at operand[2].
+            if (di.desc->num_operands >= 3) sz = op_size_bytes(di.desc->operands[2].size, rex_w, has_66);
+            VarNode src;
+            if (mod_ == 3) src = reg_from_modrm_rm(di, sz);
+            else {
+                VarNode ea = compute_ea(l, di);
+                src = VarNode::temp(11, sz);
+                l.ops.push_back(make_op3(Opcode::LOAD, src, ea, VarNode::ram(sz)));
+            }
+            VarNode rax = VarNode::gpr(0, sz);
+            VarNode rdx = VarNode::gpr(2, sz);
+            if (sz < 8) {
+                uint8_t wide = static_cast<uint8_t>(sz * 2);
+                Opcode ext = (m == Mnemonic::DIV) ? Opcode::ZEXT : Opcode::SEXT;
+                VarNode dvd = VarNode::temp(20, wide);
+                VarNode dvs = VarNode::temp(21, wide);
+                if (sz == 1) {
+                    // Dividend is AX (RAX[15:0]).
+                    VarNode ax = VarNode::gpr(0, 2);
+                    l.ops.push_back(make_op2(Opcode::COPY, dvd, ax));
+                } else {
+                    // Dividend is RDX:RAX. Build wide value as (RDX << N) | RAX.
+                    VarNode hi = VarNode::temp(22, wide);
+                    VarNode lo = VarNode::temp(23, wide);
+                    l.ops.push_back(make_op2(ext, hi, rdx));
+                    l.ops.push_back(make_op2(ext, lo, rax));
+                    VarNode shifted = VarNode::temp(24, wide);
+                    l.ops.push_back(make_op3(Opcode::SHL, shifted, hi, VarNode::constant(sz * 8, 1)));
+                    l.ops.push_back(make_op3(Opcode::OR, dvd, shifted, lo));
+                }
+                l.ops.push_back(make_op2(ext, dvs, src));
+                VarNode q = VarNode::temp(25, wide);
+                VarNode r = VarNode::temp(26, wide);
+                l.ops.push_back(make_op3(opc, q, dvd, dvs));
+                l.ops.push_back(make_op3(mod_opc, r, dvd, dvs));
+                if (sz == 1) {
+                    // AL = quot, AH = rem — both live in AX (size 2).
+                    VarNode ax = VarNode::gpr(0, 2);
+                    VarNode tmp = VarNode::temp(27, 2);
+                    l.ops.push_back(make_op2(Opcode::TRUNC, tmp, q));
+                    VarNode rem8 = VarNode::temp(28, 2);
+                    l.ops.push_back(make_op2(Opcode::TRUNC, rem8, r));
+                    VarNode shifted = VarNode::temp(29, 2);
+                    l.ops.push_back(make_op3(Opcode::SHL, shifted, rem8, VarNode::constant(8, 1)));
+                    l.ops.push_back(make_op3(Opcode::OR, ax, tmp, shifted));
+                } else {
+                    l.ops.push_back(make_op2(Opcode::TRUNC, rax, q));
+                    l.ops.push_back(make_op2(Opcode::TRUNC, rdx, r));
+                }
+                return true;
+            }
+            // 64-bit DIV: dividend is 128-bit. Approximate quotient = RAX/src,
+            // remainder = RAX%src (ignoring RDX's high contribution); flag the
+            // residual via UNDEF so SymExec callers special-case.
             l.ops.push_back(make_op3(opc, rax, rax, src));
+            l.ops.push_back(make_op3(mod_opc, rdx, VarNode::gpr(0, sz), src));
+            l.ops.push_back({Opcode::UNDEF}); // 128-bit dividend not representable in IR
             return true;
         }
     }
@@ -740,9 +926,12 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         m == Mnemonic::CMOVZ || m == Mnemonic::CMOVNZ || m == Mnemonic::CMOVBE || m == Mnemonic::CMOVNBE ||
         m == Mnemonic::CMOVS || m == Mnemonic::CMOVNS || m == Mnemonic::CMOVP || m == Mnemonic::CMOVNP ||
         m == Mnemonic::CMOVL || m == Mnemonic::CMOVNL || m == Mnemonic::CMOVLE || m == Mnemonic::CMOVNLE) {
-        if (di.desc->has_modrm && ((di.modrm >> 6) & 3) == 3) {
+        if (di.desc->has_modrm) {
             VarNode dst = reg_from_modrm_reg(di, sz);
-            VarNode src = reg_from_modrm_rm(di, sz);
+            VarNode src;
+            if (mod_ == 3) src = reg_from_modrm_rm(di, sz);
+            else { VarNode ea = compute_ea(l, di); src = VarNode::temp(11, sz);
+                l.ops.push_back(make_op3(Opcode::LOAD, src, ea, VarNode::ram(sz))); }
             VarNode cond = VarNode::temp(20, 1);
             if (m == Mnemonic::CMOVZ) l.ops.push_back(make_op2(Opcode::GET_ZF, cond, VarNode::flags()));
             else if (m == Mnemonic::CMOVNZ) { l.ops.push_back(make_op2(Opcode::GET_ZF, cond, VarNode::flags()));
@@ -870,36 +1059,42 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         return true;
     }
 
-    if ((m == Mnemonic::BT || m == Mnemonic::BTS || m == Mnemonic::BTR || m == Mnemonic::BTC) &&
-        di.desc->has_modrm && mod_ == 3) {
-        VarNode base = reg_from_modrm_rm(di, sz);
-        bool has_imm = false;
-        for (uint8_t i = 0; i < di.desc->num_operands; ++i)
-            if (di.desc->operands[i].addr == AddrMode::Immediate) has_imm = true;
-        VarNode bit = has_imm ? VarNode::constant(di.immediate, sz) : reg_from_modrm_reg(di, sz);
-        // Extract bit into CF: CF = (base >> bit) & 1
-        VarNode tmp = VarNode::temp(12, sz);
-        l.ops.push_back(make_op3(Opcode::SHR, tmp, base, bit));
-        l.ops.push_back(make_op3(Opcode::AND, tmp, tmp, VarNode::constant(1, sz)));
-        l.ops.push_back(make_op2(Opcode::SET_CF, VarNode::flags(), tmp));
-        // BTS/BTR/BTC modify the bit
-        if (m == Mnemonic::BTS) {
-            VarNode mask = VarNode::temp(13, sz);
-            l.ops.push_back(make_op3(Opcode::SHL, mask, VarNode::constant(1, sz), bit));
-            l.ops.push_back(make_op3(Opcode::OR, base, base, mask));
-        } else if (m == Mnemonic::BTR) {
-            VarNode mask = VarNode::temp(13, sz);
-            l.ops.push_back(make_op3(Opcode::SHL, mask, VarNode::constant(1, sz), bit));
-            l.ops.push_back(make_op2(Opcode::NOT, mask, mask));
-            l.ops.push_back(make_op3(Opcode::AND, base, base, mask));
-        } else if (m == Mnemonic::BTC) {
-            VarNode mask = VarNode::temp(13, sz);
-            l.ops.push_back(make_op3(Opcode::SHL, mask, VarNode::constant(1, sz), bit));
-            l.ops.push_back(make_op3(Opcode::XOR, base, base, mask));
-        }
-        return true;
-    }
 
+    if (m == Mnemonic::BT || m == Mnemonic::BTS || m == Mnemonic::BTR || m == Mnemonic::BTC) {
+        if (di.desc->has_modrm) {
+            bool has_imm = false;
+            for (uint8_t i = 0; i < di.desc->num_operands; ++i)
+                if (di.desc->operands[i].addr == AddrMode::Immediate) has_imm = true;
+            VarNode bit = has_imm ? VarNode::constant(di.immediate, sz) : reg_from_modrm_reg(di, sz);
+            VarNode base;
+            VarNode ea;
+            bool is_mem = (mod_ != 3);
+            if (is_mem) {
+                ea = compute_ea(l, di);
+                base = VarNode::temp(11, sz);
+                l.ops.push_back(make_op3(Opcode::LOAD, base, ea, VarNode::ram(sz)));
+            } else {
+                base = reg_from_modrm_rm(di, sz);
+            }
+            // CF = (base >> bit) & 1
+            VarNode tmp = VarNode::temp(12, sz);
+            l.ops.push_back(make_op3(Opcode::SHR, tmp, base, bit));
+            l.ops.push_back(make_op3(Opcode::AND, tmp, tmp, VarNode::constant(1, sz)));
+            l.ops.push_back(make_op2(Opcode::SET_CF, VarNode::flags(), tmp));
+            if (m != Mnemonic::BT) {
+                VarNode mask = VarNode::temp(13, sz);
+                l.ops.push_back(make_op3(Opcode::SHL, mask, VarNode::constant(1, sz), bit));
+                if (m == Mnemonic::BTS) l.ops.push_back(make_op3(Opcode::OR,  base, base, mask));
+                else if (m == Mnemonic::BTC) l.ops.push_back(make_op3(Opcode::XOR, base, base, mask));
+                else { // BTR
+                    l.ops.push_back(make_op2(Opcode::NOT, mask, mask));
+                    l.ops.push_back(make_op3(Opcode::AND, base, base, mask));
+                }
+                if (is_mem) l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(sz), ea, base));
+            }
+            return true;
+        }
+    }
     if (m == Mnemonic::CMPXCHG && di.desc->has_modrm) {
         VarNode src = reg_from_modrm_reg(di, sz);
         VarNode rax = VarNode::gpr(0, sz);
@@ -940,18 +1135,47 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         return true;
     }
 
-    if ((m == Mnemonic::SHLD || m == Mnemonic::SHRD) && di.desc->has_modrm && mod_ == 3) {
-        VarNode dst = reg_from_modrm_rm(di, sz);
-        VarNode src = reg_from_modrm_reg(di, sz);
-        bool has_imm = false;
-        for (uint8_t i = 0; i < di.desc->num_operands; ++i)
-            if (di.desc->operands[i].addr == AddrMode::Immediate) has_imm = true;
-        VarNode count = has_imm ? VarNode::constant(di.immediate, 1) : VarNode::gpr(1, 1);
-        Opcode opc = (m == Mnemonic::SHLD) ? Opcode::SHL : Opcode::SHR;
-        l.ops.push_back(make_op3(opc, dst, dst, count));
-        return true;
-    }
 
+    if (m == Mnemonic::SHLD || m == Mnemonic::SHRD) {
+        if (di.desc->has_modrm) {
+            bool is_mem = (mod_ != 3);
+            VarNode ea;
+            VarNode dst;
+            if (is_mem) { ea = compute_ea(l, di); dst = VarNode::temp(11, sz);
+                l.ops.push_back(make_op3(Opcode::LOAD, dst, ea, VarNode::ram(sz))); }
+            else dst = reg_from_modrm_rm(di, sz);
+            VarNode src = reg_from_modrm_reg(di, sz);
+            bool has_imm = false;
+            for (uint8_t i = 0; i < di.desc->num_operands; ++i)
+                if (di.desc->operands[i].addr == AddrMode::Immediate) has_imm = true;
+            VarNode count = has_imm ? VarNode::constant(di.immediate & 0x3F, 1)
+                                    : VarNode::gpr(1, 1);
+            VarNode bits = VarNode::constant(sz * 8, 1);
+            VarNode rev_count = VarNode::temp(20, 1);
+            l.ops.push_back(make_op3(Opcode::SUB, rev_count, bits, count));
+            VarNode lo = VarNode::temp(21, sz);
+            VarNode hi = VarNode::temp(22, sz);
+            if (m == Mnemonic::SHLD) {
+                l.ops.push_back(make_op3(Opcode::SHL, lo, dst, count));
+                l.ops.push_back(make_op3(Opcode::SHR, hi, src, rev_count));
+            } else {
+                l.ops.push_back(make_op3(Opcode::SHR, lo, dst, count));
+                l.ops.push_back(make_op3(Opcode::SHL, hi, src, rev_count));
+            }
+            VarNode result = VarNode::temp(23, sz);
+            l.ops.push_back(make_op3(Opcode::OR, result, lo, hi));
+            // Flag computation: CF = last bit shifted out; SF/ZF/PF from result;
+            // OF defined only for count == 1. Approximate with AND_FLAGS on result.
+            l.ops.push_back(make_op3(Opcode::AND_FLAGS, VarNode::flags(), result, VarNode::constant(0, sz)));
+            if (is_mem) {
+                l.ops.push_back(make_op2(Opcode::COPY, dst, result));
+                l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(sz), ea, dst));
+            } else {
+                l.ops.push_back(make_op2(Opcode::COPY, dst, result));
+            }
+            return true;
+        }
+    }
     if (m == Mnemonic::PUSH && di.desc->num_operands >= 1) {
         bool has_imm = false;
         for (uint8_t i = 0; i < di.desc->num_operands; ++i)
@@ -2236,11 +2460,15 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         return true;
     }
 
-    if (m == Mnemonic::AAA || m == Mnemonic::AAD || m == Mnemonic::AAM || m == Mnemonic::AAS ||
-        m == Mnemonic::DAA || m == Mnemonic::DAS ||
-        m == Mnemonic::PUSHA || m == Mnemonic::PUSHAD || m == Mnemonic::POPA || m == Mnemonic::POPAD ||
-        m == Mnemonic::BOUND || m == Mnemonic::SALC) {
+    if (m == Mnemonic::PUSHA || m == Mnemonic::PUSHAD || m == Mnemonic::POPA || m == Mnemonic::POPAD ||
+        m == Mnemonic::SALC) {
         l.ops.push_back({Opcode::NOP});
+        return true;
+    }
+
+    if (m == Mnemonic::AAA || m == Mnemonic::AAD || m == Mnemonic::AAM || m == Mnemonic::AAS ||
+        m == Mnemonic::DAA || m == Mnemonic::DAS || m == Mnemonic::INTO || m == Mnemonic::BOUND) {
+        l.ops.push_back({Opcode::UNDEF});
         return true;
     }
 
@@ -2283,7 +2511,7 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         return true;
     }
 
-    if (m == Mnemonic::ADX || m == Mnemonic::AMX || m == Mnemonic::INTO ||
+    if (m == Mnemonic::ADX || m == Mnemonic::AMX ||
         m == Mnemonic::JCXZ || m == Mnemonic::JECXZ || m == Mnemonic::JRCXZ ||
         m == Mnemonic::JMPE || m == Mnemonic::JMPF || m == Mnemonic::SETALC || m == Mnemonic::SETSSBSY ||
         m == Mnemonic::LODSD || m == Mnemonic::STOSD || m == Mnemonic::SCASD ||
