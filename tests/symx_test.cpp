@@ -193,6 +193,42 @@ int main() {
         }
     }
 
+#ifdef VEDX64_Z3
+    // --- Z3-backed solver: actual SAT/UNSAT/concretization ---
+    {
+        Builder b;
+        Solver s;
+        CHECK(Solver::is_smt_backed(), "Z3 backend reports as SMT-backed");
+        // Create a constraint: x == 42 under empty PC.
+        const Expr* x = b.sym(64);
+        const Expr* eq42 = b.eq(x, b.k(42, 64));
+        PathCondition pc;
+        CHECK(s.sat(pc, eq42) == SolveResult::Sat, "Z3: x == 42 is SAT");
+        // x == 42 AND x == 7 → unsat
+        pc.push(eq42);
+        const Expr* eq7  = b.eq(x, b.k(7, 64));
+        CHECK(s.sat(pc, eq7) == SolveResult::Unsat, "Z3: x == 42 AND x == 7 is UNSAT");
+        // get_value should pin x to 42 under pc.
+        auto v = s.get_value(pc, x);
+        CHECK(v.has_value() && *v == 42, "Z3: get_value pins x to 42");
+    }
+    {
+        Builder b;
+        Solver s;
+        // (x & 1) == 1 enumerates to many odd values; restrict to 4 bits.
+        const Expr* x = b.sym(4);
+        const Expr* odd = b.eq(b.band(x, b.k(1, 4)), b.k(1, 4));
+        PathCondition pc;
+        pc.push(odd);
+        auto vals = s.enumerate(pc, x, 8);
+        // 4-bit odd values: 1, 3, 5, 7, 9, 11, 13, 15 — exactly 8.
+        CHECK(vals.size() == 8, "Z3: enumerate finds all 8 odd 4-bit values");
+        bool all_odd = true;
+        for (auto v : vals) if ((v & 1) == 0) all_odd = false;
+        CHECK(all_odd, "Z3: enumerated values are all odd");
+    }
+#endif
+
     std::printf("\n%d/%d symx tests passed\n", g_pass, g_pass + g_fail);
     return g_fail > 0 ? 1 : 0;
 }

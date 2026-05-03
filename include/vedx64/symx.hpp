@@ -206,6 +206,11 @@ enum class SolveResult { Sat, Unsat, Unknown };
 
 class Solver {
 public:
+    Solver();
+    ~Solver();
+    Solver(const Solver&) = delete;
+    Solver& operator=(const Solver&) = delete;
+
     // Is `cond` satisfiable under the path condition? `cond` is width=1.
     SolveResult sat(const PathCondition& pc, const Expr* cond);
 
@@ -215,6 +220,17 @@ public:
 
     // Enumerate up to `max` distinct values of `e` consistent with `pc`.
     std::vector<uint64_t>   enumerate(const PathCondition& pc, const Expr* e, size_t max = 8);
+
+    // True if the solver actually does any reasoning beyond constant folding.
+    // False for the stub backend (when vedx64_core was built without VEDX64_Z3).
+    static bool is_smt_backed();
+
+private:
+    // PIMPL hides z3.h from the public header. When vedx64_core is built
+    // without VEDX64_Z3 the impl_ pointer stays null and the methods take
+    // the constant-only fast paths.
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
 };
 
 // ============================================================

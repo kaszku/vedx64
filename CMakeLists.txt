@@ -25,6 +25,7 @@ option(VEDX64_EXAMPLES "Build example programs" OFF)
 option(VEDX64_PYTHON "Build Python bindings (requires Python + nanobind)" OFF)
 option(VEDX64_ASSEMBLER "Enable text assembler" OFF)
 option(VEDX64_IR "Enable IR lifting/interpreter" OFF)
+option(VEDX64_Z3 "Use Z3 for the symbolic-execution Solver (requires the Z3 vcpkg port or a system install)" OFF)
 
 # Core library
 set(VEDX64_CORE_SOURCES
@@ -99,6 +100,18 @@ endif()
 # Link ntdll on Windows for NT syscall-based hooking
 if(WIN32 AND VEDX64_HOOK)
     target_link_libraries(vedx64_core PUBLIC ntdll)
+endif()
+
+if(VEDX64_Z3)
+    find_package(Z3 CONFIG REQUIRED)
+    if(TARGET z3::libz3)
+        target_link_libraries(vedx64_core PUBLIC z3::libz3)
+    elseif(TARGET z3)
+        target_link_libraries(vedx64_core PUBLIC z3)
+    else()
+        message(FATAL_ERROR "VEDX64_Z3=ON but neither z3::libz3 nor z3 target was provided by find_package(Z3)")
+    endif()
+    target_compile_definitions(vedx64_core PUBLIC VEDX64_Z3)
 endif()
 
 if(VEDX64_TESTS)

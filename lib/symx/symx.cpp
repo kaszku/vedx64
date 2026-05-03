@@ -433,22 +433,187 @@ State State::fork() const {
 }
 
 // ============================================================
-//  Solver — concrete fast-path stub
+//  Solver — concrete fast-path + (optional) Z3-backed reasoning
 // ============================================================
 
-SolveResult Solver::sat(const PathCondition& /*pc*/, const Expr* cond) {
+#ifdef VEDX64_Z3
+#include <z3++.h>
+#include <cstdio>
+#endif
+
+// Always provide a complete Solver::Impl definition so unique_ptr<Impl>'s
+// destructor can be instantiated. The Z3 build adds real fields; the stub
+// build keeps it empty.
+#ifdef VEDX64_Z3
+struct Solver::Impl {
+    z3::context ctx;
+    z3::solver  core;
+    // Cache of Expr* → translated z3::expr. We store the index into `terms`
+    // because z3::expr's lifetime is tied to the context; copying is cheap
+    // (refcounted handle) but the unordered_map<expr> dance is annoying.
+    std::unordered_map<const Expr*, unsigned> cache;
+    std::vector<z3::expr>                     terms;
+    Impl() : core(ctx) {}
+};
+#else
+struct Solver::Impl {};
+#endif
+
+#ifdef VEDX64_Z3
+static z3::expr translate(Solver::Impl& s, const Expr* e) {
+    auto it = s.cache.find(e);
+    if (it != s.cache.end()) return s.terms[it->second];
+    z3::expr r(s.ctx);
+    auto bv1_true  = [&] { return s.ctx.bv_val(1u, 1u); };
+    auto bv1_false = [&] { return s.ctx.bv_val(0u, 1u); };
+    auto pred_to_bv = [&](z3::expr p) { return z3::ite(p, bv1_true(), bv1_false()); };
+
+    switch (e->op) {
+    case ExprOp::ConstU: r = s.ctx.bv_val(e->k, e->width); break;
+    case ExprOp::Symbol: {
+        char name[32];
+        std::snprintf(name, sizeof name, "sym%llu", (unsigned long long)e->k);
+        r = s.ctx.bv_const(name, e->width);
+        break;
+    }
+    case ExprOp::Add:  r = translate(s, e->a) + translate(s, e->b); break;
+    case ExprOp::Sub:  r = translate(s, e->a) - translate(s, e->b); break;
+    case ExprOp::Mul:  r = translate(s, e->a) * translate(s, e->b); break;
+    case ExprOp::UDiv: r = z3::udiv(translate(s, e->a), translate(s, e->b)); break;
+    case ExprOp::SDiv: r = translate(s, e->a) / translate(s, e->b); break;
+    case ExprOp::UMod: r = z3::urem(translate(s, e->a), translate(s, e->b)); break;
+    case ExprOp::SMod: r = z3::srem(translate(s, e->a), translate(s, e->b)); break;
+    case ExprOp::And:  r = translate(s, e->a) & translate(s, e->b); break;
+    case ExprOp::Or:   r = translate(s, e->a) | translate(s, e->b); break;
+    case ExprOp::Xor:  r = translate(s, e->a) ^ translate(s, e->b); break;
+    case ExprOp::Not:  r = ~translate(s, e->a); break;
+    case ExprOp::Neg:  r = -translate(s, e->a); break;
+    case ExprOp::Shl:  r = z3::shl (translate(s, e->a), translate(s, e->b)); break;
+    case ExprOp::LShr: r = z3::lshr(translate(s, e->a), translate(s, e->b)); break;
+    case ExprOp::AShr: r = z3::ashr(translate(s, e->a), translate(s, e->b)); break;
+    case ExprOp::Zext: r = z3::zext(translate(s, e->a), e->width - e->a->width); break;
+    case ExprOp::Sext: r = z3::sext(translate(s, e->a), e->width - e->a->width); break;
+    case ExprOp::Trunc: r = translate(s, e->a).extract(e->width - 1, 0); break;
+    case ExprOp::Extract: {
+        unsigned hi = static_cast<unsigned>((e->k >> 8) & 0xFF);
+        unsigned lo = static_cast<unsigned>(e->k & 0xFF);
+        r = translate(s, e->a).extract(hi, lo);
+        break;
+    }
+    case ExprOp::Concat: r = z3::concat(translate(s, e->a), translate(s, e->b)); break;
+    case ExprOp::Eq:  r = pred_to_bv(translate(s, e->a) == translate(s, e->b)); break;
+    case ExprOp::Ne:  r = pred_to_bv(translate(s, e->a) != translate(s, e->b)); break;
+    case ExprOp::Ult: r = pred_to_bv(z3::ult(translate(s, e->a), translate(s, e->b))); break;
+    case ExprOp::Slt: r = pred_to_bv(translate(s, e->a) <  translate(s, e->b)); break;
+    case ExprOp::Ule: r = pred_to_bv(z3::ule(translate(s, e->a), translate(s, e->b))); break;
+    case ExprOp::Sle: r = pred_to_bv(translate(s, e->a) <= translate(s, e->b)); break;
+    case ExprOp::Ite:
+        r = z3::ite(translate(s, e->a) == bv1_true(),
+                    translate(s, e->b),
+                    translate(s, e->c));
+        break;
+    default:
+        // Unknown op — model as a fresh free variable so the path stays sound.
+        r = s.ctx.bv_const("opaque", e->width ? e->width : 1u);
+        break;
+    }
+    unsigned idx = static_cast<unsigned>(s.terms.size());
+    s.terms.push_back(r);
+    s.cache.emplace(e, idx);
+    return r;
+}
+
+static void apply_pc(Solver::Impl& s, const PathCondition& pc) {
+    z3::expr one = s.ctx.bv_val(1u, 1u);
+    for (auto* t : pc.terms) s.core.add(translate(s, t) == one);
+}
+#endif // VEDX64_Z3
+
+Solver::Solver()
+#ifdef VEDX64_Z3
+    : impl_(std::make_unique<Impl>())
+#endif
+{}
+Solver::~Solver() = default;
+
+bool Solver::is_smt_backed() {
+#ifdef VEDX64_Z3
+    return true;
+#else
+    return false;
+#endif
+}
+
+SolveResult Solver::sat(const PathCondition& pc, const Expr* cond) {
     if (is_const(cond)) return cond->k ? SolveResult::Sat : SolveResult::Unsat;
+#ifdef VEDX64_Z3
+    auto& s = *impl_;
+    s.core.push();
+    apply_pc(s, pc);
+    z3::expr c = translate(s, cond);
+    if (cond->width != 1) c = c != s.ctx.bv_val(0u, cond->width);
+    else                  c = c == s.ctx.bv_val(1u, 1u);
+    s.core.add(c);
+    z3::check_result r = s.core.check();
+    s.core.pop();
+    if (r == z3::sat)   return SolveResult::Sat;
+    if (r == z3::unsat) return SolveResult::Unsat;
     return SolveResult::Unknown;
+#else
+    (void)pc;
+    return SolveResult::Unknown;
+#endif
 }
 
-std::optional<uint64_t> Solver::get_value(const PathCondition& /*pc*/, const Expr* e) {
+std::optional<uint64_t> Solver::get_value(const PathCondition& pc, const Expr* e) {
     if (is_const(e)) return e->k;
+#ifdef VEDX64_Z3
+    auto& s = *impl_;
+    s.core.push();
+    apply_pc(s, pc);
+    z3::expr ze = translate(s, e);
+    if (s.core.check() != z3::sat) { s.core.pop(); return std::nullopt; }
+    z3::model m = s.core.get_model();
+    z3::expr v = m.eval(ze, /*model_completion=*/true);
+    uint64_t value = 0;
+    bool ok = false;
+    if (v.is_numeral_u64(value)) ok = true;
+    if (!ok) { s.core.pop(); return std::nullopt; }
+    // Confirm uniqueness — if `e` could take any other value under `pc`,
+    // refuse to concretize. This matches the spirit of get_value.
+    s.core.add(ze != s.ctx.bv_val(value, e->width));
+    z3::check_result other = s.core.check();
+    s.core.pop();
+    if (other == z3::sat) return std::nullopt;
+    return value;
+#else
+    (void)pc;
     return std::nullopt;
+#endif
 }
 
-std::vector<uint64_t> Solver::enumerate(const PathCondition& pc, const Expr* e, size_t /*max*/) {
-    if (auto v = get_value(pc, e)) return {*v};
-    return {};   // can't enumerate without a real solver
+std::vector<uint64_t> Solver::enumerate(const PathCondition& pc, const Expr* e, size_t max) {
+    std::vector<uint64_t> out;
+    if (is_const(e)) { out.push_back(e->k); return out; }
+#ifdef VEDX64_Z3
+    auto& s = *impl_;
+    s.core.push();
+    apply_pc(s, pc);
+    z3::expr ze = translate(s, e);
+    while (out.size() < max) {
+        if (s.core.check() != z3::sat) break;
+        z3::model m = s.core.get_model();
+        z3::expr v = m.eval(ze, true);
+        uint64_t value = 0;
+        if (!v.is_numeral_u64(value)) break;
+        out.push_back(value);
+        s.core.add(ze != s.ctx.bv_val(value, e->width));
+    }
+    s.core.pop();
+#else
+    (void)pc; (void)max;
+#endif
+    return out;
 }
 
 // ============================================================

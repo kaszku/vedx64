@@ -752,9 +752,25 @@ size_t disassemble(const uint8_t* code, size_t len, char* buf, size_t buf_len_, 
             }
             off += emit_str(buf + off, buf_len - off, tmp);
             break;
-        case AddrMode::Immediate:
-            off += emit_hex(buf + off, buf_len - off, (uint64_t)di.immediate);
+        case AddrMode::Immediate: {
+            // Mask the printed immediate to its operand width — sign-extended
+            // bytes (e.g. ByteSignExt 0x95 → di.immediate = 0xFFFFFFFFFFFFFF95)
+            // should render as the source byte 0x95, not the full 64-bit form.
+            uint8_t imm_bytes = 0;
+            switch (op.size) {
+            case OpSize::Byte: case OpSize::ByteSignExt: imm_bytes = 1; break;
+            case OpSize::Word:  imm_bytes = 2; break;
+            case OpSize::Dword: imm_bytes = 4; break;
+            case OpSize::Qword: imm_bytes = 8; break;
+            case OpSize::OpSz: case OpSize::OpSzQ: case OpSize::OpSzDS:
+                imm_bytes = rex_w ? 8 : (opsz ? 2 : 4); break;
+            default: imm_bytes = 0; break;
+            }
+            uint64_t mask = (imm_bytes >= 8) ? ~0ULL : ((1ULL << (imm_bytes * 8)) - 1);
+            uint64_t shown = imm_bytes ? ((uint64_t)di.immediate & mask) : (uint64_t)di.immediate;
+            off += emit_hex(buf + off, buf_len - off, shown);
             break;
+        }
         case AddrMode::RelOffset: {
             uint64_t target = rip + consumed + di.immediate;
             off += emit_hex(buf + off, buf_len - off, target);

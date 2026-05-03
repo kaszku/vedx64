@@ -1,0 +1,13 @@
+{
+  "name": "vedx64",
+  "version-string": "0.1.0",
+  "description": "x86-64 instruction toolkit (decoder, encoder, lifter, codegen, symbolic executor)",
+  "homepage": "https://github.com/wisk/vedx64",
+  "dependencies": [],
+  "features": {
+    "symx-z3": {
+      "description": "Z3 backend for the symbolic-execution Solver (vedx64::symx)",
+      "dependencies": ["z3"]
+    }
+  }
+}
