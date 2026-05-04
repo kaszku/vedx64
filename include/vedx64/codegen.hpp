@@ -540,10 +540,22 @@ public:
         return *this;
     }
     CodeGen& adc(Mem dst, int64_t imm) {
-        emit_rex_mem(false, 0, dst);
-        emit8(0x80);
-        emit_mem(2, dst);
-        emit_imm(imm, dst.size_hint ? dst.size_hint : 4);
+        uint8_t bits = dst.size_hint ? dst.size_hint * 8 : 32;
+        if (bits == 16) emit8(0x66);
+        emit_rex_mem(bits == 64, 0, dst);
+        if (bits == 8) {
+            emit8(0x80);
+            emit_mem(2, dst);
+            emit_imm(imm, 1);
+        } else if (imm >= -128 && imm <= 127) {
+            emit8(0x83);
+            emit_mem(2, dst);
+            emit_imm(imm, 1);
+        } else {
+            emit8(0x81);
+            emit_mem(2, dst);
+            emit_imm(imm, bits == 64 ? 4 : bits/8);
+        }
         return *this;
     }
 
@@ -584,10 +596,22 @@ public:
         return *this;
     }
     CodeGen& add(Mem dst, int64_t imm) {
-        emit_rex_mem(false, 0, dst);
-        emit8(0x80);
-        emit_mem(0, dst);
-        emit_imm(imm, dst.size_hint ? dst.size_hint : 4);
+        uint8_t bits = dst.size_hint ? dst.size_hint * 8 : 32;
+        if (bits == 16) emit8(0x66);
+        emit_rex_mem(bits == 64, 0, dst);
+        if (bits == 8) {
+            emit8(0x80);
+            emit_mem(0, dst);
+            emit_imm(imm, 1);
+        } else if (imm >= -128 && imm <= 127) {
+            emit8(0x83);
+            emit_mem(0, dst);
+            emit_imm(imm, 1);
+        } else {
+            emit8(0x81);
+            emit_mem(0, dst);
+            emit_imm(imm, bits == 64 ? 4 : bits/8);
+        }
         return *this;
     }
 
@@ -738,10 +762,22 @@ public:
         return *this;
     }
     CodeGen& and_(Mem dst, int64_t imm) {
-        emit_rex_mem(false, 0, dst);
-        emit8(0x80);
-        emit_mem(4, dst);
-        emit_imm(imm, dst.size_hint ? dst.size_hint : 4);
+        uint8_t bits = dst.size_hint ? dst.size_hint * 8 : 32;
+        if (bits == 16) emit8(0x66);
+        emit_rex_mem(bits == 64, 0, dst);
+        if (bits == 8) {
+            emit8(0x80);
+            emit_mem(4, dst);
+            emit_imm(imm, 1);
+        } else if (imm >= -128 && imm <= 127) {
+            emit8(0x83);
+            emit_mem(4, dst);
+            emit_imm(imm, 1);
+        } else {
+            emit8(0x81);
+            emit_mem(4, dst);
+            emit_imm(imm, bits == 64 ? 4 : bits/8);
+        }
         return *this;
     }
 
@@ -950,10 +986,12 @@ public:
         return *this;
     }
     CodeGen& bt(Mem dst, int64_t imm) {
-        emit_rex_mem(false, 0, dst);
+        uint8_t bits = dst.size_hint ? dst.size_hint * 8 : 32;
+        if (bits == 16) emit8(0x66);
+        emit_rex_mem(bits == 64, 0, dst);
         emit8(0x0F); emit8(0xBA);
         emit_mem(4, dst);
-        emit_imm(imm, dst.size_hint ? dst.size_hint : 4);
+        emit_imm(imm, 1);
         return *this;
     }
 
@@ -978,10 +1016,12 @@ public:
         return *this;
     }
     CodeGen& btc(Mem dst, int64_t imm) {
-        emit_rex_mem(false, 0, dst);
+        uint8_t bits = dst.size_hint ? dst.size_hint * 8 : 32;
+        if (bits == 16) emit8(0x66);
+        emit_rex_mem(bits == 64, 0, dst);
         emit8(0x0F); emit8(0xBA);
         emit_mem(7, dst);
-        emit_imm(imm, dst.size_hint ? dst.size_hint : 4);
+        emit_imm(imm, 1);
         return *this;
     }
 
@@ -1006,10 +1046,12 @@ public:
         return *this;
     }
     CodeGen& btr(Mem dst, int64_t imm) {
-        emit_rex_mem(false, 0, dst);
+        uint8_t bits = dst.size_hint ? dst.size_hint * 8 : 32;
+        if (bits == 16) emit8(0x66);
+        emit_rex_mem(bits == 64, 0, dst);
         emit8(0x0F); emit8(0xBA);
         emit_mem(6, dst);
-        emit_imm(imm, dst.size_hint ? dst.size_hint : 4);
+        emit_imm(imm, 1);
         return *this;
     }
 
@@ -1034,10 +1076,12 @@ public:
         return *this;
     }
     CodeGen& bts(Mem dst, int64_t imm) {
-        emit_rex_mem(false, 0, dst);
+        uint8_t bits = dst.size_hint ? dst.size_hint * 8 : 32;
+        if (bits == 16) emit8(0x66);
+        emit_rex_mem(bits == 64, 0, dst);
         emit8(0x0F); emit8(0xBA);
         emit_mem(5, dst);
-        emit_imm(imm, dst.size_hint ? dst.size_hint : 4);
+        emit_imm(imm, 1);
         return *this;
     }
 
@@ -1365,10 +1409,22 @@ public:
         return *this;
     }
     CodeGen& cmp(Mem dst, int64_t imm) {
-        emit_rex_mem(false, 0, dst);
-        emit8(0x80);
-        emit_mem(7, dst);
-        emit_imm(imm, dst.size_hint ? dst.size_hint : 4);
+        uint8_t bits = dst.size_hint ? dst.size_hint * 8 : 32;
+        if (bits == 16) emit8(0x66);
+        emit_rex_mem(bits == 64, 0, dst);
+        if (bits == 8) {
+            emit8(0x80);
+            emit_mem(7, dst);
+            emit_imm(imm, 1);
+        } else if (imm >= -128 && imm <= 127) {
+            emit8(0x83);
+            emit_mem(7, dst);
+            emit_imm(imm, 1);
+        } else {
+            emit8(0x81);
+            emit_mem(7, dst);
+            emit_imm(imm, bits == 64 ? 4 : bits/8);
+        }
         return *this;
     }
 
@@ -3811,10 +3867,17 @@ public:
         return *this;
     }
     CodeGen& mov(Mem dst, int64_t imm) {
-        emit_rex_mem(false, 0, dst);
-        emit8(0xC6);
+        uint8_t bits = dst.size_hint ? dst.size_hint * 8 : 32;
+        if (bits == 16) emit8(0x66);
+        emit_rex_mem(bits == 64, 0, dst);
+        if (bits == 8) {
+            emit8(0xC6);
+        } else {
+            emit8(0xC7);
+        }
         emit_mem(0, dst);
-        emit_imm(imm, dst.size_hint ? dst.size_hint : 4);
+        if (bits == 8) emit_imm(imm, 1);
+        else emit_imm(imm, bits == 64 ? 4 : bits/8);
         return *this;
     }
 
@@ -4524,10 +4587,22 @@ public:
         return *this;
     }
     CodeGen& or_(Mem dst, int64_t imm) {
-        emit_rex_mem(false, 0, dst);
-        emit8(0x80);
-        emit_mem(1, dst);
-        emit_imm(imm, dst.size_hint ? dst.size_hint : 4);
+        uint8_t bits = dst.size_hint ? dst.size_hint * 8 : 32;
+        if (bits == 16) emit8(0x66);
+        emit_rex_mem(bits == 64, 0, dst);
+        if (bits == 8) {
+            emit8(0x80);
+            emit_mem(1, dst);
+            emit_imm(imm, 1);
+        } else if (imm >= -128 && imm <= 127) {
+            emit8(0x83);
+            emit_mem(1, dst);
+            emit_imm(imm, 1);
+        } else {
+            emit8(0x81);
+            emit_mem(1, dst);
+            emit_imm(imm, bits == 64 ? 4 : bits/8);
+        }
         return *this;
     }
 
@@ -7596,10 +7671,16 @@ public:
         return *this;
     }
     CodeGen& rcl(Mem dst, int64_t imm) {
-        emit_rex_mem(false, 0, dst);
-        emit8(0xC0);
+        uint8_t bits = dst.size_hint ? dst.size_hint * 8 : 32;
+        if (bits == 16) emit8(0x66);
+        emit_rex_mem(bits == 64, 0, dst);
+        if (bits == 8) {
+            emit8(0xC0);
+        } else {
+            emit8(0xC1);
+        }
         emit_mem(2, dst);
-        emit_imm(imm, dst.size_hint ? dst.size_hint : 4);
+        emit_imm(imm, 1);
         return *this;
     }
 
@@ -7648,10 +7729,16 @@ public:
         return *this;
     }
     CodeGen& rcr(Mem dst, int64_t imm) {
-        emit_rex_mem(false, 0, dst);
-        emit8(0xC0);
+        uint8_t bits = dst.size_hint ? dst.size_hint * 8 : 32;
+        if (bits == 16) emit8(0x66);
+        emit_rex_mem(bits == 64, 0, dst);
+        if (bits == 8) {
+            emit8(0xC0);
+        } else {
+            emit8(0xC1);
+        }
         emit_mem(3, dst);
-        emit_imm(imm, dst.size_hint ? dst.size_hint : 4);
+        emit_imm(imm, 1);
         return *this;
     }
 
@@ -7700,10 +7787,16 @@ public:
         return *this;
     }
     CodeGen& rol(Mem dst, int64_t imm) {
-        emit_rex_mem(false, 0, dst);
-        emit8(0xC0);
+        uint8_t bits = dst.size_hint ? dst.size_hint * 8 : 32;
+        if (bits == 16) emit8(0x66);
+        emit_rex_mem(bits == 64, 0, dst);
+        if (bits == 8) {
+            emit8(0xC0);
+        } else {
+            emit8(0xC1);
+        }
         emit_mem(0, dst);
-        emit_imm(imm, dst.size_hint ? dst.size_hint : 4);
+        emit_imm(imm, 1);
         return *this;
     }
 
@@ -7720,10 +7813,16 @@ public:
         return *this;
     }
     CodeGen& ror(Mem dst, int64_t imm) {
-        emit_rex_mem(false, 0, dst);
-        emit8(0xC0);
+        uint8_t bits = dst.size_hint ? dst.size_hint * 8 : 32;
+        if (bits == 16) emit8(0x66);
+        emit_rex_mem(bits == 64, 0, dst);
+        if (bits == 8) {
+            emit8(0xC0);
+        } else {
+            emit8(0xC1);
+        }
         emit_mem(1, dst);
-        emit_imm(imm, dst.size_hint ? dst.size_hint : 4);
+        emit_imm(imm, 1);
         return *this;
     }
 
@@ -7866,10 +7965,16 @@ public:
         return *this;
     }
     CodeGen& sal(Mem dst, int64_t imm) {
-        emit_rex_mem(false, 0, dst);
-        emit8(0xC0);
+        uint8_t bits = dst.size_hint ? dst.size_hint * 8 : 32;
+        if (bits == 16) emit8(0x66);
+        emit_rex_mem(bits == 64, 0, dst);
+        if (bits == 8) {
+            emit8(0xC0);
+        } else {
+            emit8(0xC1);
+        }
         emit_mem(6, dst);
-        emit_imm(imm, dst.size_hint ? dst.size_hint : 4);
+        emit_imm(imm, 1);
         return *this;
     }
 
@@ -7891,10 +7996,16 @@ public:
         return *this;
     }
     CodeGen& sar(Mem dst, int64_t imm) {
-        emit_rex_mem(false, 0, dst);
-        emit8(0xC0);
+        uint8_t bits = dst.size_hint ? dst.size_hint * 8 : 32;
+        if (bits == 16) emit8(0x66);
+        emit_rex_mem(bits == 64, 0, dst);
+        if (bits == 8) {
+            emit8(0xC0);
+        } else {
+            emit8(0xC1);
+        }
         emit_mem(7, dst);
-        emit_imm(imm, dst.size_hint ? dst.size_hint : 4);
+        emit_imm(imm, 1);
         return *this;
     }
 
@@ -7935,10 +8046,22 @@ public:
         return *this;
     }
     CodeGen& sbb(Mem dst, int64_t imm) {
-        emit_rex_mem(false, 0, dst);
-        emit8(0x80);
-        emit_mem(3, dst);
-        emit_imm(imm, dst.size_hint ? dst.size_hint : 4);
+        uint8_t bits = dst.size_hint ? dst.size_hint * 8 : 32;
+        if (bits == 16) emit8(0x66);
+        emit_rex_mem(bits == 64, 0, dst);
+        if (bits == 8) {
+            emit8(0x80);
+            emit_mem(3, dst);
+            emit_imm(imm, 1);
+        } else if (imm >= -128 && imm <= 127) {
+            emit8(0x83);
+            emit_mem(3, dst);
+            emit_imm(imm, 1);
+        } else {
+            emit8(0x81);
+            emit_mem(3, dst);
+            emit_imm(imm, bits == 64 ? 4 : bits/8);
+        }
         return *this;
     }
 
@@ -8187,10 +8310,16 @@ public:
         return *this;
     }
     CodeGen& shl(Mem dst, int64_t imm) {
-        emit_rex_mem(false, 0, dst);
-        emit8(0xC0);
+        uint8_t bits = dst.size_hint ? dst.size_hint * 8 : 32;
+        if (bits == 16) emit8(0x66);
+        emit_rex_mem(bits == 64, 0, dst);
+        if (bits == 8) {
+            emit8(0xC0);
+        } else {
+            emit8(0xC1);
+        }
         emit_mem(4, dst);
-        emit_imm(imm, dst.size_hint ? dst.size_hint : 4);
+        emit_imm(imm, 1);
         return *this;
     }
 
@@ -8215,10 +8344,16 @@ public:
         return *this;
     }
     CodeGen& shr(Mem dst, int64_t imm) {
-        emit_rex_mem(false, 0, dst);
-        emit8(0xC0);
+        uint8_t bits = dst.size_hint ? dst.size_hint * 8 : 32;
+        if (bits == 16) emit8(0x66);
+        emit_rex_mem(bits == 64, 0, dst);
+        if (bits == 8) {
+            emit8(0xC0);
+        } else {
+            emit8(0xC1);
+        }
         emit_mem(5, dst);
-        emit_imm(imm, dst.size_hint ? dst.size_hint : 4);
+        emit_imm(imm, 1);
         return *this;
     }
 
@@ -8454,10 +8589,22 @@ public:
         return *this;
     }
     CodeGen& sub(Mem dst, int64_t imm) {
-        emit_rex_mem(false, 0, dst);
-        emit8(0x80);
-        emit_mem(5, dst);
-        emit_imm(imm, dst.size_hint ? dst.size_hint : 4);
+        uint8_t bits = dst.size_hint ? dst.size_hint * 8 : 32;
+        if (bits == 16) emit8(0x66);
+        emit_rex_mem(bits == 64, 0, dst);
+        if (bits == 8) {
+            emit8(0x80);
+            emit_mem(5, dst);
+            emit_imm(imm, 1);
+        } else if (imm >= -128 && imm <= 127) {
+            emit8(0x83);
+            emit_mem(5, dst);
+            emit_imm(imm, 1);
+        } else {
+            emit8(0x81);
+            emit_mem(5, dst);
+            emit_imm(imm, bits == 64 ? 4 : bits/8);
+        }
         return *this;
     }
 
@@ -8580,10 +8727,17 @@ public:
         return *this;
     }
     CodeGen& test(Mem dst, int64_t imm) {
-        emit_rex_mem(false, 0, dst);
-        emit8(0xF6);
+        uint8_t bits = dst.size_hint ? dst.size_hint * 8 : 32;
+        if (bits == 16) emit8(0x66);
+        emit_rex_mem(bits == 64, 0, dst);
+        if (bits == 8) {
+            emit8(0xF6);
+        } else {
+            emit8(0xF7);
+        }
         emit_mem(0, dst);
-        emit_imm(imm, dst.size_hint ? dst.size_hint : 4);
+        if (bits == 8) emit_imm(imm, 1);
+        else emit_imm(imm, bits == 64 ? 4 : bits/8);
         return *this;
     }
 
@@ -8928,10 +9082,22 @@ public:
         return *this;
     }
     CodeGen& xor_(Mem dst, int64_t imm) {
-        emit_rex_mem(false, 0, dst);
-        emit8(0x80);
-        emit_mem(6, dst);
-        emit_imm(imm, dst.size_hint ? dst.size_hint : 4);
+        uint8_t bits = dst.size_hint ? dst.size_hint * 8 : 32;
+        if (bits == 16) emit8(0x66);
+        emit_rex_mem(bits == 64, 0, dst);
+        if (bits == 8) {
+            emit8(0x80);
+            emit_mem(6, dst);
+            emit_imm(imm, 1);
+        } else if (imm >= -128 && imm <= 127) {
+            emit8(0x83);
+            emit_mem(6, dst);
+            emit_imm(imm, 1);
+        } else {
+            emit8(0x81);
+            emit_mem(6, dst);
+            emit_imm(imm, bits == 64 ? 4 : bits/8);
+        }
         return *this;
     }
 
