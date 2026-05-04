@@ -349,6 +349,44 @@ int main() {
         CHECK(loaded != v, "partial overwrite evicts the matching chunk");
     }
 
+    // --- Memory isolation across forks ---
+    {
+        // The fork branches store *different* 64-bit values to [rsi] via RCX
+        // (CodeGen's mov(qword_ptr, imm) picks the byte form — a separate
+        // bug). After both branches converge at `end`, the load through RAX
+        // should reflect each fork's own write, not its sibling's.
+        auto snip = emit([](CodeGen& g) {
+            auto taken = g.label();
+            auto done  = g.label();
+            g.cmp(rdi, (int64_t)0);
+            g.jz(taken);
+            g.mov(rcx, (int64_t)11);
+            g.mov(qword_ptr(rsi), rcx);
+            g.jmp(done);
+            g.bind(taken);
+            g.mov(rcx, (int64_t)22);
+            g.mov(qword_ptr(rsi), rcx);
+            g.bind(done);
+            g.mov(rax, qword_ptr(rsi));
+            g.add_anchor("end");
+            g.ret();
+        });
+        constexpr uint64_t base = 0xA000;
+        Config cfg{}; cfg.enable_merging = false;   // keep paths separate to inspect each
+        Engine eng(cfg, code_reader(base, snip.bytes));
+        eng.seed_state().gpr[6] = eng.builder().k(0xCAFE0000, 64);  // RSI concrete
+        uint64_t end = base + snip.anchors["end"];
+        auto results = eng.run(base, [&](const State& s) { return s.rip == end; });
+        CHECK(results.size() == 2, "memory-isolation: two forked paths");
+        if (results.size() == 2) {
+            const Expr* a = results[0].gpr[0];
+            const Expr* b = results[1].gpr[0];
+            CHECK(is_const(a) && is_const(b) &&
+                  ((a->k == 11 && b->k == 22) || (a->k == 22 && b->k == 11)),
+                  "each fork's load saw its own write, not the sibling's");
+        }
+    }
+
     // --- State merging at convergence ---
     auto build_diamond = [](){
         return emit([](CodeGen& g) {

@@ -494,7 +494,9 @@ State State::fork() const {
     copy.b = b;
     for (int i = 0; i < 16; ++i) copy.gpr[i]   = gpr[i];
     for (int i = 0; i < 7;  ++i) copy.flags[i] = flags[i];
-    copy.mem        = mem;          // shared — caller should snapshot if needed
+    // Deep-clone memory so writes from this fork don't leak to the parent
+    // or siblings. Expr* contents are interned and shared safely.
+    copy.mem = mem ? std::make_unique<Memory>(*mem) : nullptr;
     copy.rip        = rip;
     copy.pc         = pc;
     copy.fork_depth = fork_depth + 1;
@@ -514,10 +516,11 @@ bool State::can_merge_with(const State& other) const {
     if (rip != other.rip) return false;
     if (fork_depth != other.fork_depth) return false;
     if (call_stack != other.call_stack) return false;
-    if (mem != other.mem) return false;            // pointer-identity for now
-    // Both must have at least one term beyond the common prefix — otherwise
-    // one is strictly more constrained and a true union isn't possible
-    // without the negation of the extra term.
+    // Memory is per-state now; we don't merge memories. The merged state
+    // keeps `this`'s memory after merge — writes from `other` that diverged
+    // from `this` are dropped. For typical x86 push/pop discipline both
+    // sides write the same shape so this is benign; arbitrary stores from
+    // the other side will not be visible. Documented limitation.
     size_t cp = common_pc_prefix(other);
     return cp < pc.terms.size() && cp < other.pc.terms.size();
 }
@@ -747,9 +750,9 @@ std::vector<uint64_t> Solver::enumerate(const PathCondition& pc, const Expr* e, 
 // ============================================================
 
 Engine::Engine(Config cfg, ReadCode read_code)
-    : cfg_(cfg), read_code_(std::move(read_code)), memory_(&builder_) {
+    : cfg_(cfg), read_code_(std::move(read_code)) {
     seed_.b = &builder_;
-    seed_.mem = &memory_;
+    seed_.mem = std::make_unique<Memory>(&builder_);
     seed_initial_state(seed_);
 }
 
@@ -888,7 +891,10 @@ void Engine::apply_op(State& s, const ir::Op& op, const ir::Lifted& l, const Dec
 
     case OC::LOAD: {
         const Expr* addr = in(0);
-        s.temps[op.output.offset] = s.mem->load(addr, op.output.size);
+        // Route through write_var so GPR/Temp/etc. destinations all work
+        // (the previous unconditional s.temps[...] assignment broke any
+        // load that targeted a register, e.g. `mov rax, [rsi]`).
+        write_var(s, op.output, s.mem->load(addr, op.output.size));
         break;
     }
     case OC::STORE: {

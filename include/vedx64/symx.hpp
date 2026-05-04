@@ -181,7 +181,10 @@ struct State {
     Builder*       b;
     const Expr*    gpr[16]   = {};       // width=64 each
     const Expr*    flags[7]  = {};       // width=1 each
-    Memory*        mem       = nullptr;  // shared across forks of the same engine
+    // Per-state memory. Fork deep-clones it so writes from one branch do
+    // not leak to siblings. The clone is shallow over Expr* (those are
+    // interned in the shared Builder) but copies the maps themselves.
+    std::unique_ptr<Memory> mem;
     uint64_t       rip       = 0;
     PathCondition  pc;
     uint32_t       fork_depth = 0;
@@ -320,7 +323,7 @@ private:
     Config                   cfg_;
     ReadCode                 read_code_;
     Builder                  builder_;
-    Memory                   memory_;
+    // Memory lives inside seed_ now; each forked State carries its own clone.
     Solver                   solver_;
     State                    seed_;
     std::deque<State>        queue_;
