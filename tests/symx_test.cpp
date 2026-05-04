@@ -270,6 +270,97 @@ int main() {
         CHECK(is_const(rax) && rax->k == 13, "rax = 10 + 1 + 1 + 1 = 13");
     }
 
+    // --- Loop visit cap kills runaway loops ---
+    {
+        // jmp $-2  →  EB FC  (infinite loop in 2 bytes)
+        static const uint8_t prog[] = { 0xEB, 0xFE };  // jmp to itself (-2 from next insn)
+        constexpr uint64_t base = 0x6000;
+        Config cfg{}; cfg.max_visits_per_rip = 5; cfg.max_steps_per_path = 1000;
+        Engine eng(cfg, [&](uint64_t addr, uint8_t* out, size_t n) {
+            if (addr < base || addr + n > base + sizeof(prog)) return false;
+            std::memcpy(out, prog + (addr - base), n);
+            return true;
+        });
+        State s = eng.seed_state().fork();
+        s.rip = base;
+        // Run until the visit cap kills the path. Should be a small number
+        // of steps regardless of max_steps_per_path.
+        size_t executed = 0;
+        while (eng.step(s)) ++executed;
+        CHECK(s.dead, "infinite loop killed by visit cap");
+        CHECK(executed <= cfg.max_visits_per_rip + 1, "stopped within visit cap budget");
+    }
+
+    // --- CallStack discipline: CALL → target, RET → caller ---
+    {
+        //  base+0:  call +5         E8 05 00 00 00      (5-byte call to base+10)
+        //  base+5:  mov rax, 99     48 C7 C0 63 00 00 00
+        //  base+12: ret             C3
+        //  base+13:  hlt placeholder (we'll stop here)
+        //  --- callee at base+10 ---
+        // Rewriting cleanly:
+        //  call f      E8 06 00 00 00      bytes 0..4
+        //  mov rcx, 1  48 C7 C1 01 00 00 00 bytes 5..11
+        //  ret         C3                  byte  12
+        //  f: mov rax, 42  48 C7 C0 2A 00 00 00  bytes 13..19
+        //     ret           C3                   byte  20
+        // CALL +6 from rip=5 lands at base+11... easier to just hand-craft offsets.
+        static const uint8_t prog[] = {
+            0xE8, 0x08, 0x00, 0x00, 0x00,                   // 0:  call f (rel = 8 → base+13)
+            0x48, 0xC7, 0xC1, 0x01, 0x00, 0x00, 0x00,       // 5:  mov rcx, 1
+            0xC3,                                            // 12: ret  (caller)
+            0x48, 0xC7, 0xC0, 0x2A, 0x00, 0x00, 0x00,       // 13: mov rax, 42  (callee f)
+            0xC3,                                            // 20: ret
+        };
+        constexpr uint64_t base = 0x7000;
+        Config cfg{};
+        Engine eng(cfg, [&](uint64_t addr, uint8_t* out, size_t n) {
+            if (addr < base || addr + n > base + sizeof(prog)) return false;
+            std::memcpy(out, prog + (addr - base), n);
+            return true;
+        });
+        State s = eng.seed_state().fork();
+        s.rip = base;
+        // Run forward: call → mov rax,42 → ret → mov rcx,1 → ret.
+        // The outer ret pops past our shadow stack — call_stack is now empty,
+        // memory ret target is symbolic, so the path dies cleanly. Stop just
+        // before the outer ret so RAX/RCX are observable.
+        size_t executed = 0;
+        while (executed < 8 && s.rip != base + 12) { eng.step(s); ++executed; }
+        CHECK(!s.dead, "callstack-guided run is alive at outer ret");
+        CHECK(s.rip == base + 12, "returned to caller's RIP after callee ret");
+        const Expr* rax = s.gpr[0];
+        const Expr* rcx = s.gpr[1];
+        CHECK(is_const(rax) && rax->k == 42, "RAX = 42 from callee");
+        CHECK(is_const(rcx) && rcx->k == 1,  "RCX = 1 from caller after return");
+    }
+
+    // --- Memory chunk coalescing: store-then-load returns the source Expr ---
+    {
+        Builder b;
+        Memory m(&b);
+        const Expr* addr = b.k(0x4000, 64);
+        const Expr* val  = b.add(b.sym(64), b.k(7, 64));   // symbolic, non-const
+        m.store(addr, val, 8);
+        const Expr* loaded = m.load(addr, 8);
+        CHECK(loaded == val, "8B store + 8B load returns the same Expr (no byte chain)");
+        // Chunk hit only on exact width: 4B load doesn't short-circuit.
+        const Expr* loaded4 = m.load(addr, 4);
+        CHECK(loaded4 != val, "4B load of 8B-stored chunk takes the byte path");
+    }
+    {
+        // Eviction: a partial overwrite invalidates the chunk.
+        Builder b;
+        Memory m(&b);
+        const Expr* a8 = b.k(0x5000, 64);
+        const Expr* v  = b.add(b.sym(64), b.k(1, 64));
+        m.store(a8, v, 8);
+        // Overwrite byte 0.
+        m.store(a8, b.k(0xAA, 8), 1);
+        const Expr* loaded = m.load(a8, 8);
+        CHECK(loaded != v, "partial overwrite evicts the matching chunk");
+    }
+
 #ifdef VEDX64_Z3
     // --- Z3-backed solver: actual SAT/UNSAT/concretization ---
     {

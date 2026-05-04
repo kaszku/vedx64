@@ -362,7 +362,24 @@ std::string Builder::to_string(const Expr* e) {
 //  Memory
 // ============================================================
 
-void Memory::clear() { concrete_.clear(); symbolic_.clear(); }
+void Memory::clear() { concrete_.clear(); chunks_.clear(); symbolic_.clear(); }
+
+void Memory::evict_overlapping(uint64_t addr, uint8_t bytes) {
+    // Drop any chunk whose [start, start+bytes) overlaps [addr, addr+bytes).
+    // The byte-level concrete_ map carries the partial-overwrite truth; the
+    // chunk cache only holds *intact* multi-byte writes.
+    if (chunks_.empty()) return;
+    uint64_t end = addr + bytes;
+    auto it = chunks_.lower_bound(addr);
+    // Walk back one in case the prior chunk reaches into [addr, end).
+    if (it != chunks_.begin()) --it;
+    while (it != chunks_.end() && it->first < end) {
+        uint64_t cstart = it->first;
+        uint64_t cend   = cstart + it->second.bytes;
+        if (cend > addr && cstart < end) it = chunks_.erase(it);
+        else ++it;
+    }
+}
 
 void Memory::seed(uint64_t addr, const uint8_t* data, size_t n) {
     for (size_t i = 0; i < n; ++i) concrete_[addr + i] = b_->k(data[i], 8);
@@ -407,7 +424,15 @@ void Memory::store_byte(const Expr* addr_byte, const Expr* val_byte) {
 }
 
 const Expr* Memory::load(const Expr* addr, uint8_t bytes) {
-    // Little-endian: byte 0 at lowest address.
+    // Concrete-address chunk hit: if the most recent multi-byte write at
+    // exactly this (addr, bytes) is still intact, return its source value
+    // directly. Skips the byte-decompose / shl / or chain entirely — most
+    // x86 loads after a matching store hit this path.
+    if (is_const(addr)) {
+        auto it = chunks_.find(addr->k);
+        if (it != chunks_.end() && it->second.bytes == bytes) return it->second.val;
+    }
+    // Little-endian byte assembly fallback.
     const Expr* result = nullptr;
     for (uint8_t i = 0; i < bytes; ++i) {
         const Expr* off = b_->k(i, addr->width);
@@ -420,6 +445,12 @@ const Expr* Memory::load(const Expr* addr, uint8_t bytes) {
 }
 
 void Memory::store(const Expr* addr, const Expr* val, uint8_t bytes) {
+    // Record the intact write so a matching load can short-circuit.
+    if (is_const(addr)) {
+        evict_overlapping(addr->k, bytes);
+        chunks_[addr->k] = Chunk{bytes, val};
+    }
+    // Always populate the byte-level map so partial / aliased loads remain correct.
     for (uint8_t i = 0; i < bytes; ++i) {
         const Expr* off = b_->k(i, addr->width);
         const Expr* a   = b_->add(addr, off);
@@ -467,6 +498,8 @@ State State::fork() const {
     copy.rip        = rip;
     copy.pc         = pc;
     copy.fork_depth = fork_depth + 1;
+    copy.visits     = visits;
+    copy.call_stack = call_stack;
     return copy;
 }
 
@@ -865,20 +898,42 @@ void Engine::apply_op(State& s, const ir::Op& op, const ir::Lifted& l, const Dec
     }
 
     case OC::CALL: {
-        // Treat as straight-line to the next instruction; symbolic-aware
-        // engines that want to descend into callees should inject their own
-        // stack model and recurse.
-        s.rip += l.length;
+        // The lifter has already emitted SUB RSP,#8 and STORE [RSP], retaddr
+        // before this CALL op. Maintain an explicit shadow stack so RET can
+        // resolve concretely even when [RSP] becomes symbolic (after string
+        // ops, push of computed values, etc.). Then jump to the target.
+        s.call_stack.push_back(s.rip + l.length);
+        const Expr* tgt = in(0);
+        if (is_const(tgt)) { s.rip = tgt->k; }
+        else if (auto v = solver_.get_value(s.pc, tgt)) { s.rip = *v; }
+        else { s.dead = true; diagnostics_.push_back("CALL: symbolic target abandoned"); }
         break;
     }
-    case OC::VCALL: s.rip += l.length; break;
+    case OC::VCALL: {
+        // Indirect / virtual call. Same shadow-stack behavior; target is
+        // input[0] which the lifter already loaded from memory if needed.
+        s.call_stack.push_back(s.rip + l.length);
+        const Expr* tgt = in(0);
+        if (is_const(tgt)) { s.rip = tgt->k; }
+        else if (auto v = solver_.get_value(s.pc, tgt)) { s.rip = *v; }
+        else { s.dead = true; diagnostics_.push_back("VCALL: symbolic target abandoned"); }
+        break;
+    }
     case OC::RET: {
-        // Read the saved retaddr from [RSP] (it was stored by the lifter).
-        const Expr* rsp = s.gpr[4];
-        const Expr* ret = s.mem->load(rsp, 8);
-        auto v = solver_.get_value(s.pc, ret);
-        if (v) s.rip = *v;
-        else   { s.dead = true; diagnostics_.push_back("RET: symbolic return target abandoned"); }
+        // Prefer the shadow stack — it stays concrete across symbolic
+        // memory writes between CALL and RET. Fall back to the
+        // architectural [RSP] read only when the shadow stack is empty
+        // (e.g. the engine entered mid-function).
+        if (!s.call_stack.empty()) {
+            s.rip = s.call_stack.back();
+            s.call_stack.pop_back();
+        } else {
+            const Expr* rsp = s.gpr[4];
+            const Expr* ret = s.mem->load(rsp, 8);
+            auto v = solver_.get_value(s.pc, ret);
+            if (v) s.rip = *v;
+            else   { s.dead = true; diagnostics_.push_back("RET: symbolic return target abandoned"); }
+        }
         break;
     }
 
@@ -925,6 +980,13 @@ std::vector<State> Engine::run(uint64_t entry, std::function<bool(const State&)>
         uint32_t steps = 0;
         while (!s.dead && steps < cfg_.max_steps_per_path) {
             if (stop && stop(s)) { finished.push_back(std::move(s)); goto next_path; }
+            uint32_t& v = s.visits[s.rip];
+            if (v >= cfg_.max_visits_per_rip) {
+                s.dead = true;
+                diagnostics_.push_back("run: max_visits_per_rip exceeded");
+                break;
+            }
+            ++v;
             uint8_t code[15] = {};
             // Try the full 15-byte read first; if the host can't satisfy it
             // (end-of-buffer), shrink the window so trailing instructions
@@ -962,6 +1024,15 @@ std::vector<State> Engine::run(uint64_t entry, std::function<bool(const State&)>
 
 bool Engine::step(State& s) {
     if (s.dead) return false;
+    // Loop cap. Counting before we run lets us refuse the (cap+1)-th
+    // execution rather than running it and then killing.
+    uint32_t& v = s.visits[s.rip];
+    if (v >= cfg_.max_visits_per_rip) {
+        s.dead = true;
+        diagnostics_.push_back("step: max_visits_per_rip exceeded");
+        return false;
+    }
+    ++v;
     uint8_t code[15] = {};
     size_t got = 0;
     for (size_t want = 15; want >= 1; --want) {

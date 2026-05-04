@@ -150,11 +150,14 @@ public:
 
 private:
     struct SymWrite { const Expr* addr; const Expr* val; }; // val is 1 byte wide
+    struct Chunk    { uint8_t bytes; const Expr* val; };    // multi-byte intact write
     Builder*                          b_;
     std::map<uint64_t, const Expr*>   concrete_;   // byte-addressable
+    std::map<uint64_t, Chunk>         chunks_;     // addr → intact multi-byte store
     std::vector<SymWrite>             symbolic_;
     const Expr* load_byte(const Expr* addr_byte);
     void        store_byte(const Expr* addr_byte, const Expr* val_byte);
+    void        evict_overlapping(uint64_t addr, uint8_t bytes);
 };
 
 // ============================================================
@@ -183,6 +186,16 @@ struct State {
     PathCondition  pc;
     uint32_t       fork_depth = 0;
     bool           dead       = false;
+
+    // Per-RIP visit counter for loop-detection. Engine::step kills paths
+    // exceeding Config::max_visits_per_rip on any single RIP — bounds
+    // analysis-time on functions with symbolic-count loops.
+    std::unordered_map<uint64_t, uint32_t> visits;
+
+    // Explicit call stack mirroring the architectural one. CALL pushes the
+    // return address; RET pops. Lets the engine resolve normal-discipline
+    // calls without round-tripping through symbolic memory.
+    std::vector<uint64_t> call_stack;
 
     // Per-instruction scratch — temps live only during one Lifted apply.
     std::unordered_map<uint16_t, const Expr*> temps;
@@ -240,6 +253,11 @@ private:
 struct Config {
     uint32_t max_fork_depth     = 64;
     uint32_t max_steps_per_path = 4096;
+    // Per-RIP visit cap: any single RIP that's been executed this many
+    // times on a path makes the engine kill that path. Bounds analysis
+    // time on functions with symbolic-count loops without forcing the
+    // user to set a tiny max_steps_per_path.
+    uint32_t max_visits_per_rip = 8;
     bool     stop_on_undef      = false;  // if true, kill paths on UNDEF; else havoc
     bool     verbose            = false;
 };
