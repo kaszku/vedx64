@@ -3,14 +3,48 @@
 
 #include "vedx64/symx.hpp"
 #include "vedx64/ir.hpp"
+#include "vedx64/codegen.hpp"
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <string>
+#include <vector>
+#include <functional>
+#include <unordered_map>
 
 using namespace vedx64;
 using namespace vedx64::symx;
 
 static int g_pass = 0, g_fail = 0;
 #define CHECK(cond, msg) do { if (cond) ++g_pass; else { ++g_fail; std::printf("FAIL: %s\n", msg); } } while (0)
+
+// Build a snippet via the CodeGen emit API and return (bytes, anchor map).
+// Tests use `add_anchor("name")` between instructions to capture offsets
+// for later reference; the second component maps name → byte offset.
+struct Snippet {
+    std::vector<uint8_t> bytes;
+    std::unordered_map<std::string, size_t> anchors;
+};
+
+static Snippet emit(std::function<void(CodeGen&)> build) {
+    CodeGen g;
+    build(g);
+    Snippet s;
+    s.bytes.assign(g.data(), g.data() + g.size());
+    for (const auto& a : g.anchors()) s.anchors[a.name] = a.offset;
+    return s;
+}
+
+// Wrap a byte vector in the read_code lambda the engine expects.
+static std::function<bool(uint64_t, uint8_t*, size_t)> code_reader(
+    uint64_t base, const std::vector<uint8_t>& bytes)
+{
+    return [base, &bytes](uint64_t addr, uint8_t* out, size_t n) {
+        if (addr < base || addr + n > base + bytes.size()) return false;
+        std::memcpy(out, bytes.data() + (addr - base), n);
+        return true;
+    };
+}
 
 int main() {
     std::printf("=== symx tests ===\n");
@@ -108,24 +142,17 @@ int main() {
 
     // --- Engine: run a tiny program (concrete inputs) ---
     {
-        // mov rax, 5      48 C7 C0 05 00 00 00
-        // mov rcx, 7      48 C7 C1 07 00 00 00
-        // add rax, rcx    48 01 C8
-        // ret             C3
-        static const uint8_t prog[] = {
-            0x48, 0xC7, 0xC0, 0x05, 0x00, 0x00, 0x00,
-            0x48, 0xC7, 0xC1, 0x07, 0x00, 0x00, 0x00,
-            0x48, 0x01, 0xC8,
-            0xC3,
-        };
-        Config cfg{}; cfg.max_steps_per_path = 32; cfg.stop_on_undef = false;
-        Engine eng(cfg, [&](uint64_t addr, uint8_t* out, size_t n) {
-            if (addr < 0x1000 || addr + n > 0x1000 + sizeof(prog)) return false;
-            std::memcpy(out, prog + (addr - 0x1000), n);
-            return true;
+        auto snip = emit([](CodeGen& g) {
+            g.mov(rax, (int64_t)5);
+            g.mov(rcx, (int64_t)7);
+            g.add(rax, rcx);
+            g.add_anchor("ret");
+            g.ret();
         });
-        // Stop at the RET (at offset 17 → addr 0x1011).
-        auto results = eng.run(0x1000, [&](const State& s) { return s.rip == 0x1011; });
+        constexpr uint64_t base = 0x1000;
+        Config cfg{}; cfg.max_steps_per_path = 32;
+        Engine eng(cfg, code_reader(base, snip.bytes));
+        auto results = eng.run(base, [&](const State& s) { return s.rip == base + snip.anchors["ret"]; });
         CHECK(results.size() == 1, "engine produced one finished path");
         if (!results.empty()) {
             const Expr* rax = results[0].gpr[0];
@@ -135,19 +162,17 @@ int main() {
 
     // --- Engine: symbolic input flows through ---
     {
-        // mov rax, rdi   48 89 F8       ; symbolic input from RDI
-        // add rax, 1     48 83 C0 01
-        // ret            C3
-        static const uint8_t prog[] = { 0x48, 0x89, 0xF8, 0x48, 0x83, 0xC0, 0x01, 0xC3 };
-        Config cfg{}; cfg.max_steps_per_path = 16;
-        Engine eng(cfg, [&](uint64_t addr, uint8_t* out, size_t n) {
-            if (addr < 0x2000 || addr + n > 0x2000 + sizeof(prog)) return false;
-            std::memcpy(out, prog + (addr - 0x2000), n);
-            return true;
+        auto snip = emit([](CodeGen& g) {
+            g.mov(rax, rdi);
+            g.add(rax, (int64_t)1);
+            g.add_anchor("ret");
+            g.ret();
         });
-        // Constrain RDI to 41 — RAX should fold to 42.
+        constexpr uint64_t base = 0x2000;
+        Config cfg{}; cfg.max_steps_per_path = 16;
+        Engine eng(cfg, code_reader(base, snip.bytes));
         eng.seed_state().gpr[7] = eng.builder().k(41, 64);
-        auto results = eng.run(0x2000, [&](const State& s) { return s.rip == 0x2007; });
+        auto results = eng.run(base, [&](const State& s) { return s.rip == base + snip.anchors["ret"]; });
         CHECK(results.size() == 1, "symbolic-RDI engine produced one path");
         if (!results.empty()) {
             const Expr* rax = results[0].gpr[0];
@@ -155,37 +180,28 @@ int main() {
         }
     }
 
-    // --- Engine: symbolic branch forks ---
+    // --- Engine: symbolic branch forks (merging disabled) ---
     {
-        // The lifter produces CBRANCH with a symbolic condition.
-        //   cmp rdi, 0      48 83 FF 00
-        //   je  +5          74 05
-        //   mov rax, 1      48 C7 C0 01 00 00 00      ; fall-through path
-        //   ret             C3
-        //   mov rax, 2      48 C7 C0 02 00 00 00      ; taken path
-        //   ret             C3
-        static const uint8_t prog[] = {
-            0x48, 0x83, 0xFF, 0x00,
-            0x74, 0x08,
-            0x48, 0xC7, 0xC0, 0x01, 0x00, 0x00, 0x00,
-            0xC3,
-            0x48, 0xC7, 0xC0, 0x02, 0x00, 0x00, 0x00,
-            0xC3,
-        };
-        Config cfg{}; cfg.max_steps_per_path = 16;
-        Engine eng(cfg, [&](uint64_t addr, uint8_t* out, size_t n) {
-            if (addr < 0x3000 || addr + n > 0x3000 + sizeof(prog)) return false;
-            std::memcpy(out, prog + (addr - 0x3000), n);
-            return true;
+        auto snip = emit([](CodeGen& g) {
+            auto taken = g.label();
+            g.cmp(rdi, (int64_t)0);
+            g.jz(taken);
+            g.mov(rax, (int64_t)1);
+            g.add_anchor("ret_fall");
+            g.ret();
+            g.bind(taken);
+            g.mov(rax, (int64_t)2);
+            g.add_anchor("ret_taken");
+            g.ret();
         });
-        // RDI stays symbolic. Stop at either RET — fall-through RET is at
-        // 0x300D, taken-branch RET is at 0x3015.
-        auto results = eng.run(0x3000, [&](const State& s) {
-            return s.rip == 0x300D || s.rip == 0x3015;
-        });
+        constexpr uint64_t base = 0x3000;
+        Config cfg{}; cfg.max_steps_per_path = 16; cfg.enable_merging = false;
+        Engine eng(cfg, code_reader(base, snip.bytes));
+        uint64_t fall = base + snip.anchors["ret_fall"];
+        uint64_t take = base + snip.anchors["ret_taken"];
+        auto results = eng.run(base, [&](const State& s) { return s.rip == fall || s.rip == take; });
         CHECK(results.size() == 2, "symbolic compare → two paths");
         if (results.size() == 2) {
-            // Distinct RIPs and distinct RAX values across the two paths.
             CHECK(results[0].rip != results[1].rip, "two paths reach different RIPs");
             const Expr* a = results[0].gpr[0];
             const Expr* b = results[1].gpr[0];
@@ -223,21 +239,14 @@ int main() {
 
     // --- Engine: step ---
     {
-        // mov rax, 1     48 C7 C0 01 00 00 00
-        // add rax, 2     48 83 C0 02
-        // add rax, 3     48 83 C0 03
-        static const uint8_t prog[] = {
-            0x48, 0xC7, 0xC0, 0x01, 0x00, 0x00, 0x00,
-            0x48, 0x83, 0xC0, 0x02,
-            0x48, 0x83, 0xC0, 0x03,
-        };
+        auto snip = emit([](CodeGen& g) {
+            g.mov(rax, (int64_t)1);
+            g.add(rax, (int64_t)2);
+            g.add(rax, (int64_t)3);
+        });
         constexpr uint64_t base = 0x4000;
         Config cfg{};
-        Engine eng(cfg, [&](uint64_t addr, uint8_t* out, size_t n) {
-            if (addr < base || addr + n > base + sizeof(prog)) return false;
-            std::memcpy(out, prog + (addr - base), n);
-            return true;
-        });
+        Engine eng(cfg, code_reader(base, snip.bytes));
         State s = eng.seed_state().fork();
         s.rip = base;
         CHECK(eng.step(s), "step #1 (mov)");
@@ -248,20 +257,16 @@ int main() {
     }
     // --- Engine: run_block ---
     {
-        static const uint8_t prog[] = {
-            0x48, 0xC7, 0xC0, 0x0A, 0x00, 0x00, 0x00,  // mov rax, 10
-            0x48, 0xFF, 0xC0,                           // inc rax
-            0x48, 0xFF, 0xC0,                           // inc rax
-            0x48, 0xFF, 0xC0,                           // inc rax
-            0xC3,
-        };
+        auto snip = emit([](CodeGen& g) {
+            g.mov(rax, (int64_t)10);
+            g.inc(rax);
+            g.inc(rax);
+            g.inc(rax);
+            g.ret();
+        });
         constexpr uint64_t base = 0x5000;
         Config cfg{};
-        Engine eng(cfg, [&](uint64_t addr, uint8_t* out, size_t n) {
-            if (addr < base || addr + n > base + sizeof(prog)) return false;
-            std::memcpy(out, prog + (addr - base), n);
-            return true;
-        });
+        Engine eng(cfg, code_reader(base, snip.bytes));
         State s = eng.seed_state().fork();
         s.rip = base;
         size_t n = eng.run_block(s, 4);
@@ -272,19 +277,16 @@ int main() {
 
     // --- Loop visit cap kills runaway loops ---
     {
-        // jmp $-2  →  EB FC  (infinite loop in 2 bytes)
-        static const uint8_t prog[] = { 0xEB, 0xFE };  // jmp to itself (-2 from next insn)
+        auto snip = emit([](CodeGen& g) {
+            auto self = g.label();
+            g.bind(self);
+            g.jmp(self);
+        });
         constexpr uint64_t base = 0x6000;
         Config cfg{}; cfg.max_visits_per_rip = 5; cfg.max_steps_per_path = 1000;
-        Engine eng(cfg, [&](uint64_t addr, uint8_t* out, size_t n) {
-            if (addr < base || addr + n > base + sizeof(prog)) return false;
-            std::memcpy(out, prog + (addr - base), n);
-            return true;
-        });
+        Engine eng(cfg, code_reader(base, snip.bytes));
         State s = eng.seed_state().fork();
         s.rip = base;
-        // Run until the visit cap kills the path. Should be a small number
-        // of steps regardless of max_steps_per_path.
         size_t executed = 0;
         while (eng.step(s)) ++executed;
         CHECK(s.dead, "infinite loop killed by visit cap");
@@ -293,42 +295,28 @@ int main() {
 
     // --- CallStack discipline: CALL → target, RET → caller ---
     {
-        //  base+0:  call +5         E8 05 00 00 00      (5-byte call to base+10)
-        //  base+5:  mov rax, 99     48 C7 C0 63 00 00 00
-        //  base+12: ret             C3
-        //  base+13:  hlt placeholder (we'll stop here)
-        //  --- callee at base+10 ---
-        // Rewriting cleanly:
-        //  call f      E8 06 00 00 00      bytes 0..4
-        //  mov rcx, 1  48 C7 C1 01 00 00 00 bytes 5..11
-        //  ret         C3                  byte  12
-        //  f: mov rax, 42  48 C7 C0 2A 00 00 00  bytes 13..19
-        //     ret           C3                   byte  20
-        // CALL +6 from rip=5 lands at base+11... easier to just hand-craft offsets.
-        static const uint8_t prog[] = {
-            0xE8, 0x08, 0x00, 0x00, 0x00,                   // 0:  call f (rel = 8 → base+13)
-            0x48, 0xC7, 0xC1, 0x01, 0x00, 0x00, 0x00,       // 5:  mov rcx, 1
-            0xC3,                                            // 12: ret  (caller)
-            0x48, 0xC7, 0xC0, 0x2A, 0x00, 0x00, 0x00,       // 13: mov rax, 42  (callee f)
-            0xC3,                                            // 20: ret
-        };
+        auto snip = emit([](CodeGen& g) {
+            auto callee = g.label();
+            g.call(callee);
+            g.mov(rcx, (int64_t)1);
+            g.add_anchor("outer_ret");
+            g.ret();
+            g.bind(callee);
+            g.mov(rax, (int64_t)42);
+            g.ret();
+        });
         constexpr uint64_t base = 0x7000;
         Config cfg{};
-        Engine eng(cfg, [&](uint64_t addr, uint8_t* out, size_t n) {
-            if (addr < base || addr + n > base + sizeof(prog)) return false;
-            std::memcpy(out, prog + (addr - base), n);
-            return true;
-        });
+        Engine eng(cfg, code_reader(base, snip.bytes));
         State s = eng.seed_state().fork();
         s.rip = base;
-        // Run forward: call → mov rax,42 → ret → mov rcx,1 → ret.
-        // The outer ret pops past our shadow stack — call_stack is now empty,
-        // memory ret target is symbolic, so the path dies cleanly. Stop just
-        // before the outer ret so RAX/RCX are observable.
+        // Run until just before the outer ret (where the shadow stack would
+        // empty and the path would die on a symbolic-memory pop).
+        uint64_t outer_ret = base + snip.anchors["outer_ret"];
         size_t executed = 0;
-        while (executed < 8 && s.rip != base + 12) { eng.step(s); ++executed; }
+        while (executed < 8 && s.rip != outer_ret) { eng.step(s); ++executed; }
         CHECK(!s.dead, "callstack-guided run is alive at outer ret");
-        CHECK(s.rip == base + 12, "returned to caller's RIP after callee ret");
+        CHECK(s.rip == outer_ret, "returned to caller's RIP after callee ret");
         const Expr* rax = s.gpr[0];
         const Expr* rcx = s.gpr[1];
         CHECK(is_const(rax) && rax->k == 42, "RAX = 42 from callee");
@@ -359,6 +347,49 @@ int main() {
         m.store(a8, b.k(0xAA, 8), 1);
         const Expr* loaded = m.load(a8, 8);
         CHECK(loaded != v, "partial overwrite evicts the matching chunk");
+    }
+
+    // --- State merging at convergence ---
+    auto build_diamond = [](){
+        return emit([](CodeGen& g) {
+            auto taken = g.label();
+            auto done  = g.label();
+            g.cmp(rdi, (int64_t)0);
+            g.jz(taken);
+            g.mov(rax, (int64_t)1);
+            g.jmp(done);
+            g.bind(taken);
+            g.mov(rax, (int64_t)2);
+            g.bind(done);
+            g.add_anchor("conv");
+            g.nop();   // landing pad for the stop predicate
+        });
+    };
+    {
+        auto snip = build_diamond();
+        constexpr uint64_t base = 0x8000;
+        Config cfg{}; cfg.enable_merging = true;
+        Engine eng(cfg, code_reader(base, snip.bytes));
+        uint64_t conv = base + snip.anchors["conv"];
+        auto results = eng.run(base, [&](const State& s) { return s.rip == conv; });
+        CHECK(results.size() == 1, "diamond: two converging paths merged into one");
+        if (results.size() == 1) {
+            const Expr* rax = results[0].gpr[0];
+            CHECK(rax->op == ExprOp::Ite, "merged RAX is an ite");
+            CHECK(is_const(rax->b) && is_const(rax->c) &&
+                  ((rax->b->k == 1 && rax->c->k == 2) || (rax->b->k == 2 && rax->c->k == 1)),
+                  "merged RAX arms are 1 and 2");
+        }
+    }
+    // Same diamond with merging disabled — should produce two separate paths.
+    {
+        auto snip = build_diamond();
+        constexpr uint64_t base = 0x9000;
+        Config cfg{}; cfg.enable_merging = false;
+        Engine eng(cfg, code_reader(base, snip.bytes));
+        uint64_t conv = base + snip.anchors["conv"];
+        auto results = eng.run(base, [&](const State& s) { return s.rip == conv; });
+        CHECK(results.size() == 2, "without merging: two separate paths");
     }
 
 #ifdef VEDX64_Z3

@@ -208,6 +208,22 @@ struct State {
     const Expr* get_gpr_slice(uint8_t r, uint8_t bytes) const;
 
     State fork() const;   // deep copy except for `mem` (shared by reference)
+
+    // Length of the longest common prefix of this->pc.terms and other.pc.terms
+    // (matched by Expr* identity, since the Builder hash-conses).
+    size_t common_pc_prefix(const State& other) const;
+
+    // True if this state can merge with `other` — same (rip, fork_depth,
+    // call_stack) and a non-empty distinguishing tail in each PC.
+    bool can_merge_with(const State& other) const;
+
+    // Merge `other` into `this`. Per slot the result is ite(distinguishing,
+    // this->slot, other->slot) where distinguishing is the suffix of pc.terms
+    // unique to `this` (folded with AND). The merged PC keeps the common
+    // prefix and appends (this_tail OR other_tail). Memory is not merged —
+    // both states currently share the same Memory* pointer (a known
+    // limitation; per-state memory snapshotting is a separate feature).
+    void merge_diamond(const State& other);
 };
 
 // ============================================================
@@ -258,6 +274,10 @@ struct Config {
     // time on functions with symbolic-count loops without forcing the
     // user to set a tiny max_steps_per_path.
     uint32_t max_visits_per_rip = 8;
+    // When two queued states share (rip, fork_depth, call_stack), merge
+    // them into one with per-slot ite(distinguishing_pc, a, b). Cuts the
+    // path count on diamond control flow at the cost of larger Expr trees.
+    bool     enable_merging     = true;
     bool     stop_on_undef      = false;  // if true, kill paths on UNDEF; else havoc
     bool     verbose            = false;
 };

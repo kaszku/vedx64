@@ -503,6 +503,61 @@ State State::fork() const {
     return copy;
 }
 
+size_t State::common_pc_prefix(const State& other) const {
+    size_t n = std::min(pc.terms.size(), other.pc.terms.size());
+    size_t i = 0;
+    while (i < n && pc.terms[i] == other.pc.terms[i]) ++i;
+    return i;
+}
+
+bool State::can_merge_with(const State& other) const {
+    if (rip != other.rip) return false;
+    if (fork_depth != other.fork_depth) return false;
+    if (call_stack != other.call_stack) return false;
+    if (mem != other.mem) return false;            // pointer-identity for now
+    // Both must have at least one term beyond the common prefix — otherwise
+    // one is strictly more constrained and a true union isn't possible
+    // without the negation of the extra term.
+    size_t cp = common_pc_prefix(other);
+    return cp < pc.terms.size() && cp < other.pc.terms.size();
+}
+
+void State::merge_diamond(const State& other) {
+    if (!can_merge_with(other)) return;
+    size_t cp = common_pc_prefix(other);
+
+    // Distinguishing predicate: the AND of this->pc.terms[cp..] (the suffix
+    // unique to *this*). Under that predicate the merged value is `this`'s,
+    // otherwise `other`'s.
+    const Expr* dist = nullptr;
+    for (size_t i = cp; i < pc.terms.size(); ++i) {
+        dist = dist ? b->band(dist, pc.terms[i]) : pc.terms[i];
+    }
+    // (and similarly the other-side suffix, only used for the merged PC)
+    const Expr* other_tail = nullptr;
+    for (size_t i = cp; i < other.pc.terms.size(); ++i) {
+        other_tail = other_tail ? b->band(other_tail, other.pc.terms[i]) : other.pc.terms[i];
+    }
+
+    // Per-slot merge.
+    for (int i = 0; i < 16; ++i) {
+        if (gpr[i] != other.gpr[i]) gpr[i] = b->ite(dist, gpr[i], other.gpr[i]);
+    }
+    for (int i = 0; i < 7; ++i) {
+        if (flags[i] != other.flags[i]) flags[i] = b->ite(dist, flags[i], other.flags[i]);
+    }
+
+    // Combined PC: shared prefix, then (this_tail ∨ other_tail).
+    pc.terms.resize(cp);
+    pc.push(b->bor(dist, other_tail));
+
+    // Merge bookkeeping: keep the maximum visit counts from either side.
+    for (auto& kv : other.visits) {
+        auto it = visits.find(kv.first);
+        if (it == visits.end() || it->second < kv.second) visits[kv.first] = kv.second;
+    }
+}
+
 // ============================================================
 //  Solver — concrete fast-path + (optional) Z3-backed reasoning
 // ============================================================
@@ -878,6 +933,9 @@ void Engine::apply_op(State& s, const ir::Op& op, const ir::Lifted& l, const Dec
             queue_.push_back(std::move(alt));
             s.pc.push(cond);
             s.rip = target;
+            // Bump our depth too so siblings share the same fork_depth — lets
+            // the merge detector recognize them as a diamond pair.
+            s.fork_depth++;
         } else if (t_feas) {
             s.pc.push(cond);
             s.rip = target;
@@ -977,9 +1035,35 @@ std::vector<State> Engine::run(uint64_t entry, std::function<bool(const State&)>
         State s = std::move(queue_.front());
         queue_.pop_front();
 
+        // Opportunistic merge: scan the queue for a state at the same join
+        // point and combine. Done before stepping so the merged state's
+        // values reflect both branches reaching this RIP.
+        if (cfg_.enable_merging) {
+            for (auto it = queue_.begin(); it != queue_.end(); ) {
+                if (s.can_merge_with(*it)) {
+                    s.merge_diamond(*it);
+                    it = queue_.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
+
+        // Helper: push to finished, merging into an existing equivalent state
+        // if one is already there (so paths that converge at a stop point
+        // collapse instead of accumulating).
+        auto add_finished = [&](State&& fs) {
+            if (cfg_.enable_merging) {
+                for (auto& f : finished) {
+                    if (fs.can_merge_with(f)) { f.merge_diamond(fs); return; }
+                }
+            }
+            finished.push_back(std::move(fs));
+        };
+
         uint32_t steps = 0;
         while (!s.dead && steps < cfg_.max_steps_per_path) {
-            if (stop && stop(s)) { finished.push_back(std::move(s)); goto next_path; }
+            if (stop && stop(s)) { add_finished(std::move(s)); goto next_path; }
             uint32_t& v = s.visits[s.rip];
             if (v >= cfg_.max_visits_per_rip) {
                 s.dead = true;
@@ -1016,7 +1100,7 @@ std::vector<State> Engine::run(uint64_t entry, std::function<bool(const State&)>
             if (!s.dead && s.rip == pre_rip) s.rip += expanded.length;
             ++steps;
         }
-        if (!s.dead) finished.push_back(std::move(s));
+        if (!s.dead) add_finished(std::move(s));
         next_path:;
     }
     return finished;
