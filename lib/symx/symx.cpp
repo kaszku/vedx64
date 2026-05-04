@@ -260,6 +260,11 @@ const Expr* Builder::extract(const Expr* x, uint16_t hi, uint16_t lo) {
     }
     // extract(hi, lo, sext(to, y)) when slice lies entirely below the sign extension.
     if (x->op == ExprOp::Sext && hi < x->a->width) return extract(x->a, hi, lo);
+    // Push extract through ite: extract(hi, lo, ite(c, t, f)) = ite(c, extract t, extract f).
+    // Lets symbolic-CMOV traces simplify the high-bits-of-cmov chain.
+    if (x->op == ExprOp::Ite) {
+        return ite(x->a, extract(x->b, hi, lo), extract(x->c, hi, lo));
+    }
     return intern(ExprOp::Extract, w, ((uint64_t)hi << 8) | lo, x, nullptr);
 }
 
@@ -277,6 +282,11 @@ const Expr* Builder::concat(const Expr* hi, const Expr* lo) {
         uint16_t hi_hi = static_cast<uint16_t>((hi->k >> 8) & 0xFF);
         if (hi_lo == lo_hi + 1) return extract(hi->a, hi_hi, lo_lo);
     }
+    // Push concat through ite on either side. Most useful on the high
+    // half because that's where 'preserve upper bits of RAX across CMOVcc'
+    // produces a concat(extract(ite(...)), low) shape.
+    if (hi->op == ExprOp::Ite) return ite(hi->a, concat(hi->b, lo), concat(hi->c, lo));
+    if (lo->op == ExprOp::Ite) return ite(lo->a, concat(hi, lo->b), concat(hi, lo->c));
     return intern(ExprOp::Concat, w, 0, hi, lo);
 }
 
@@ -833,6 +843,43 @@ void Engine::havoc_state(State& s, const DecodedInstr& di) {
     }
 }
 
+bool Engine::resolve_symbolic_target(State& s, const Expr* tgt, const char* what) {
+    Builder* b = &builder_;
+    if (auto v = solver_.get_value(s.pc, tgt)) {
+        // Pin the path-condition to the resolved value so subsequent
+        // queries don't have to re-derive it.
+        s.pc.push(b->eq(tgt, b->k(*v, tgt->width)));
+        s.rip = *v;
+        return true;
+    }
+    if (cfg_.max_enumerate_targets == 0) {
+        diagnostics_.push_back(std::string(what) + ": symbolic target abandoned");
+        return false;
+    }
+    auto cands = solver_.enumerate(s.pc, tgt, cfg_.max_enumerate_targets);
+    if (cands.empty()) {
+        diagnostics_.push_back(std::string(what) + ": symbolic target abandoned");
+        return false;
+    }
+    // Fork extras first (each gets its own pc constraining tgt to that
+    // candidate). Honour fork-depth cap; drop overflow.
+    for (size_t i = 1; i < cands.size(); ++i) {
+        if (s.fork_depth >= cfg_.max_fork_depth) {
+            diagnostics_.push_back(std::string(what) + ": fork-depth cap hit during enumerate");
+            break;
+        }
+        State alt = s.fork();
+        alt.pc.push(b->eq(tgt, b->k(cands[i], tgt->width)));
+        alt.rip = cands[i];
+        alt.fork_depth++;
+        queue_.push_back(std::move(alt));
+        s.fork_depth++;
+    }
+    s.pc.push(b->eq(tgt, b->k(cands[0], tgt->width)));
+    s.rip = cands[0];
+    return true;
+}
+
 void Engine::apply_op(State& s, const ir::Op& op, const ir::Lifted& l, const DecodedInstr& di) {
     using OC = ir::Opcode;
     Builder* b = &builder_;
@@ -907,12 +954,8 @@ void Engine::apply_op(State& s, const ir::Op& op, const ir::Lifted& l, const Dec
     case OC::BRANCH:
         // Unconditional — input[0] is the constant target VA.
         if (is_const(in(0))) s.rip = in(0)->k;
-        else {
-            // Symbolic target — try to concretize.
-            auto v = solver_.get_value(s.pc, in(0));
-            if (v) s.rip = *v;
-            else { s.dead = true; diagnostics_.push_back("BRANCH: symbolic target abandoned"); }
-        }
+        else if (!resolve_symbolic_target(s, in(0), "BRANCH"))
+            { s.dead = true; }
         break;
 
     case OC::CBRANCH: {
@@ -955,9 +998,10 @@ void Engine::apply_op(State& s, const ir::Op& op, const ir::Lifted& l, const Dec
     }
 
     case OC::INDIRECT_JMP: {
-        auto v = solver_.get_value(s.pc, in(0));
-        if (v) s.rip = *v;
-        else   { s.dead = true; diagnostics_.push_back("INDIRECT_JMP: symbolic target abandoned"); }
+        const Expr* tgt = in(0);
+        if (is_const(tgt)) { s.rip = tgt->k; }
+        else if (!resolve_symbolic_target(s, tgt, "INDIRECT_JMP"))
+            { s.dead = true; }
         break;
     }
 
@@ -969,8 +1013,8 @@ void Engine::apply_op(State& s, const ir::Op& op, const ir::Lifted& l, const Dec
         s.call_stack.push_back(s.rip + l.length);
         const Expr* tgt = in(0);
         if (is_const(tgt)) { s.rip = tgt->k; }
-        else if (auto v = solver_.get_value(s.pc, tgt)) { s.rip = *v; }
-        else { s.dead = true; diagnostics_.push_back("CALL: symbolic target abandoned"); }
+        else if (!resolve_symbolic_target(s, tgt, "CALL"))
+            { s.dead = true; }
         break;
     }
     case OC::VCALL: {
@@ -979,8 +1023,8 @@ void Engine::apply_op(State& s, const ir::Op& op, const ir::Lifted& l, const Dec
         s.call_stack.push_back(s.rip + l.length);
         const Expr* tgt = in(0);
         if (is_const(tgt)) { s.rip = tgt->k; }
-        else if (auto v = solver_.get_value(s.pc, tgt)) { s.rip = *v; }
-        else { s.dead = true; diagnostics_.push_back("VCALL: symbolic target abandoned"); }
+        else if (!resolve_symbolic_target(s, tgt, "VCALL"))
+            { s.dead = true; }
         break;
     }
     case OC::RET: {
@@ -994,9 +1038,9 @@ void Engine::apply_op(State& s, const ir::Op& op, const ir::Lifted& l, const Dec
         } else {
             const Expr* rsp = s.gpr[4];
             const Expr* ret = s.mem->load(rsp, 8);
-            auto v = solver_.get_value(s.pc, ret);
-            if (v) s.rip = *v;
-            else   { s.dead = true; diagnostics_.push_back("RET: symbolic return target abandoned"); }
+            if (is_const(ret)) { s.rip = ret->k; }
+            else if (!resolve_symbolic_target(s, ret, "RET"))
+                { s.dead = true; }
         }
         break;
     }

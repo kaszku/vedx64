@@ -464,6 +464,47 @@ int main() {
         for (auto v : vals) if ((v & 1) == 0) all_odd = false;
         CHECK(all_odd, "Z3: enumerated values are all odd");
     }
+    // --- Symbolic indirect-jump fans out to all enumerated targets ---
+    {
+        auto snip = emit([](CodeGen& g) { g.jmp(rax); });
+        constexpr uint64_t base = 0xB000;
+        Config cfg{}; cfg.max_enumerate_targets = 8;
+        Engine eng(cfg, code_reader(base, snip.bytes));
+        Builder& bb = eng.builder();
+        const Expr* sym = bb.sym(64);
+        eng.seed_state().gpr[0] = sym;
+        const Expr* in_set = bb.bor(
+            bb.eq(sym, bb.k(0x1000, 64)),
+            bb.bor(bb.eq(sym, bb.k(0x2000, 64)),
+                   bb.eq(sym, bb.k(0x3000, 64))));
+        eng.seed_state().pc.push(in_set);
+        auto results = eng.run(base,
+            [base](const State& s) { return s.rip != base; });
+        CHECK(results.size() == 3, "Z3 enumerate: jmp rax fans out to 3 paths");
+        bool h1=false, h2=false, h3=false;
+        for (auto& r : results) {
+            if (r.rip == 0x1000) h1 = true;
+            if (r.rip == 0x2000) h2 = true;
+            if (r.rip == 0x3000) h3 = true;
+        }
+        CHECK(h1 && h2 && h3, "Z3 enumerate: each candidate target is reached");
+    }
+    // --- max_enumerate_targets=0 falls back to the old single-resolve path ---
+    {
+        auto snip = emit([](CodeGen& g) { g.jmp(rax); });
+        constexpr uint64_t base = 0xC000;
+        Config cfg{}; cfg.max_enumerate_targets = 0;
+        Engine eng(cfg, code_reader(base, snip.bytes));
+        Builder& bb = eng.builder();
+        const Expr* sym = bb.sym(64);
+        eng.seed_state().gpr[0] = sym;
+        eng.seed_state().pc.push(bb.bor(
+            bb.eq(sym, bb.k(0x1000, 64)),
+            bb.eq(sym, bb.k(0x2000, 64))));
+        auto results = eng.run(base,
+            [base](const State& s) { return s.rip != base; });
+        CHECK(results.size() <= 1, "max_enumerate_targets=0: no fan-out");
+    }
 #endif
 
     std::printf("\n%d/%d symx tests passed\n", g_pass, g_pass + g_fail);

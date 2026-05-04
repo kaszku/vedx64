@@ -281,6 +281,11 @@ struct Config {
     // them into one with per-slot ite(distinguishing_pc, a, b). Cuts the
     // path count on diamond control flow at the cost of larger Expr trees.
     bool     enable_merging     = true;
+    // When BRANCH / INDIRECT_JMP / RET sees a symbolic target the engine
+    // first tries Solver::get_value to pin it to one concrete value; if
+    // the value isn't unique, it asks Solver::enumerate for up to this
+    // many candidates and forks one path per candidate. 0 disables.
+    uint32_t max_enumerate_targets = 8;
     bool     stop_on_undef      = false;  // if true, kill paths on UNDEF; else havoc
     bool     verbose            = false;
 };
@@ -319,6 +324,14 @@ private:
     void apply_op(State& s, const ir::Op& op, const ir::Lifted& l, const DecodedInstr& di);
     void havoc_state(State& s, const DecodedInstr& di);
     void seed_initial_state(State& s);
+
+    // For symbolic BRANCH/INDIRECT_JMP/CALL/VCALL/RET targets: try
+    // get_value first; if non-unique, enumerate up to
+    // cfg_.max_enumerate_targets candidates and fork one path per extra
+    // candidate (capped by cfg_.max_fork_depth). Updates s.rip + s.pc
+    // for the first candidate. Returns false if no candidate was found
+    // (caller should mark the path dead).
+    bool resolve_symbolic_target(State& s, const Expr* tgt, const char* what);
 
     Config                   cfg_;
     ReadCode                 read_code_;

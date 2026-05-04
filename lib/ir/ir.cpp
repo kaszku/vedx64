@@ -897,30 +897,81 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         m == Mnemonic::SETZ || m == Mnemonic::SETNZ || m == Mnemonic::SETBE || m == Mnemonic::SETNBE ||
         m == Mnemonic::SETS || m == Mnemonic::SETNS || m == Mnemonic::SETP || m == Mnemonic::SETNP ||
         m == Mnemonic::SETL || m == Mnemonic::SETNL || m == Mnemonic::SETLE || m == Mnemonic::SETNLE) {
+
         if (di.desc->has_modrm) {
             VarNode dst = (mod_ == 3) ? reg_from_modrm_rm(di, 1) : VarNode::temp(11, 1);
-            // Extract the primary flag for the condition
-            Opcode get_flag = Opcode::GET_ZF; // default
-            bool invert = false;
-            if (m == Mnemonic::SETO) get_flag = Opcode::GET_OF;
-            else if (m == Mnemonic::SETNO) { get_flag = Opcode::GET_OF; invert = true; }
-            else if (m == Mnemonic::SETB) get_flag = Opcode::GET_CF;
-            else if (m == Mnemonic::SETNB) { get_flag = Opcode::GET_CF; invert = true; }
-            else if (m == Mnemonic::SETZ) get_flag = Opcode::GET_ZF;
-            else if (m == Mnemonic::SETNZ) { get_flag = Opcode::GET_ZF; invert = true; }
-            else if (m == Mnemonic::SETS) get_flag = Opcode::GET_SF;
-            else if (m == Mnemonic::SETNS) { get_flag = Opcode::GET_SF; invert = true; }
-            else if (m == Mnemonic::SETP) get_flag = Opcode::GET_PF;
-            else if (m == Mnemonic::SETNP) { get_flag = Opcode::GET_PF; invert = true; }
-            // For compound conditions (SETBE, SETL, SETLE) — use primary flag as approximation
-            else if (m == Mnemonic::SETBE) get_flag = Opcode::GET_CF;
-            else if (m == Mnemonic::SETNBE) { get_flag = Opcode::GET_CF; invert = true; }
-            else if (m == Mnemonic::SETL) get_flag = Opcode::GET_SF;
-            else if (m == Mnemonic::SETNL) { get_flag = Opcode::GET_SF; invert = true; }
-            else if (m == Mnemonic::SETLE) get_flag = Opcode::GET_ZF;
-            else if (m == Mnemonic::SETNLE) { get_flag = Opcode::GET_ZF; invert = true; }
-            l.ops.push_back(make_op2(get_flag, dst, VarNode::flags()));
-            if (invert) l.ops.push_back(make_op2(Opcode::NOT, dst, dst));
+            // Build the condition value into `dst` (1 byte). For simple
+            // single-flag predicates this is just GET_xF (optionally NOT-ed);
+            // compound predicates (BE / NBE / L / NL / LE / NLE) build the
+            // boolean from two flags.
+            VarNode flags = VarNode::flags();
+            VarNode cf = VarNode::temp(20, 1);
+            VarNode zf = VarNode::temp(21, 1);
+            VarNode sf = VarNode::temp(22, 1);
+            VarNode of = VarNode::temp(23, 1);
+            auto get = [&](Opcode oc, VarNode v) {
+                l.ops.push_back(make_op2(oc, v, flags));
+            };
+            // Single-flag fast paths.
+            Opcode single = Opcode::NOP;
+            bool   invert = false;
+            if (m == Mnemonic::SETO) { single = Opcode::GET_OF; }
+            else if (m == Mnemonic::SETNO) { single = Opcode::GET_OF; invert = true; }
+            else if (m == Mnemonic::SETB || m == Mnemonic::SETC || m == Mnemonic::SETNAE) { single = Opcode::GET_CF; }
+            else if (m == Mnemonic::SETNB || m == Mnemonic::SETNC || m == Mnemonic::SETAE) { single = Opcode::GET_CF; invert = true; }
+            else if (m == Mnemonic::SETZ || m == Mnemonic::SETE) { single = Opcode::GET_ZF; }
+            else if (m == Mnemonic::SETNZ || m == Mnemonic::SETNE) { single = Opcode::GET_ZF; invert = true; }
+            else if (m == Mnemonic::SETS) { single = Opcode::GET_SF; }
+            else if (m == Mnemonic::SETNS) { single = Opcode::GET_SF; invert = true; }
+            else if (m == Mnemonic::SETP || m == Mnemonic::SETPE) { single = Opcode::GET_PF; }
+            else if (m == Mnemonic::SETNP || m == Mnemonic::SETPO) { single = Opcode::GET_PF; invert = true; }
+
+            if (single != Opcode::NOP) {
+                l.ops.push_back(make_op2(single, dst, flags));
+                if (invert) l.ops.push_back(make_op3(Opcode::XOR, dst, dst, VarNode::constant(1, 1)));
+            } else if (m == Mnemonic::SETBE || m == Mnemonic::SETNA) {
+                // BE = CF | ZF
+                get(Opcode::GET_CF, cf);
+                get(Opcode::GET_ZF, zf);
+                l.ops.push_back(make_op3(Opcode::OR, dst, cf, zf));
+            } else if (m == Mnemonic::SETNBE || m == Mnemonic::SETA) {
+                // A = !(CF | ZF) = !CF & !ZF
+                get(Opcode::GET_CF, cf);
+                get(Opcode::GET_ZF, zf);
+                VarNode tmp = VarNode::temp(24, 1);
+                l.ops.push_back(make_op3(Opcode::OR, tmp, cf, zf));
+                l.ops.push_back(make_op3(Opcode::XOR, dst, tmp, VarNode::constant(1, 1)));
+            } else if (m == Mnemonic::SETL || m == Mnemonic::SETNGE) {
+                // L = SF != OF = SF ^ OF
+                get(Opcode::GET_SF, sf);
+                get(Opcode::GET_OF, of);
+                l.ops.push_back(make_op3(Opcode::XOR, dst, sf, of));
+            } else if (m == Mnemonic::SETNL || m == Mnemonic::SETGE) {
+                // GE = SF == OF = !(SF ^ OF)
+                get(Opcode::GET_SF, sf);
+                get(Opcode::GET_OF, of);
+                VarNode tmp = VarNode::temp(24, 1);
+                l.ops.push_back(make_op3(Opcode::XOR, tmp, sf, of));
+                l.ops.push_back(make_op3(Opcode::XOR, dst, tmp, VarNode::constant(1, 1)));
+            } else if (m == Mnemonic::SETLE || m == Mnemonic::SETNG) {
+                // LE = ZF | (SF != OF)
+                get(Opcode::GET_ZF, zf);
+                get(Opcode::GET_SF, sf);
+                get(Opcode::GET_OF, of);
+                VarNode ne = VarNode::temp(24, 1);
+                l.ops.push_back(make_op3(Opcode::XOR, ne, sf, of));
+                l.ops.push_back(make_op3(Opcode::OR, dst, zf, ne));
+            } else if (m == Mnemonic::SETNLE || m == Mnemonic::SETG) {
+                // G = !ZF & SF == OF
+                get(Opcode::GET_ZF, zf);
+                get(Opcode::GET_SF, sf);
+                get(Opcode::GET_OF, of);
+                VarNode ne = VarNode::temp(24, 1);
+                l.ops.push_back(make_op3(Opcode::XOR, ne, sf, of));
+                VarNode any = VarNode::temp(25, 1);
+                l.ops.push_back(make_op3(Opcode::OR, any, zf, ne));
+                l.ops.push_back(make_op3(Opcode::XOR, dst, any, VarNode::constant(1, 1)));
+            }
             if (mod_ != 3) {
                 VarNode ea = compute_ea(l, di);
                 l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(1), ea, dst));
