@@ -286,6 +286,10 @@ struct Config {
     // the value isn't unique, it asks Solver::enumerate for up to this
     // many candidates and forks one path per candidate. 0 disables.
     uint32_t max_enumerate_targets = 8;
+    // Upper bound on the number of iterations of a REP/REPZ/REPNZ string op
+    // when RCX is concrete. Past the cap the engine havocs the destination
+    // and zeros RCX. Symbolic RCX skips the loop entirely (also havocs).
+    uint32_t max_rep_iterations = 4096;
     bool     stop_on_undef      = false;  // if true, kill paths on UNDEF; else havoc
     bool     verbose            = false;
 };
@@ -324,6 +328,16 @@ private:
     void apply_op(State& s, const ir::Op& op, const ir::Lifted& l, const DecodedInstr& di);
     void havoc_state(State& s, const DecodedInstr& di);
     void seed_initial_state(State& s);
+
+    // Apply every op of `expanded` exactly once. Caller already cleared temps.
+    void run_body(State& s, const ir::Lifted& expanded, const DecodedInstr& di);
+    // Run the body of a lifted instruction, taking into account a REP /
+    // REPZ / REPNZ prefix. For RepMode::None this is just a single
+    // `run_body` call; otherwise the engine drives the RCX-decrement
+    // termination loop itself (the lifter only emits a single iteration).
+    // RCX must be concrete; symbolic RCX or hitting the iteration cap
+    // havocs the destination + zeros RCX.
+    void execute_lifted(State& s, const ir::Lifted& expanded, const DecodedInstr& di);
 
     // For symbolic BRANCH/INDIRECT_JMP/CALL/VCALL/RET targets: try
     // get_value first; if non-unique, enumerate up to

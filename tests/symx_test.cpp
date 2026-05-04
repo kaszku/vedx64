@@ -387,6 +387,87 @@ int main() {
         }
     }
 
+    // --- REP MOVSB copies the right number of bytes ---
+    {
+        auto snip = emit([](CodeGen& g) {
+            g.rep_movsb();
+            g.add_anchor("end");
+            g.ret();
+        });
+        constexpr uint64_t base = 0xD000;
+        constexpr uint64_t src  = 0x10000;
+        constexpr uint64_t dst  = 0x20000;
+        Config cfg{};
+        Engine eng(cfg, code_reader(base, snip.bytes));
+        // RSI = src, RDI = dst, RCX = 5, DF = 0 (forward)
+        eng.seed_state().gpr[6] = eng.builder().k(src, 64);
+        eng.seed_state().gpr[7] = eng.builder().k(dst, 64);
+        eng.seed_state().gpr[1] = eng.builder().k(5, 64);
+        eng.seed_state().flags[6] = eng.builder().k(0, 1);   // DF = 0
+        // Seed source with 5 bytes 0x11 .. 0x55.
+        for (uint64_t i = 0; i < 5; ++i) {
+            eng.seed_state().mem->store(
+                eng.builder().k(src + i, 64),
+                eng.builder().k(0x11 * (i + 1), 8), 1);
+        }
+        uint64_t end = base + snip.anchors["end"];
+        auto results = eng.run(base, [&](const State& s) { return s.rip == end; });
+        CHECK(results.size() == 1, "REP MOVSB: one path through");
+        if (results.size() == 1) {
+            const State& s = results[0];
+            const Expr* rcx = s.gpr[1];
+            CHECK(is_const(rcx) && rcx->k == 0, "REP MOVSB: RCX decremented to 0");
+            // Verify destination saw all 5 bytes.
+            bool all_match = true;
+            for (uint64_t i = 0; i < 5; ++i) {
+                const Expr* byte = s.mem->load(eng.builder().k(dst + i, 64), 1);
+                if (!(is_const(byte) && byte->k == 0x11 * (i + 1))) all_match = false;
+            }
+            CHECK(all_match, "REP MOVSB: destination bytes match source");
+        }
+    }
+    // --- REP with RCX=0 is a no-op (still terminates cleanly) ---
+    {
+        auto snip = emit([](CodeGen& g) {
+            g.rep_movsb();
+            g.add_anchor("end");
+            g.ret();
+        });
+        constexpr uint64_t base = 0xD400;
+        Config cfg{};
+        Engine eng(cfg, code_reader(base, snip.bytes));
+        eng.seed_state().gpr[1] = eng.builder().k(0, 64);
+        eng.seed_state().gpr[6] = eng.builder().k(0x10000, 64);
+        eng.seed_state().gpr[7] = eng.builder().k(0x20000, 64);
+        eng.seed_state().flags[6] = eng.builder().k(0, 1);
+        uint64_t end = base + snip.anchors["end"];
+        auto results = eng.run(base, [&](const State& s) { return s.rip == end; });
+        CHECK(results.size() == 1, "REP MOVSB with RCX=0: clean exit");
+    }
+    // --- REP cap havocs instead of looping forever ---
+    {
+        auto snip = emit([](CodeGen& g) {
+            g.rep_movsb();
+            g.add_anchor("end");
+            g.ret();
+        });
+        constexpr uint64_t base = 0xD800;
+        Config cfg{}; cfg.max_rep_iterations = 4;
+        Engine eng(cfg, code_reader(base, snip.bytes));
+        eng.seed_state().gpr[1] = eng.builder().k(1000, 64);
+        eng.seed_state().gpr[6] = eng.builder().k(0x10000, 64);
+        eng.seed_state().gpr[7] = eng.builder().k(0x20000, 64);
+        eng.seed_state().flags[6] = eng.builder().k(0, 1);
+        uint64_t end = base + snip.anchors["end"];
+        auto results = eng.run(base, [&](const State& s) { return s.rip == end; });
+        CHECK(results.size() == 1, "REP cap: path survives the cap");
+        if (results.size() == 1) {
+            const Expr* rcx = results[0].gpr[1];
+            CHECK(is_const(rcx) && rcx->k == 0,
+                  "REP cap: RCX zeroed after havoc");
+        }
+    }
+
     // --- State merging at convergence ---
     auto build_diamond = [](){
         return emit([](CodeGen& g) {

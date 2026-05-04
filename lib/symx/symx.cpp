@@ -843,6 +843,61 @@ void Engine::havoc_state(State& s, const DecodedInstr& di) {
     }
 }
 
+void Engine::run_body(State& s, const ir::Lifted& expanded, const DecodedInstr& di) {
+    for (const auto& op : expanded.ops) {
+        apply_op(s, op, expanded, di);
+        if (s.dead) return;
+    }
+}
+
+void Engine::execute_lifted(State& s, const ir::Lifted& expanded, const DecodedInstr& di) {
+    if (expanded.rep == ir::RepMode::None) {
+        s.clear_temps();
+        run_body(s, expanded, di);
+        return;
+    }
+    Builder* b = &builder_;
+    // Symbolic RCX: havoc and bail. Forking on every possible iteration count
+    // is impractical; a summary is the best we can do without a real
+    // length-quantified store primitive.
+    if (!is_const(s.gpr[1])) {
+        diagnostics_.push_back("REP: symbolic RCX, havocing");
+        havoc_state(s, di);
+        s.gpr[1] = b->k(0, 64);
+        return;
+    }
+    uint32_t iters = 0;
+    while (s.gpr[1]->k != 0 && iters < cfg_.max_rep_iterations && !s.dead) {
+        s.clear_temps();
+        run_body(s, expanded, di);
+        if (s.dead) return;
+        s.gpr[1] = b->sub(s.gpr[1], b->k(1, 64));
+        if (!is_const(s.gpr[1])) {
+            // The body somehow turned RCX symbolic. Bail.
+            diagnostics_.push_back("REP: RCX went symbolic mid-loop, havocing");
+            havoc_state(s, di);
+            s.gpr[1] = b->k(0, 64);
+            return;
+        }
+        if (expanded.rep == ir::RepMode::RepZ) {
+            const Expr* zf = s.flags[ZF];
+            if (is_const(zf)) { if (zf->k == 0) return; }
+            else { diagnostics_.push_back("REPZ: symbolic ZF, stopping early"); return; }
+        }
+        if (expanded.rep == ir::RepMode::RepNZ) {
+            const Expr* zf = s.flags[ZF];
+            if (is_const(zf)) { if (zf->k != 0) return; }
+            else { diagnostics_.push_back("REPNZ: symbolic ZF, stopping early"); return; }
+        }
+        ++iters;
+    }
+    if (iters >= cfg_.max_rep_iterations && s.gpr[1]->k != 0) {
+        diagnostics_.push_back("REP: max_rep_iterations cap hit, havocing");
+        havoc_state(s, di);
+        s.gpr[1] = b->k(0, 64);
+    }
+}
+
 bool Engine::resolve_symbolic_target(State& s, const Expr* tgt, const char* what) {
     Builder* b = &builder_;
     if (auto v = solver_.get_value(s.pc, tgt)) {
@@ -1142,11 +1197,7 @@ std::vector<State> Engine::run(uint64_t entry, std::function<bool(const State&)>
 
             // Snapshot rip — only auto-advance if no branch op fired.
             uint64_t pre_rip = s.rip;
-            s.clear_temps();
-            for (const auto& op : expanded.ops) {
-                apply_op(s, op, expanded, di);
-                if (s.dead) break;
-            }
+            execute_lifted(s, expanded, di);
             if (!s.dead && s.rip == pre_rip) s.rip += expanded.length;
             ++steps;
         }
@@ -1183,11 +1234,7 @@ bool Engine::step(State& s) {
     auto expanded = ir::expand_flag_bundles(*lifted);
 
     uint64_t pre_rip = s.rip;
-    s.clear_temps();
-    for (const auto& op : expanded.ops) {
-        apply_op(s, op, expanded, di);
-        if (s.dead) break;
-    }
+    execute_lifted(s, expanded, di);
     if (!s.dead && s.rip == pre_rip) s.rip += expanded.length;
     return !s.dead;
 }
