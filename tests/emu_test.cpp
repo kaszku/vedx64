@@ -141,7 +141,8 @@ static void test_flags_overflow() {
     CpuState cpu;
     emu_init(cpu, mem, sizeof(mem));
     cpu.rip = 0x100;
-    mem[0x100] = 0x01; mem[0x101] = 0xD8;
+    // 48 01 D8: add rax, rbx (REX.W → 64-bit add).
+    mem[0x100] = 0x48; mem[0x101] = 0x01; mem[0x102] = 0xD8;
     cpu.gpr[0] = 0x7FFFFFFFFFFFFFFFULL; cpu.gpr[3] = 1;
     emu_step(cpu);
     CHECK(cpu.gpr[0] == 0x8000000000000000ULL, "add overflow result");
@@ -299,11 +300,11 @@ static void test_shld_shrd() {
     CpuState cpu;
     emu_init(cpu, mem, sizeof(mem));
     cpu.rip = 0x100;
-    // SHLD EAX, EBX, 4: 0F A4 D8 04
+    // SHLD EAX, EBX, 4: 0F A4 D8 04 (32-bit). Result = (EAX<<4)|(EBX>>28).
     mem[0x100] = 0x0F; mem[0x101] = 0xA4; mem[0x102] = 0xD8; mem[0x103] = 0x04;
     cpu.gpr[0] = 0x12345678; cpu.gpr[3] = 0xABCDEF00;
     emu_step(cpu);
-    CHECK(cpu.gpr[0] == 0x123456780ULL, "shld rax,rbx,4");
+    CHECK(cpu.gpr[0] == 0x2345678AULL, "shld eax,ebx,4 → 0x2345678A");
     // SHRD EAX, EBX, 4: 0F AC D8 04
     cpu.rip = 0x104;
     mem[0x104] = 0x0F; mem[0x105] = 0xAC; mem[0x106] = 0xD8; mem[0x107] = 0x04;
@@ -539,6 +540,108 @@ static void test_vex_basic() {
     CHECK(cpu.zmm[3][0] == 0.0 && cpu.zmm[3][1] == 0.0, "vxorps xmm3,xmm3,xmm3 zeroes");
 }
 
+static void test_bts_btr_btc() {
+    uint8_t mem[8192] = {};
+    CpuState cpu;
+
+    // BTS ECX, 33 → bit 33 mod 32 = 1 of ECX.
+    emu_init(cpu, mem, sizeof(mem));
+    cpu.gpr[1] = 0; cpu.rip = 0x100;
+    static const uint8_t c1[] = {0x0F, 0xBA, 0xE9, 33};
+    memcpy(mem + 0x100, c1, sizeof(c1));
+    emu_step(cpu);
+    CHECK(cpu.gpr[1] == 0x2, "BTS ECX,33 → ECX=0x2 (offset masked mod 32)");
+    CHECK(!(cpu.rflags & RFLAG_CF), "BTS ECX,33: previous bit was 0 → CF=0");
+
+    // BTS RCX, 65 → bit 65 mod 64 = 1 of RCX.
+    emu_init(cpu, mem, sizeof(mem));
+    cpu.gpr[1] = 0; cpu.rip = 0x100;
+    static const uint8_t c2[] = {0x48, 0x0F, 0xBA, 0xE9, 65};
+    memcpy(mem + 0x100, c2, sizeof(c2));
+    emu_step(cpu);
+    CHECK(cpu.gpr[1] == 0x2, "BTS RCX,65 → RCX=0x2 (offset masked mod 64)");
+
+    // BTS EAX, ECX with ECX=33 → bit 1 of EAX.
+    emu_init(cpu, mem, sizeof(mem));
+    cpu.gpr[0] = 0; cpu.gpr[1] = 33; cpu.rip = 0x100;
+    static const uint8_t c3[] = {0x0F, 0xAB, 0xC8};
+    memcpy(mem + 0x100, c3, sizeof(c3));
+    emu_step(cpu);
+    CHECK(cpu.gpr[0] == 0x2, "BTS EAX,ECX(33) → EAX=0x2 (mask mod 32)");
+
+    // BTR ECX,1 with bit 1 set → CF=1 and bit cleared.
+    emu_init(cpu, mem, sizeof(mem));
+    cpu.gpr[1] = 0x2; cpu.rip = 0x100;
+    static const uint8_t c4[] = {0x0F, 0xBA, 0xF1, 1};
+    memcpy(mem + 0x100, c4, sizeof(c4));
+    emu_step(cpu);
+    CHECK(cpu.rflags & RFLAG_CF, "BTR ECX,1: previous bit 1 → CF=1");
+    CHECK(cpu.gpr[1] == 0x0, "BTR ECX,1 → ECX=0");
+
+    // BTC ECX,2 toggles bit 2.
+    emu_init(cpu, mem, sizeof(mem));
+    cpu.gpr[1] = 0x4; cpu.rip = 0x100;
+    static const uint8_t c5[] = {0x0F, 0xBA, 0xF9, 2};
+    memcpy(mem + 0x100, c5, sizeof(c5));
+    emu_step(cpu);
+    CHECK(cpu.rflags & RFLAG_CF, "BTC ECX,2: previous bit 1 → CF=1");
+    CHECK(cpu.gpr[1] == 0x0, "BTC ECX,2 → ECX=0");
+
+    // BT ECX,1 (read-only): CF gets bit, dest unchanged.
+    emu_init(cpu, mem, sizeof(mem));
+    cpu.gpr[1] = 0x2; cpu.rip = 0x100;
+    static const uint8_t c6[] = {0x0F, 0xBA, 0xE1, 1};
+    memcpy(mem + 0x100, c6, sizeof(c6));
+    emu_step(cpu);
+    CHECK(cpu.rflags & RFLAG_CF, "BT ECX,1 → CF=1");
+    CHECK(cpu.gpr[1] == 0x2, "BT ECX,1: ECX unchanged");
+
+    // BTS dword [rdx], 33 → imm masked mod 32, sets bit 1 of dword at [rdx].
+    emu_init(cpu, mem, sizeof(mem));
+    cpu.gpr[2] = 0x500; cpu.rip = 0x100;
+    static const uint8_t c7[] = {0x0F, 0xBA, 0x2A, 33};
+    memcpy(mem + 0x100, c7, sizeof(c7));
+    emu_step(cpu);
+    uint32_t v32 = 0; memcpy(&v32, mem + 0x500, 4);
+    CHECK(v32 == 0x2, "BTS dword [rdx],33 → [rdx]=0x2 (imm mod 32)");
+
+    // BTS dword [rdx], ECX with ECX=64 → adjusts EA by 8 bytes (bit 64 of array → byte 8, bit 0).
+    emu_init(cpu, mem, sizeof(mem));
+    cpu.gpr[2] = 0x600; cpu.gpr[1] = 64; cpu.rip = 0x100;
+    static const uint8_t c8[] = {0x0F, 0xAB, 0x0A};
+    memcpy(mem + 0x100, c8, sizeof(c8));
+    emu_step(cpu);
+    CHECK(mem[0x608] == 0x01, "BTS dword [rdx],ECX(64): mem[+8]=0x01 (EA adjusted)");
+    CHECK(mem[0x600] == 0x00, "BTS dword [rdx],ECX(64): base dword unchanged");
+
+    // BT dword [rdx], ECX with ECX=64 reading [rdx+8]=0x01 → CF=1.
+    emu_init(cpu, mem, sizeof(mem));
+    cpu.gpr[2] = 0x700; cpu.gpr[1] = 64; cpu.rip = 0x100;
+    mem[0x708] = 0x01;
+    static const uint8_t c9[] = {0x0F, 0xA3, 0x0A};
+    memcpy(mem + 0x100, c9, sizeof(c9));
+    emu_step(cpu);
+    CHECK(cpu.rflags & RFLAG_CF, "BT dword [rdx],ECX(64): bit at [+8] is 1 → CF=1");
+
+    // BTS qword [rdx], RCX with RCX=130 (qword opsize=64): adjust by 16 bytes, bit 2.
+    emu_init(cpu, mem, sizeof(mem));
+    cpu.gpr[2] = 0x800; cpu.gpr[1] = 130; cpu.rip = 0x100;
+    static const uint8_t cA[] = {0x48, 0x0F, 0xAB, 0x0A};
+    memcpy(mem + 0x100, cA, sizeof(cA));
+    emu_step(cpu);
+    CHECK(mem[0x810] == 0x04, "BTS qword [rdx],RCX(130): mem[+16]=0x04 (bit 2)");
+
+    // BTS [rdx], reg with negative offset: bit -1 with dword opsize → adjust EA by -4, set bit 31 of [rdx-4].
+    emu_init(cpu, mem, sizeof(mem));
+    cpu.gpr[2] = 0x900; cpu.gpr[1] = (uint64_t)-1; cpu.rip = 0x100;
+    static const uint8_t cB[] = {0x0F, 0xAB, 0x0A};
+    memcpy(mem + 0x100, cB, sizeof(cB));
+    emu_step(cpu);
+    // bit -1 → byte at [rdx + (-1>>3)] = [rdx + (-1)/8 with floor] = [rdx-1], in-byte bit 7
+    // For dword opsize: floor(-1/32)=-1, EA adjust = -1 * 4 = -4, bit (-1 mod 32) = 31, that's mem[0x900-4+3]=mem[0x8FF] bit 7 = 0x80.
+    CHECK(mem[0x8FF] == 0x80, "BTS dword [rdx],ECX(-1): mem[-1]=0x80 (negative EA adj, bit 31)");
+}
+
 int main() {
     test_add();
     test_sub();
@@ -570,6 +673,7 @@ int main() {
     test_evex_addps_512();
     test_vpermq();
     test_vex_basic();
+    test_bts_btr_btc();
 
     printf("vedx64_emu: %d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;

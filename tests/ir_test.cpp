@@ -801,6 +801,207 @@ int main() {
         CHECK(l && ir::is_fully_lifted(*l), "BT rax, imm8 fully lifted");
     }
 
+    // BTS reg with imm/reg offset: lifter must mask offset by (opsize-1).
+    //   48 0F BA E9 41  →  bts rcx, 0x41  (offset masked to 1 mod 64)
+    //   48 0F AB C8     →  bts rax, rcx   (lifter ANDs RCX with 0x3F before SHR)
+    {
+        uint8_t bts_reg_imm[] = {0x48, 0x0F, 0xBA, 0xE9, 0x41};
+        auto l = ir::lift(bts_reg_imm, sizeof(bts_reg_imm));
+        CHECK(l && ir::is_fully_lifted(*l), "BTS rcx, 0x41 fully lifted");
+        // The lifter constant-folded the masked imm. It MUST NOT keep an
+        // SHL/SHR by a count of 0x41 (which would be implementation-defined
+        // for a 64-bit shift). Walk inputs of every SHR/SHL and confirm any
+        // constant input is < 64.
+        bool count_in_range = true;
+        for (const auto& op : l->ops) {
+            if (op.opcode != ir::Opcode::SHR && op.opcode != ir::Opcode::SHL) continue;
+            const auto& cnt = op.inputs[op.num_inputs - 1];
+            if (cnt.space == ir::Space::Const && cnt.value >= 64) count_in_range = false;
+        }
+        CHECK(count_in_range, "BTS imm offset masked into [0,63]");
+    }
+    {
+        uint8_t bts_reg_reg[] = {0x48, 0x0F, 0xAB, 0xC8};
+        auto l = ir::lift(bts_reg_reg, sizeof(bts_reg_reg));
+        CHECK(l && ir::is_fully_lifted(*l), "BTS rax, rcx fully lifted");
+        // For register source we expect an explicit mask op: AND ?, RCX, 0x3F.
+        bool found_mask = false;
+        for (const auto& op : l->ops) {
+            if (op.opcode != ir::Opcode::AND) continue;
+            const auto& cnt = op.inputs[op.num_inputs - 1];
+            if (cnt.space == ir::Space::Const && cnt.value == 0x3F) found_mask = true;
+        }
+        CHECK(found_mask, "BTS reg-source: lifter ANDs offset with 0x3F");
+    }
+
+    // BTS mem,reg: lifter must adjust EA by (offset SAR 3) to walk the
+    // bit array properly (not just take offset MOD opsize within the chunk).
+    //   48 0F AB 0B  →  bts qword [rbx], rcx
+    {
+        uint8_t bts_mem_reg[] = {0x48, 0x0F, 0xAB, 0x0B};
+        auto l = ir::lift(bts_mem_reg, sizeof(bts_mem_reg));
+        CHECK(l && ir::is_fully_lifted(*l), "BTS [rbx], rcx fully lifted");
+        bool found_sar = false;
+        for (const auto& op : l->ops)
+            if (op.opcode == ir::Opcode::SAR) found_sar = true;
+        CHECK(found_sar, "BTS mem,reg: lifter emits SAR for byte-level EA adjust");
+    }
+
+    // SAR cl, 0x80: count masked to 5 bits → 0 → no-op semantically.
+    // The lifter must fold the immediate to 0 (or an AND by 0x1F before SHR
+    // for register count) so symbolic execution doesn't get a wide-shift.
+    //   D2 F9              →  sar cl, cl       (count = CL & 0x1F)
+    //   C0 F9 80           →  sar cl, 0x80     (count = 0x80 & 0x1F = 0)
+    {
+        uint8_t sar_imm[] = {0xC0, 0xF9, 0x80};
+        auto l = ir::lift(sar_imm, sizeof(sar_imm));
+        CHECK(l && ir::is_fully_lifted(*l), "SAR cl, 0x80 fully lifted");
+        bool wide_shift = false;
+        for (const auto& op : l->ops) {
+            if (op.opcode != ir::Opcode::SAR) continue;
+            const auto& cnt = op.inputs[op.num_inputs - 1];
+            if (cnt.space == ir::Space::Const && cnt.value > 31) wide_shift = true;
+        }
+        CHECK(!wide_shift, "SAR cl, 0x80: imm masked into [0,31] (5-bit mask)");
+    }
+    {
+        uint8_t sar_cl[] = {0xD2, 0xF9};
+        auto l = ir::lift(sar_cl, sizeof(sar_cl));
+        CHECK(l && ir::is_fully_lifted(*l), "SAR cl, cl fully lifted");
+        bool found_mask = false;
+        for (const auto& op : l->ops) {
+            if (op.opcode != ir::Opcode::AND) continue;
+            const auto& cnt = op.inputs[op.num_inputs - 1];
+            if (cnt.space == ir::Space::Const && cnt.value == 0x1F) found_mask = true;
+        }
+        CHECK(found_mask, "SAR cl, cl: lifter ANDs CL with 0x1F (8-bit op)");
+    }
+    // SAR rax, cl: 64-bit operand uses 6-bit mask.
+    {
+        uint8_t sar_rax_cl[] = {0x48, 0xD3, 0xF8};
+        auto l = ir::lift(sar_rax_cl, sizeof(sar_rax_cl));
+        CHECK(l && ir::is_fully_lifted(*l), "SAR rax, cl fully lifted");
+        bool found_mask = false;
+        for (const auto& op : l->ops) {
+            if (op.opcode != ir::Opcode::AND) continue;
+            const auto& cnt = op.inputs[op.num_inputs - 1];
+            if (cnt.space == ir::Space::Const && cnt.value == 0x3F) found_mask = true;
+        }
+        CHECK(found_mask, "SAR rax, cl: lifter ANDs CL with 0x3F (64-bit op)");
+    }
+
+    // BSR — must produce dst = (bits - 1) - CLZ(src), not bare CLZ.
+    {
+        uint8_t bsr_rax_rcx[] = {0x48, 0x0F, 0xBD, 0xC1};
+        auto l = ir::lift(bsr_rax_rcx, sizeof(bsr_rax_rcx));
+        CHECK(l && ir::is_fully_lifted(*l), "BSR rax, rcx fully lifted");
+        CHECK(count_op(*l, ir::Opcode::CLZ) == 1, "BSR emits exactly one CLZ");
+        bool found_inv = false;
+        for (const auto& op : l->ops) {
+            if (op.opcode != ir::Opcode::SUB) continue;
+            const auto& a = op.inputs[0];
+            if (a.space == ir::Space::Const && a.value == 63) found_inv = true;
+        }
+        CHECK(found_inv, "BSR rax: lifter emits SUB 63 - CLZ");
+    }
+    // BSF — single CTZ, no inversion.
+    {
+        uint8_t bsf_rax_rcx[] = {0x48, 0x0F, 0xBC, 0xC1};
+        auto l = ir::lift(bsf_rax_rcx, sizeof(bsf_rax_rcx));
+        CHECK(l && ir::is_fully_lifted(*l), "BSF rax, rcx fully lifted");
+        CHECK(count_op(*l, ir::Opcode::CTZ) == 1, "BSF emits exactly one CTZ");
+    }
+
+    // SHLD/SHRD count masking.
+    //   0F A4 C8 21       →  shld eax, ecx, 0x21  (32-bit; 0x21 & 0x1F = 1)
+    //   48 0F A4 C8 41    →  shld rax, rcx, 0x41  (64-bit; 0x41 & 0x3F = 1)
+    //   0F A5 C8          →  shld eax, ecx, cl    (lifter ANDs CL with 0x1F)
+    auto find_shift_const_count = [](const ir::Lifted& L, ir::Opcode opc, int64_t bound) {
+        for (const auto& op : L.ops) {
+            if (op.opcode != opc) continue;
+            const auto& cnt = op.inputs[op.num_inputs - 1];
+            if (cnt.space == ir::Space::Const && cnt.value >= bound) return true;
+        }
+        return false;
+    };
+    {
+        uint8_t shld32_imm[] = {0x0F, 0xA4, 0xC8, 0x21};
+        auto l = ir::lift(shld32_imm, sizeof(shld32_imm));
+        CHECK(l && ir::is_fully_lifted(*l), "SHLD eax,ecx,0x21 fully lifted");
+        CHECK(!find_shift_const_count(*l, ir::Opcode::SHL, 32),
+              "SHLD eax: count masked into [0,31]");
+    }
+    {
+        uint8_t shld64_imm[] = {0x48, 0x0F, 0xA4, 0xC8, 0x41};
+        auto l = ir::lift(shld64_imm, sizeof(shld64_imm));
+        CHECK(l && ir::is_fully_lifted(*l), "SHLD rax,rcx,0x41 fully lifted");
+        CHECK(!find_shift_const_count(*l, ir::Opcode::SHL, 64),
+              "SHLD rax: count masked into [0,63]");
+    }
+    {
+        uint8_t shld_cl[] = {0x0F, 0xA5, 0xC8};
+        auto l = ir::lift(shld_cl, sizeof(shld_cl));
+        CHECK(l && ir::is_fully_lifted(*l), "SHLD eax,ecx,cl fully lifted");
+        bool found = false;
+        for (const auto& op : l->ops) {
+            if (op.opcode != ir::Opcode::AND) continue;
+            const auto& cnt = op.inputs[op.num_inputs - 1];
+            if (cnt.space == ir::Space::Const && cnt.value == 0x1F) found = true;
+        }
+        CHECK(found, "SHLD CL form: lifter ANDs CL with 0x1F");
+    }
+
+    // RCL/RCR count masking.
+    //   C0 D0 21    →  rcl al, 0x21  (count 0x21 & 0x1F = 1)
+    //   D2 D0       →  rcl al, cl    (lifter ANDs CL with 0x1F)
+    {
+        uint8_t rcl_imm[] = {0xC0, 0xD0, 0x21};
+        auto l = ir::lift(rcl_imm, sizeof(rcl_imm));
+        CHECK(l && ir::is_fully_lifted(*l), "RCL al,0x21 fully lifted");
+        CHECK(!find_shift_const_count(*l, ir::Opcode::ROL, 32),
+              "RCL imm: count masked into [0,31]");
+    }
+    {
+        uint8_t rcl_cl[] = {0xD2, 0xD0};
+        auto l = ir::lift(rcl_cl, sizeof(rcl_cl));
+        CHECK(l && ir::is_fully_lifted(*l), "RCL al,cl fully lifted");
+        bool found = false;
+        for (const auto& op : l->ops) {
+            if (op.opcode != ir::Opcode::AND) continue;
+            const auto& cnt = op.inputs[op.num_inputs - 1];
+            if (cnt.space == ir::Space::Const && cnt.value == 0x1F) found = true;
+        }
+        CHECK(found, "RCL CL form: lifter ANDs CL with 0x1F");
+    }
+
+    // BMI2 SHLX/SHRX/SARX (VEX-encoded; mask same as legacy shifts).
+    //   C4 E2 70 F7 C1   →  shlx eax, ecx, ebx (32-bit; 5-bit mask)
+    //   C4 E2 F0 F7 C1   →  shlx rax, rcx, rbx (64-bit; 6-bit mask)
+    {
+        uint8_t shlx32[] = {0xC4, 0xE2, 0x71, 0xF7, 0xC1};
+        auto l = ir::lift(shlx32, sizeof(shlx32));
+        CHECK(l && ir::is_fully_lifted(*l), "SHLX eax,ecx,ebx fully lifted");
+        bool found = false;
+        for (const auto& op : l->ops) {
+            if (op.opcode != ir::Opcode::AND) continue;
+            const auto& cnt = op.inputs[op.num_inputs - 1];
+            if (cnt.space == ir::Space::Const && cnt.value == 0x1F) found = true;
+        }
+        CHECK(found, "SHLX 32-bit: lifter ANDs ctl with 0x1F");
+    }
+    {
+        uint8_t shlx64[] = {0xC4, 0xE2, 0xF1, 0xF7, 0xC1};
+        auto l = ir::lift(shlx64, sizeof(shlx64));
+        CHECK(l && ir::is_fully_lifted(*l), "SHLX rax,rcx,rbx fully lifted");
+        bool found = false;
+        for (const auto& op : l->ops) {
+            if (op.opcode != ir::Opcode::AND) continue;
+            const auto& cnt = op.inputs[op.num_inputs - 1];
+            if (cnt.space == ir::Space::Const && cnt.value == 0x3F) found = true;
+        }
+        CHECK(found, "SHLX 64-bit: lifter ANDs ctl with 0x3F");
+    }
+
     // SHLD imm form: 48 0F A4 C8 04  →  shld rax, rcx, 4
     {
         uint8_t shld_imm[] = {0x48, 0x0F, 0xA4, 0xC8, 0x04};

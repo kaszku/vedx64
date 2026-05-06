@@ -528,15 +528,27 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         bool has_imm = false;
         for (uint8_t i = 0; i < di.desc->num_operands; ++i)
             if (di.desc->operands[i].addr == AddrMode::Immediate) has_imm = true;
-        if (has_imm) count = VarNode::constant(di.immediate, 1);
+        // Per Intel SDM: shift/rotate count is masked to 5 bits for byte/word/dword
+        // operands and 6 bits for qword. Apply that mask before passing it to
+        // the IR shift op so semantic-execution and symbolic clients see a count
+        // in [0, opsize_bits-1] regardless of how the source was encoded.
+        uint8_t cmask = (sz == 8) ? 0x3F : 0x1F;
+        if (has_imm) count = VarNode::constant((uint64_t)di.immediate & cmask, 1);
         else if (di.desc->opcode == 0xD0 || di.desc->opcode == 0xD1) count = VarNode::constant(1, 1);
-        else count = VarNode::gpr(1, 1); // CL
+        else {
+            VarNode raw_cl = VarNode::gpr(1, 1); // CL
+            VarNode masked = VarNode::temp(15, 1);
+            l.ops.push_back(make_op3(Opcode::AND, masked, raw_cl, VarNode::constant(cmask, 1)));
+            count = masked;
+        }
         Opcode opc;
-        if (m == Mnemonic::SHL || m == Mnemonic::SAL) opc = Opcode::SHL;
-        else if (m == Mnemonic::SHR) opc = Opcode::SHR;
-        else if (m == Mnemonic::SAR) opc = Opcode::SAR;
-        else if (m == Mnemonic::ROL) opc = Opcode::ROL;
-        else opc = Opcode::ROR;
+        switch (m) {
+        case Mnemonic::SHL: case Mnemonic::SAL: opc = Opcode::SHL; break;
+        case Mnemonic::SHR: opc = Opcode::SHR; break;
+        case Mnemonic::SAR: opc = Opcode::SAR; break;
+        case Mnemonic::ROL: opc = Opcode::ROL; break;
+        default:            opc = Opcode::ROR; break;
+        }
         if (mod_ == 3) {
             VarNode dst = reg_from_modrm_rm(di, sz);
             l.ops.push_back(make_op3(opc, dst, dst, count));
@@ -1123,32 +1135,71 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
             bool has_imm = false;
             for (uint8_t i = 0; i < di.desc->num_operands; ++i)
                 if (di.desc->operands[i].addr == AddrMode::Immediate) has_imm = true;
-            VarNode bit = has_imm ? VarNode::constant(di.immediate, sz) : reg_from_modrm_reg(di, sz);
+            bool is_mem = (mod_ != 3);
             VarNode base;
             VarNode ea;
-            bool is_mem = (mod_ != 3);
-            if (is_mem) {
+            VarNode bit;       // bit-within-base (0..sz*8-1)
+            uint64_t bits = (uint64_t)sz * 8;
+
+            if (is_mem && !has_imm) {
+                // Memory destination + register bit offset: per Intel SDM the
+                // CPU re-bases the EA by floor(bitoffset / opsize) chunks and
+                // takes the bit inside the chunk as (bitoffset MOD opsize).
+                // Implement at byte granularity to keep the math simple and
+                // to handle negative offsets correctly: byte_addr = EA + (off
+                // arithmetic-shift-right 3); bit_in_byte = off & 7.
+                VarNode raw_off = reg_from_modrm_reg(di, sz);
+                VarNode byte_off = VarNode::temp(11, sz);
+                l.ops.push_back(make_op3(Opcode::SAR, byte_off, raw_off, VarNode::constant(3, sz)));
+                ea = compute_ea(l, di);
+                VarNode adj = VarNode::temp(12, sz);
+                l.ops.push_back(make_op3(Opcode::ADD, adj, ea, byte_off));
+                ea = adj;
+                base = VarNode::temp(13, 1);          // 1-byte chunk
+                l.ops.push_back(make_op3(Opcode::LOAD, base, ea, VarNode::ram(1)));
+                bit = VarNode::temp(14, 1);
+                l.ops.push_back(make_op3(Opcode::AND, bit, raw_off, VarNode::constant(7, sz)));
+                bits = 8;                              // operate at byte granularity
+            } else if (is_mem) {
+                // Memory + imm8: imm is masked mod opsize.
                 ea = compute_ea(l, di);
                 base = VarNode::temp(11, sz);
                 l.ops.push_back(make_op3(Opcode::LOAD, base, ea, VarNode::ram(sz)));
+                bit = VarNode::constant((uint64_t)di.immediate & (bits - 1), sz);
             } else {
+                // Register destination — bit offset masked mod opsize.
                 base = reg_from_modrm_rm(di, sz);
+                if (has_imm) {
+                    bit = VarNode::constant((uint64_t)di.immediate & (bits - 1), sz);
+                } else {
+                    VarNode raw = reg_from_modrm_reg(di, sz);
+                    bit = VarNode::temp(11, sz);
+                    l.ops.push_back(make_op3(Opcode::AND, bit, raw, VarNode::constant(bits - 1, sz)));
+                }
             }
+
             // CF = (base >> bit) & 1
-            VarNode tmp = VarNode::temp(12, sz);
+            VarNode tmp = VarNode::temp(15, base.size);
             l.ops.push_back(make_op3(Opcode::SHR, tmp, base, bit));
-            l.ops.push_back(make_op3(Opcode::AND, tmp, tmp, VarNode::constant(1, sz)));
+            l.ops.push_back(make_op3(Opcode::AND, tmp, tmp, VarNode::constant(1, base.size)));
             l.ops.push_back(make_op2(Opcode::SET_CF, VarNode::flags(), tmp));
             if (m != Mnemonic::BT) {
-                VarNode mask = VarNode::temp(13, sz);
-                l.ops.push_back(make_op3(Opcode::SHL, mask, VarNode::constant(1, sz), bit));
-                if (m == Mnemonic::BTS) l.ops.push_back(make_op3(Opcode::OR,  base, base, mask));
-                else if (m == Mnemonic::BTC) l.ops.push_back(make_op3(Opcode::XOR, base, base, mask));
-                else { // BTR
+                VarNode mask = VarNode::temp(16, base.size);
+                l.ops.push_back(make_op3(Opcode::SHL, mask, VarNode::constant(1, base.size), bit));
+                switch (m) {
+                case Mnemonic::BTS:
+                    l.ops.push_back(make_op3(Opcode::OR,  base, base, mask));
+                    break;
+                case Mnemonic::BTC:
+                    l.ops.push_back(make_op3(Opcode::XOR, base, base, mask));
+                    break;
+                case Mnemonic::BTR:
                     l.ops.push_back(make_op2(Opcode::NOT, mask, mask));
                     l.ops.push_back(make_op3(Opcode::AND, base, base, mask));
+                    break;
+                default: break;
                 }
-                if (is_mem) l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(sz), ea, base));
+                if (is_mem) l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(base.size), ea, base));
             }
             return true;
         }
@@ -1206,8 +1257,18 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
             bool has_imm = false;
             for (uint8_t i = 0; i < di.desc->num_operands; ++i)
                 if (di.desc->operands[i].addr == AddrMode::Immediate) has_imm = true;
-            VarNode count = has_imm ? VarNode::constant(di.immediate & 0x3F, 1)
-                                    : VarNode::gpr(1, 1);
+            // Per Intel SDM: SHLD/SHRD count is masked to 5 bits for word/dword
+            // operands and 6 bits for qword. (16-bit operand with count > 16 is
+            // undefined; we just mask it like 32-bit, matching real silicon.)
+            uint8_t cmask = (sz == 8) ? 0x3F : 0x1F;
+            VarNode count;
+            if (has_imm) {
+                count = VarNode::constant((uint64_t)di.immediate & cmask, 1);
+            } else {
+                VarNode raw_cl = VarNode::gpr(1, 1);
+                count = VarNode::temp(19, 1);
+                l.ops.push_back(make_op3(Opcode::AND, count, raw_cl, VarNode::constant(cmask, 1)));
+            }
             VarNode bits = VarNode::constant(sz * 8, 1);
             VarNode rev_count = VarNode::temp(20, 1);
             l.ops.push_back(make_op3(Opcode::SUB, rev_count, bits, count));
@@ -1254,8 +1315,17 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
             VarNode ea = compute_ea(l, di);
             l.ops.push_back(make_op3(Opcode::LOAD, src, ea, VarNode::ram(sz)));
         }
-        // BSF = count trailing zeros, BSR = bit_width-1 - count leading zeros
-        l.ops.push_back(make_op2(m == Mnemonic::BSF ? Opcode::CTZ : Opcode::CLZ, dst, src));
+        // BSF: dst = CTZ(src) (index of lowest set bit when src != 0)
+        // BSR: dst = (opsize_bits - 1) - CLZ(src) (index of highest set bit)
+        // Both leave dst undefined when src == 0; we still emit the result so
+        // analyzers see a definite write. ZF = (src == 0).
+        if (m == Mnemonic::BSF) {
+            l.ops.push_back(make_op2(Opcode::CTZ, dst, src));
+        } else {
+            VarNode lz = VarNode::temp(12, sz);
+            l.ops.push_back(make_op2(Opcode::CLZ, lz, src));
+            l.ops.push_back(make_op3(Opcode::SUB, dst, VarNode::constant((uint64_t)sz * 8 - 1, sz), lz));
+        }
         l.ops.push_back(make_op3(Opcode::AND_FLAGS, VarNode::flags(), src, src)); // ZF set if src==0
         return true;
     }
@@ -1337,13 +1407,33 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
             VarNode ea = compute_ea(l, di);
             l.ops.push_back(make_op3(Opcode::LOAD, src, ea, VarNode::ram(sz)));
         }
-        VarNode ctl = VarNode::gpr(di.has_vex ? di.vex_vvvv : 0, sz);
-        if (m == Mnemonic::SARX) l.ops.push_back(make_op3(Opcode::SAR, dst, src, ctl));
-        else if (m == Mnemonic::SHLX) l.ops.push_back(make_op3(Opcode::SHL, dst, src, ctl));
-        else if (m == Mnemonic::SHRX) l.ops.push_back(make_op3(Opcode::SHR, dst, src, ctl));
-        else if (m == Mnemonic::RORX) l.ops.push_back(make_op3(Opcode::ROR, dst, src, VarNode::constant(di.immediate, 1)));
-        else if (m == Mnemonic::MULX) l.ops.push_back(make_op3(Opcode::MUL, dst, src, VarNode::gpr(2, sz)));
-        else l.ops.push_back(make_op2(Opcode::COPY, dst, src)); // BZHI/PDEP/PEXT: placeholder
+        VarNode ctl_raw = VarNode::gpr(di.has_vex ? di.vex_vvvv : 0, sz);
+        // BMI2 SHLX/SHRX/SARX mask the count to 5 bits (32-bit dst) / 6 bits
+        // (64-bit dst), same as the legacy shifts. RORX takes its rotate count
+        // from imm8 and Intel only requires the low log2(opsize) bits.
+        VarNode ctl = ctl_raw;
+        if (m == Mnemonic::SARX || m == Mnemonic::SHLX || m == Mnemonic::SHRX) {
+            uint8_t cmask = (sz == 8) ? 0x3F : 0x1F;
+            ctl = VarNode::temp(13, sz);
+            l.ops.push_back(make_op3(Opcode::AND, ctl, ctl_raw, VarNode::constant(cmask, sz)));
+        }
+        switch (m) {
+        case Mnemonic::SARX: l.ops.push_back(make_op3(Opcode::SAR, dst, src, ctl)); break;
+        case Mnemonic::SHLX: l.ops.push_back(make_op3(Opcode::SHL, dst, src, ctl)); break;
+        case Mnemonic::SHRX: l.ops.push_back(make_op3(Opcode::SHR, dst, src, ctl)); break;
+        case Mnemonic::RORX: {
+            uint8_t cmask = (sz == 8) ? 0x3F : 0x1F;
+            l.ops.push_back(make_op3(Opcode::ROR, dst, src, VarNode::constant((uint64_t)di.immediate & cmask, 1)));
+            break;
+        }
+        case Mnemonic::MULX:
+            l.ops.push_back(make_op3(Opcode::MUL, dst, src, VarNode::gpr(2, sz)));
+            break;
+        default:
+            // BZHI / PDEP / PEXT — placeholder until we lower them.
+            l.ops.push_back(make_op2(Opcode::COPY, dst, src));
+            break;
+        }
         return true;
     }
 
@@ -1397,12 +1487,22 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
             VarNode ea = compute_ea(l, di);
             l.ops.push_back(make_op3(Opcode::LOAD, dst, ea, VarNode::ram(sz)));
         }
-        // Simplified: just rotate (ignoring carry bit integration)
+        // Simplified: just rotate (ignoring carry bit integration).
+        // Per Intel SDM the count is masked to 5 bits (byte/word/dword) or
+        // 6 bits (qword) before any further reduction; apply that mask so
+        // symbolic clients can't accidentally observe an oversized rotate.
         bool has_imm = false;
         for (uint8_t i = 0; i < di.desc->num_operands; ++i)
             if (di.desc->operands[i].addr == AddrMode::Immediate) has_imm = true;
-        VarNode count = has_imm ? VarNode::constant(di.immediate, 1) :
-            (di.desc->opcode == 0xD0 || di.desc->opcode == 0xD1) ? VarNode::constant(1, 1) : VarNode::gpr(1, 1);
+        uint8_t cmask = (sz == 8) ? 0x3F : 0x1F;
+        VarNode count;
+        if (has_imm) count = VarNode::constant((uint64_t)di.immediate & cmask, 1);
+        else if (di.desc->opcode == 0xD0 || di.desc->opcode == 0xD1) count = VarNode::constant(1, 1);
+        else {
+            VarNode raw_cl = VarNode::gpr(1, 1);
+            count = VarNode::temp(15, 1);
+            l.ops.push_back(make_op3(Opcode::AND, count, raw_cl, VarNode::constant(cmask, 1)));
+        }
         Opcode opc = (m == Mnemonic::RCL) ? Opcode::ROL : Opcode::ROR;
         l.ops.push_back(make_op3(opc, dst, dst, count));
         if (mod_ != 3) {

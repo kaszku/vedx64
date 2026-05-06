@@ -1108,8 +1108,12 @@ void Engine::apply_op(State& s, const ir::Op& op, const ir::Lifted& l, const Dec
         break;
 
     case OC::POPCNT: case OC::CTZ: case OC::CLZ:
-        // Approximate: result is symbolic of output width.
-        s.temps[op.output.offset] = b->sym(op.output.size * 8);
+        // Approximate: result is fresh symbolic of output width. Route
+        // through write_var so the destination space (GPR / temp / mem)
+        // actually receives the update — the previous version always
+        // wrote to s.temps regardless of output.space, which silently
+        // dropped writes for register destinations like BSR EAX, ECX.
+        write_var(s, op.output, b->sym(op.output.size * 8));
         break;
 
     case OC::RDTSC: case OC::SYSCALL: case OC::UD2:

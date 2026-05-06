@@ -114,10 +114,13 @@ static int resolve_opsize(const DecodedInstr& di, const OperandDesc& op) {
             if (di.legacy_prefix[i] == 0x66) return 16;
         return 32;
     case OpSize::OpSzQ:
+        // Iv-with-REX.W promotion: rex_w → 64, 0x66 → 16, otherwise 32.
+        // (Default-64 instructions like PUSH/POP/CALL/JMP use OpSize::OpSz,
+        // not OpSzQ, so we don't need the is_default64 branch here.)
         if (di.rex & 0x08) return 64;
         for (int i = 0; i < di.num_prefixes; ++i)
             if (di.legacy_prefix[i] == 0x66) return 16;
-        return 64;
+        return 32;
     default: return 64;
     }
 }
@@ -311,6 +314,58 @@ static bool has_prefix(const DecodedInstr& di, uint8_t p) {
 }
 
 using EmuHandler = StepResult(*)(CpuState&, const DecodedInstr&, int);
+
+
+static inline bool bt_dst_is_mem(const DecodedInstr& di) {
+    const OperandDesc& op = di.desc->operands[0];
+    if (op.addr == AddrMode::ModRM_RM || op.addr == AddrMode::MemOnly)
+        return ((di.modrm >> 6) & 3) != 3;
+    return false;
+}
+static inline bool bt_src_is_reg(const DecodedInstr& di) {
+    return di.desc->operands[1].addr == AddrMode::ModRM_Reg;
+}
+// Compute the addressed byte and the bit within it. For register sources to a
+// memory destination, this honours the signed bit-array addressing (the byte
+// referenced is EA + (BitOffset SAR 3)). For memory + imm and register
+// destinations the in-byte view is just an alternative slicing of the same
+// bit, so callers can use a unified set/test/clear path.
+static void bt_locate(const CpuState& cpu, const DecodedInstr& di, int bits,
+                      uint64_t& byte_addr, int& bit_in_byte, uint64_t& dst_val_out, bool& dst_is_mem)
+{
+    dst_is_mem = bt_dst_is_mem(di);
+    if (dst_is_mem && bt_src_is_reg(di)) {
+        int sbits = resolve_opsize(di, di.desc->operands[1]);
+        int64_t bitoff = (int64_t)read_operand(cpu, di, 1, sbits);
+        if (sbits < 64) {
+            uint64_t signbit = 1ULL << (sbits - 1);
+            uint64_t m = (sbits == 64) ? ~0ULL : ((1ULL << sbits) - 1);
+            int64_t v = (int64_t)((uint64_t)bitoff & m);
+            if ((uint64_t)v & signbit) v |= ~m;
+            bitoff = v;
+        }
+        uint64_t base_ea = compute_ea(cpu, di);
+        int64_t byte_off = bitoff >> 3;          // arithmetic shift, signed
+        byte_addr = base_ea + (uint64_t)byte_off;
+        bit_in_byte = (int)(bitoff & 7);
+        dst_val_out = mem_read(cpu, byte_addr, 1);
+    } else if (dst_is_mem) {
+        // Memory + imm8: imm is taken modulo opsize-bits per Intel.
+        int sbits = resolve_opsize(di, di.desc->operands[1]);
+        uint64_t bitoff = read_operand(cpu, di, 1, sbits) & (uint64_t)(bits - 1);
+        uint64_t base_ea = compute_ea(cpu, di);
+        byte_addr = base_ea + (bitoff >> 3);
+        bit_in_byte = (int)(bitoff & 7);
+        dst_val_out = mem_read(cpu, byte_addr, 1);
+    } else {
+        // Register destination: bit offset is masked by (bits - 1).
+        int sbits = resolve_opsize(di, di.desc->operands[1]);
+        uint64_t bitoff = read_operand(cpu, di, 1, sbits) & (uint64_t)(bits - 1);
+        byte_addr = 0;
+        bit_in_byte = (int)bitoff;
+        dst_val_out = read_operand(cpu, di, 0, bits);
+    }
+}
 
 static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bits) {
     uint16_t opcode = di.desc->opcode;
@@ -1274,34 +1329,37 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         break;
     }
     case Mnemonic::BT: {
-        uint64_t val = read_operand(cpu, di, 0, bits);
-        uint64_t bit = read_operand(cpu, di, 1, resolve_opsize(di, di.desc->operands[1])) % bits;
+        uint64_t byte_addr; int bit_in_byte; uint64_t val; bool dst_mem;
+        bt_locate(cpu, di, bits, byte_addr, bit_in_byte, val, dst_mem);
         cpu.rflags &= ~RFLAG_CF;
-        if (val & (1ULL << bit)) cpu.rflags |= RFLAG_CF;
+        if (val & (1ULL << bit_in_byte)) cpu.rflags |= RFLAG_CF;
         break;
     }
     case Mnemonic::BTS: {
-        uint64_t val = read_operand(cpu, di, 0, bits);
-        uint64_t bit = read_operand(cpu, di, 1, resolve_opsize(di, di.desc->operands[1])) % bits;
+        uint64_t byte_addr; int bit_in_byte; uint64_t val; bool dst_mem;
+        bt_locate(cpu, di, bits, byte_addr, bit_in_byte, val, dst_mem);
         cpu.rflags &= ~RFLAG_CF;
-        if (val & (1ULL << bit)) cpu.rflags |= RFLAG_CF;
-        write_operand(cpu, di, 0, val | (1ULL << bit), bits);
+        if (val & (1ULL << bit_in_byte)) cpu.rflags |= RFLAG_CF;
+        if (dst_mem) mem_write(cpu, byte_addr, val | (1ULL << bit_in_byte), 1);
+        else write_operand(cpu, di, 0, val | (1ULL << bit_in_byte), bits);
         break;
     }
     case Mnemonic::BTR: {
-        uint64_t val = read_operand(cpu, di, 0, bits);
-        uint64_t bit = read_operand(cpu, di, 1, resolve_opsize(di, di.desc->operands[1])) % bits;
+        uint64_t byte_addr; int bit_in_byte; uint64_t val; bool dst_mem;
+        bt_locate(cpu, di, bits, byte_addr, bit_in_byte, val, dst_mem);
         cpu.rflags &= ~RFLAG_CF;
-        if (val & (1ULL << bit)) cpu.rflags |= RFLAG_CF;
-        write_operand(cpu, di, 0, val & ~(1ULL << bit), bits);
+        if (val & (1ULL << bit_in_byte)) cpu.rflags |= RFLAG_CF;
+        if (dst_mem) mem_write(cpu, byte_addr, val & ~(1ULL << bit_in_byte), 1);
+        else write_operand(cpu, di, 0, val & ~(1ULL << bit_in_byte), bits);
         break;
     }
     case Mnemonic::BTC: {
-        uint64_t val = read_operand(cpu, di, 0, bits);
-        uint64_t bit = read_operand(cpu, di, 1, resolve_opsize(di, di.desc->operands[1])) % bits;
+        uint64_t byte_addr; int bit_in_byte; uint64_t val; bool dst_mem;
+        bt_locate(cpu, di, bits, byte_addr, bit_in_byte, val, dst_mem);
         cpu.rflags &= ~RFLAG_CF;
-        if (val & (1ULL << bit)) cpu.rflags |= RFLAG_CF;
-        write_operand(cpu, di, 0, val ^ (1ULL << bit), bits);
+        if (val & (1ULL << bit_in_byte)) cpu.rflags |= RFLAG_CF;
+        if (dst_mem) mem_write(cpu, byte_addr, val ^ (1ULL << bit_in_byte), 1);
+        else write_operand(cpu, di, 0, val ^ (1ULL << bit_in_byte), bits);
         break;
     }
     case Mnemonic::BSF: {
