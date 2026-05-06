@@ -522,6 +522,114 @@ void test_disassemble() {
 }
 #endif // VEDX64_STRINGS
 
+#ifdef VEDX64_STRINGS
+void test_disasm_byte_register_naming() {
+    char buf[256];
+    auto check_disasm = [&](const uint8_t* bytes, size_t n, const char* expect, const char* msg) {
+        buf[0]=0;
+        disassemble(bytes, n, buf, sizeof(buf), 0);
+        TEST_ASSERT(strstr(buf, expect) != nullptr, msg);
+    };
+    #define CK(expect, msg, ...) do { static const uint8_t _b[] = {__VA_ARGS__}; check_disasm(_b, sizeof(_b), expect, msg); } while (0)
+
+    // ModRM r/m: D2 /N (reg=N, rm=4..7) — group-2 shifts on r/m8, count CL
+    CK("rol ah, cl",  "d2 c4: rol ah, cl (no REX)", 0xD2, 0xC4);
+    CK("ror ch, cl",  "d2 cd: ror ch, cl (no REX)", 0xD2, 0xCD);
+    CK("rcl ch, cl",  "d2 d5: rcl ch, cl (no REX)", 0xD2, 0xD5);
+    CK("rcr dh, cl",  "d2 de: rcr dh, cl (no REX)", 0xD2, 0xDE);
+    CK("shl bh, cl",  "d2 e7: shl bh, cl (no REX)", 0xD2, 0xE7);
+    CK("shr ah, cl",  "d2 ec: shr ah, cl (no REX)", 0xD2, 0xEC);
+    CK("sal ch, cl",  "d2 f5: sal ch, cl (no REX)", 0xD2, 0xF5);
+    CK("sar dh, cl",  "d2 fe: sar dh, cl (no REX)", 0xD2, 0xFE);
+
+    // Same encodings with a bare REX prefix (0x40) — must switch to SPL/BPL/SIL/DIL
+    CK("rol spl, cl", "40 d2 c4: rol spl, cl (REX)", 0x40, 0xD2, 0xC4);
+    CK("ror bpl, cl", "40 d2 cd: ror bpl, cl (REX)", 0x40, 0xD2, 0xCD);
+    CK("rcl bpl, cl", "40 d2 d5: rcl bpl, cl (REX)", 0x40, 0xD2, 0xD5);
+    CK("rcr sil, cl", "40 d2 de: rcr sil, cl (REX)", 0x40, 0xD2, 0xDE);
+    CK("shl dil, cl", "40 d2 e7: shl dil, cl (REX)", 0x40, 0xD2, 0xE7);
+    CK("sar sil, cl", "40 d2 fe: sar sil, cl (REX)", 0x40, 0xD2, 0xFE);
+
+    // ModRM reg field at byte size — TEST r/m8, r8 (84 /r)
+    CK("test al, ah",   "84 e0: test al, ah (no REX)",   0x84, 0xE0);
+    CK("test bh, ch",   "84 ef: test bh, ch (no REX)",   0x84, 0xEF);
+    CK("test al, spl",  "40 84 e0: test al, spl (REX)",  0x40, 0x84, 0xE0);
+    CK("test dil, bpl", "40 84 ef: test dil, bpl (REX)", 0x40, 0x84, 0xEF);
+
+    // OpcodeReg form — MOV r8, imm8 is B0+rb
+    CK("mov ah, 0x11",  "b4 11: mov ah, 0x11 (no REX)", 0xB4, 0x11);
+    CK("mov ch, 0x11",  "b5 11: mov ch, 0x11 (no REX)", 0xB5, 0x11);
+    CK("mov dh, 0x11",  "b6 11: mov dh, 0x11 (no REX)", 0xB6, 0x11);
+    CK("mov bh, 0x11",  "b7 11: mov bh, 0x11 (no REX)", 0xB7, 0x11);
+    CK("mov spl, 0x11", "40 b4: mov spl, 0x11 (REX)", 0x40, 0xB4, 0x11);
+    CK("mov bpl, 0x11", "40 b5: mov bpl, 0x11 (REX)", 0x40, 0xB5, 0x11);
+    CK("mov sil, 0x11", "40 b6: mov sil, 0x11 (REX)", 0x40, 0xB6, 0x11);
+    CK("mov dil, 0x11", "40 b7: mov dil, 0x11 (REX)", 0x40, 0xB7, 0x11);
+
+    // Low 4 of REX-style byte regs (AL/CL/DL/BL) are always the same
+    CK("mov al, 0x11", "b0: mov al, 0x11 (no REX)", 0xB0, 0x11);
+    CK("mov al, 0x11", "40 b0: mov al, 0x11 (REX)", 0x40, 0xB0, 0x11);
+
+    // REX.B promotes opcode_reg into r8b..r15b — never legacy
+    CK("mov r12b, 0x11", "41 b4: mov r12b (REX.B)", 0x41, 0xB4, 0x11);
+    CK("mov r13b, 0x11", "41 b5: mov r13b (REX.B)", 0x41, 0xB5, 0x11);
+
+    // Fixed-register operand at byte size: LAHF/SAHF use AH literally
+    CK("lahf", "9f: lahf", 0x9F);
+    CK("sahf", "9e: sahf", 0x9E);
+    #undef CK
+}
+#endif // VEDX64_STRINGS
+
+#ifdef VEDX64_STRINGS
+void test_disasm_imm32_sign_extend() {
+    char buf[256];
+    auto check = [&](const uint8_t* bytes, size_t avail, size_t expect_consumed, const char* expect, const char* msg) {
+        buf[0] = 0;
+        size_t n = disassemble(bytes, avail, buf, sizeof(buf), 0);
+        TEST_ASSERT(n == expect_consumed, msg);
+        TEST_ASSERT(strstr(buf, expect) != nullptr, msg);
+    };
+    #define CK(consumed, expect, msg, ...) do { static const uint8_t _b[] = {__VA_ARGS__}; check(_b, sizeof(_b), consumed, expect, msg); } while (0)
+
+    // 48 F7 C7 8D 06 0C B2 — REX.W F7 /0: TEST r/m64, imm32 → 7 bytes total
+    CK(7, "test rdi, 0xffffffffb20c068d",
+       "48 f7 c7 imm32: TEST r/m64, imm32 reads 4 bytes (sign-extended)",
+       0x48, 0xF7, 0xC7, 0x8D, 0x06, 0x0C, 0xB2);
+
+    // 48 81 C5 0A 00 00 00 — REX.W 81 /0: ADD r/m64, imm32 → 7 bytes total
+    CK(7, "add rbp, 0xa",
+       "48 81 c5 imm32: ADD r/m64, imm32 reads 4 bytes",
+       0x48, 0x81, 0xC5, 0x0A, 0x00, 0x00, 0x00);
+
+    // 48 81 EC 00 10 00 00 — SUB rsp, 0x1000 → 7 bytes
+    CK(7, "sub rsp, 0x1000",
+       "48 81 ec imm32: SUB r/m64, imm32",
+       0x48, 0x81, 0xEC, 0x00, 0x10, 0x00, 0x00);
+
+    // 48 81 E1 FF 0F 00 00 — AND rcx, 0xFFF
+    CK(7, "and rcx, 0xfff",
+       "48 81 e1 imm32: AND r/m64, imm32",
+       0x48, 0x81, 0xE1, 0xFF, 0x0F, 0x00, 0x00);
+
+    // MOV B8+rd remains the *only* instruction that takes a true imm64.
+    CK(10, "mov rax, 0x807060504030201",
+       "48 b8 imm64: MOV r64, imm64 still reads 8 bytes",
+       0x48, 0xB8, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08);
+
+    // Without REX.W the imm32 form is unaffected.
+    CK(6, "test edi, 0xb20c068d",
+       "f7 c7 imm32: TEST r/m32, imm32 (no REX)",
+       0xF7, 0xC7, 0x8D, 0x06, 0x0C, 0xB2);
+
+    // 16-bit operand-size override caps imm at 2 bytes (Iz with 0x66).
+    CK(5, "test di, 0x68d",
+       "66 f7 c7 imm16: TEST r/m16, imm16",
+       0x66, 0xF7, 0xC7, 0x8D, 0x06);
+    #undef CK
+}
+#endif // VEDX64_STRINGS
+
 void test_decode_edge_cases() {
     DecodedInstr di;
     TEST_ASSERT(decode(nullptr, 0, di) == 0, "null input returns 0");
@@ -903,6 +1011,8 @@ int main() {
     test_encode_roundtrip();
 #ifdef VEDX64_STRINGS
     test_disassemble();
+    test_disasm_byte_register_naming();
+    test_disasm_imm32_sign_extend();
 #endif // VEDX64_STRINGS
     test_decode_edge_cases();
     test_encode_edge_cases();

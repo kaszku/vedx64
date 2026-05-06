@@ -81,6 +81,20 @@ const char** reg_table(OpSize sz, bool rex_w, bool opsz, bool def64) {
     }
 }
 
+static const char* reg8_legacy_high[4] = {"ah","ch","dh","bh"};
+
+static bool legacy_byte_naming(const DecodedInstr& di) {
+    return di.rex == 0 && !di.has_rex2 && !di.has_vex;
+}
+
+static const char* gpr_name(const DecodedInstr& di, OpSize sz, bool rex_w, bool opsz, bool def64, uint8_t idx, uint8_t rmask) {
+    uint8_t r = idx & rmask;
+    if ((sz == OpSize::Byte || sz == OpSize::ByteSignExt) && legacy_byte_naming(di) && r >= 4 && r < 8) {
+        return reg8_legacy_high[r - 4];
+    }
+    return reg_table(sz, rex_w, opsz, def64)[r];
+}
+
 static bool is_vsib_mnemonic(Mnemonic m) {
     switch (m) {
     case Mnemonic::VGATHERDPS: case Mnemonic::VGATHERDPD:
@@ -186,7 +200,7 @@ int fmt_modrm(const DecodedInstr& di, const OperandDesc& op, char* buf, int max,
         if (op.addr == AddrMode::SegReg) return emit_str(buf, max, seg_r[reg & 7]);
         if (gpr32_force && op.size != OpSize::Byte && op.size != OpSize::ByteSignExt && op.size != OpSize::Word) return emit_str(buf, max, reg32[reg & rmask]);
         if (gpr64_force) return emit_str(buf, max, reg64[reg & rmask]);
-        return emit_str(buf, max, reg_table(op.size, rex_w, opsz, def64)[reg & rmask]);
+        return emit_str(buf, max, gpr_name(di, op.size, rex_w, opsz, def64, reg, rmask));
     }
 
     if (mod_ == 3) {
@@ -197,7 +211,7 @@ int fmt_modrm(const DecodedInstr& di, const OperandDesc& op, char* buf, int max,
         if (op.addr == AddrMode::MmxRM || op.addr == AddrMode::MmxRegOnly) return emit_str(buf, max, mmx_r[rm & 7]);
         if (gpr32_force && op.size != OpSize::Byte && op.size != OpSize::ByteSignExt && op.size != OpSize::Word) return emit_str(buf, max, reg32[rm & rmask]);
         if (gpr64_force) return emit_str(buf, max, reg64[rm & rmask]);
-        return emit_str(buf, max, reg_table(op.size, rex_w, opsz, def64)[rm & rmask]);
+        return emit_str(buf, max, gpr_name(di, op.size, rex_w, opsz, def64, rm, rmask));
     }
 
     if ((di.modrm & 7) == 4) {
@@ -778,7 +792,7 @@ size_t disassemble(const uint8_t* code, size_t len, char* buf, size_t buf_len_, 
         }
         case AddrMode::OpcodeReg: {
             uint8_t reg_n = di.opcode_reg | ((di.rex & 0x01) ? 8 : 0);
-            off += emit_str(buf + off, buf_len - off, reg_table(op.size, rex_w, opsz, def64)[reg_n & 15]);
+            off += emit_str(buf + off, buf_len - off, gpr_name(di, op.size, rex_w, opsz, def64, reg_n, 15));
             break;
         }
         case AddrMode::Fixed: {
@@ -791,7 +805,7 @@ size_t disassemble(const uint8_t* code, size_t len, char* buf, size_t buf_len_, 
                     }
                 }
             }
-            off += emit_str(buf + off, buf_len - off, reg_table(fsz, rex_w, opsz, def64)[op.fixed_reg & 15]);
+            off += emit_str(buf + off, buf_len - off, gpr_name(di, fsz, rex_w, opsz, def64, op.fixed_reg, 15));
             break;
         }
         case AddrMode::Moffset:
