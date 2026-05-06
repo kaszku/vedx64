@@ -775,7 +775,17 @@ static const Expr* read_var(State& s, const ir::VarNode& v) {
     Builder* b = s.b;
     switch (v.space) {
     case ir::Space::Const: return b->k(static_cast<uint64_t>(v.value), v.size * 8);
-    case ir::Space::GPR:   return s.get_gpr_slice(static_cast<uint8_t>(v.offset), v.size);
+    case ir::Space::GPR: {
+        // Legacy AH/CH/DH/BH (bit_lo == 8): read the 8..15 slice of the
+        // underlying register, not the low byte. Every other access reads
+        // a [0, size*8) slice.
+        if (v.bit_lo != 0) {
+            uint8_t reg = static_cast<uint8_t>(v.offset);
+            uint16_t hi = static_cast<uint16_t>(v.bit_lo + v.size * 8 - 1);
+            return b->extract(s.gpr[reg], hi, v.bit_lo);
+        }
+        return s.get_gpr_slice(static_cast<uint8_t>(v.offset), v.size);
+    }
     case ir::Space::Flags: return s.flags[CF];   // generic flags read — caller usually uses GET_*
     case ir::Space::Temp: {
         auto it = s.temps.find(v.offset);
@@ -799,7 +809,26 @@ static void write_var(State& s, const ir::VarNode& v, const Expr* e) {
                                     : s.b->trunc(e, v.size * 8);
     }
     switch (v.space) {
-    case ir::Space::GPR:   s.set_gpr_low(static_cast<uint8_t>(v.offset), v.size, e); break;
+    case ir::Space::GPR: {
+        if (v.bit_lo != 0) {
+            // Legacy high-byte write: keep bits [0, bit_lo) and [bit_lo+size*8, 64)
+            // of the underlying register, splice the new value into the middle.
+            uint8_t reg = static_cast<uint8_t>(v.offset);
+            uint16_t mid_w = v.size * 8;
+            uint16_t mid_hi = static_cast<uint16_t>(v.bit_lo + mid_w - 1);
+            const Expr* lo  = s.b->extract(s.gpr[reg], v.bit_lo - 1, 0);
+            const Expr* mid = s.b->trunc(e, mid_w);
+            const Expr* res = s.b->concat(mid, lo);                 // bits [0, mid_hi+1)
+            if (mid_hi + 1 < 64) {
+                const Expr* hi = s.b->extract(s.gpr[reg], 63, mid_hi + 1);
+                res = s.b->concat(hi, res);
+            }
+            s.gpr[reg] = res;
+        } else {
+            s.set_gpr_low(static_cast<uint8_t>(v.offset), v.size, e);
+        }
+        break;
+    }
     case ir::Space::Flags: s.flags[CF] = e; break;
     case ir::Space::Temp:  s.temps[v.offset] = e; break;
     default: break;

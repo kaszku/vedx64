@@ -127,9 +127,15 @@ struct VarNode {
     uint16_t offset = 0;   ///< Register number or temp index.
     uint8_t size = 0;      ///< Size in bytes (1, 2, 4, 8, 16).
     int64_t value = 0;     ///< Constant value (only when space == Const).
+    /// Bit offset of the slice within the underlying register. Currently
+    /// only set to 8 for the legacy AH/CH/DH/BH high-byte addressing —
+    /// every other space and every REX-style 8-bit access uses 0.
+    uint8_t bit_lo = 0;
 
     static VarNode constant(int64_t val, uint8_t sz) { return {Space::Const, 0, sz, val}; }
     static VarNode gpr(uint16_t reg, uint8_t sz) { return {Space::GPR, reg, sz, 0}; }
+    /// Legacy high-byte: AH=gpr_byte_hi(0), CH=1, DH=2, BH=3. Always size=1.
+    static VarNode gpr_byte_hi(uint16_t reg) { return {Space::GPR, reg, 1, 0, 8}; }
     static VarNode xmm(uint16_t reg, uint8_t sz) { return {Space::XMM, reg, sz, 0}; }
     static VarNode temp(uint16_t id, uint8_t sz) { return {Space::Temp, id, sz, 0}; }
     static VarNode flags() { return {Space::Flags, 0, 1, 0}; }

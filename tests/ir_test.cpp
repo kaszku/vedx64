@@ -912,6 +912,90 @@ int main() {
         CHECK(count_op(*l, ir::Opcode::CTZ) == 1, "BSF emits exactly one CTZ");
     }
 
+    // Legacy AH/CH/DH/BH addressing: without REX/REX2/VEX/EVEX, ModRM
+    // r/m or reg = 4..7 at byte size names AH/CH/DH/BH (= rax/rcx/rdx/rbx
+    // [15:8]), not SPL/BPL/SIL/DIL. The lifter must build VarNodes that
+    // refer to gpr 0..3 with bit_lo=8 so symbolic / interpreted execution
+    // touches the right bits of the right register.
+    auto var_is_high_byte = [](const ir::VarNode& v, int reg) {
+        return v.space == ir::Space::GPR && v.size == 1 && v.offset == (uint16_t)reg && v.bit_lo == 8;
+    };
+    {
+        // 88 E0 = mov al, ah (without REX → ah is rax[15:8], al is rax[7:0]).
+        uint8_t mov_al_ah[] = {0x88, 0xE0};
+        auto l = ir::lift(mov_al_ah, sizeof(mov_al_ah));
+        CHECK(l && ir::is_fully_lifted(*l), "mov al, ah fully lifted");
+        const auto& copy = l->ops[0];
+        CHECK(copy.opcode == ir::Opcode::COPY, "mov is COPY");
+        CHECK(copy.output.space == ir::Space::GPR && copy.output.offset == 0
+              && copy.output.size == 1 && copy.output.bit_lo == 0,
+              "mov dst is AL (gpr 0, bit_lo 0)");
+        CHECK(var_is_high_byte(copy.inputs[0], 0),
+              "mov src is AH (gpr 0, bit_lo 8)");
+    }
+    {
+        // 40 88 E0 = mov al, spl (REX present → no high-byte addressing).
+        uint8_t rex_mov[] = {0x40, 0x88, 0xE0};
+        auto l = ir::lift(rex_mov, sizeof(rex_mov));
+        CHECK(l && ir::is_fully_lifted(*l), "mov al, spl (REX) fully lifted");
+        const auto& copy = l->ops[0];
+        CHECK(copy.inputs[0].space == ir::Space::GPR && copy.inputs[0].offset == 4
+              && copy.inputs[0].bit_lo == 0,
+              "REX byte mov: source is SPL (gpr 4, low byte) not AH");
+    }
+    {
+        // 0F C0 CD = xadd ch, cl (no REX). After: ch += cl; cl <- old ch.
+        uint8_t xadd_ch_cl[] = {0x0F, 0xC0, 0xCD};
+        auto l = ir::lift(xadd_ch_cl, sizeof(xadd_ch_cl));
+        CHECK(l && ir::is_fully_lifted(*l), "xadd ch, cl fully lifted");
+        bool found_ch = false, found_cl = false;
+        for (const auto& op : l->ops) {
+            for (uint8_t i = 0; i < op.num_inputs; ++i) {
+                const auto& v = op.inputs[i];
+                if (var_is_high_byte(v, 1)) found_ch = true;       // CH = gpr 1, bit_lo 8
+                if (v.space == ir::Space::GPR && v.size == 1 && v.offset == 1 && v.bit_lo == 0)
+                    found_cl = true;
+            }
+        }
+        CHECK(found_ch, "xadd uses CH (gpr 1, bit_lo 8)");
+        CHECK(found_cl, "xadd uses CL (gpr 1, bit_lo 0)");
+    }
+    {
+        // B4 11 = mov ah, 0x11 (OpcodeReg form, no REX).
+        uint8_t mov_ah_imm[] = {0xB4, 0x11};
+        auto l = ir::lift(mov_ah_imm, sizeof(mov_ah_imm));
+        CHECK(l && ir::is_fully_lifted(*l), "mov ah, imm fully lifted");
+        CHECK(var_is_high_byte(l->ops[0].output, 0),
+              "OpcodeReg mov dst is AH (gpr 0, bit_lo 8)");
+    }
+    {
+        // 41 B4 11 = mov r12b, 0x11 (REX.B → never legacy).
+        uint8_t mov_r12b_imm[] = {0x41, 0xB4, 0x11};
+        auto l = ir::lift(mov_r12b_imm, sizeof(mov_r12b_imm));
+        CHECK(l && ir::is_fully_lifted(*l), "mov r12b, imm fully lifted");
+        CHECK(l->ops[0].output.space == ir::Space::GPR
+              && l->ops[0].output.offset == 12
+              && l->ops[0].output.bit_lo == 0,
+              "REX.B opcode_reg dst is r12b (gpr 12, low byte)");
+    }
+    // Execute the xadd ch, cl scenario through the IR interpreter.
+    {
+        uint8_t xadd_ch_cl[] = {0x0F, 0xC0, 0xCD};
+        auto l = ir::lift(xadd_ch_cl, sizeof(xadd_ch_cl));
+        CHECK(l && ir::is_fully_lifted(*l), "xadd ch, cl interpret-prep");
+        ir::Context ctx{};
+        ctx.gpr[1] = 0x0102;                       // CH=0x01, CL=0x02
+        ctx.gpr[5] = 0xDEADBEEFCAFEBABEULL;        // RBP — must NOT be touched
+        ctx.gpr[7] = 0x1122334455667788ULL;        // RDI — must NOT be touched
+        ir::execute(ctx, *l);
+        CHECK(ctx.gpr[1] == 0x0301,
+              "xadd ch, cl: rcx=0x0301 after (CH=0x03, CL=0x01)");
+        CHECK(ctx.gpr[5] == 0xDEADBEEFCAFEBABEULL,
+              "xadd ch, cl: RBP unchanged (no aliasing into legacy slot)");
+        CHECK(ctx.gpr[7] == 0x1122334455667788ULL,
+              "xadd ch, cl: RDI unchanged");
+    }
+
     // SHLD/SHRD count masking.
     //   0F A4 C8 21       →  shld eax, ecx, 0x21  (32-bit; 0x21 & 0x1F = 1)
     //   48 0F A4 C8 41    →  shld rax, rcx, 0x41  (64-bit; 0x41 & 0x3F = 1)

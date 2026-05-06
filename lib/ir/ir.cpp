@@ -121,14 +121,25 @@ uint8_t op_size_bytes(OpSize sz, bool rex_w, bool has_66) {
     }
 }
 
+static inline bool ir_legacy_byte_naming(const DecodedInstr& di) {
+    return di.rex == 0 && !di.has_rex2 && !di.has_vex;
+}
+
+static inline VarNode gpr_byte_for_id(const DecodedInstr& di, uint8_t id, uint8_t sz) {
+    if (sz == 1 && ir_legacy_byte_naming(di) && id >= 4 && id < 8) {
+        return VarNode::gpr_byte_hi(id - 4);
+    }
+    return VarNode::gpr(id, sz);
+}
+
 VarNode reg_from_modrm_reg(const DecodedInstr& di, uint8_t sz) {
     uint8_t id = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
-    return VarNode::gpr(id, sz);
+    return gpr_byte_for_id(di, id, sz);
 }
 
 VarNode reg_from_modrm_rm(const DecodedInstr& di, uint8_t sz) {
     uint8_t id = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
-    return VarNode::gpr(id, sz);
+    return gpr_byte_for_id(di, id, sz);
 }
 
 VarNode compute_ea(Lifted& l, const DecodedInstr& di) {
@@ -235,7 +246,7 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
                 VarNode dst;
                 if (di.desc->operands[0].addr == AddrMode::OpcodeReg) {
                     uint8_t id = di.opcode_reg | ((di.rex & 0x01) ? 8 : 0);
-                    dst = VarNode::gpr(id, sz);
+                    dst = gpr_byte_for_id(di, id, sz);
                 } else if (di.desc->operands[0].addr == AddrMode::ModRM_RM && ((di.modrm >> 6) & 3) == 3) {
                     dst = reg_from_modrm_rm(di, sz);
                 } else break;
@@ -2980,6 +2991,11 @@ static void execute_once(Context& ctx, const Lifted& lifted) {
         case Space::Const: return (uint64_t)v.value;
         case Space::GPR: {
             uint64_t full = ctx.gpr[v.offset & 15];
+            // Legacy AH/CH/DH/BH have bit_lo=8 (size=1).
+            if (v.bit_lo) {
+                uint64_t mask = (v.size >= 8) ? ~0ULL : ((1ULL << (v.size*8)) - 1);
+                return (full >> v.bit_lo) & mask;
+            }
             if (v.size == 1) return full & 0xFF;
             if (v.size == 2) return full & 0xFFFF;
             if (v.size == 4) return full & 0xFFFFFFFF;
@@ -2996,10 +3012,18 @@ static void execute_once(Context& ctx, const Lifted& lifted) {
     auto write_var = [&](const VarNode& v, uint64_t val) {
         switch (v.space) {
         case Space::GPR: {
-            if (v.size == 1) ctx.gpr[v.offset & 15] = (ctx.gpr[v.offset & 15] & ~0xFFULL) | (val & 0xFF);
-            else if (v.size == 2) ctx.gpr[v.offset & 15] = (ctx.gpr[v.offset & 15] & ~0xFFFFULL) | (val & 0xFFFF);
-            else if (v.size == 4) ctx.gpr[v.offset & 15] = val & 0xFFFFFFFF; // 32-bit writes zero-extend
-            else ctx.gpr[v.offset & 15] = val;
+            uint64_t& slot = ctx.gpr[v.offset & 15];
+            if (v.bit_lo) {
+                // Legacy AH/CH/DH/BH: splice bits [bit_lo, bit_lo+size*8) of slot.
+                uint64_t w = (uint64_t)v.size * 8;
+                uint64_t fmask = ((w >= 64) ? ~0ULL : ((1ULL << w) - 1)) << v.bit_lo;
+                slot = (slot & ~fmask) | (((uint64_t)val << v.bit_lo) & fmask);
+                break;
+            }
+            if (v.size == 1) slot = (slot & ~0xFFULL) | (val & 0xFF);
+            else if (v.size == 2) slot = (slot & ~0xFFFFULL) | (val & 0xFFFF);
+            else if (v.size == 4) slot = val & 0xFFFFFFFF; // 32-bit writes zero-extend
+            else slot = val;
             break;
         }
         case Space::Temp: temps[v.offset & 31] = val; break;
