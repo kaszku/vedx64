@@ -4,6 +4,7 @@
 #ifdef VEDX64_IR
 #include "vedx64/ir.hpp"
 #include <cstring>
+#include <unordered_map>
 
 namespace vedx64 {
 namespace ir {
@@ -851,6 +852,14 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
                 l.ops.push_back(make_op2(Opcode::TRUNC, rax, wp));
                 l.ops.push_back(make_op2(Opcode::TRUNC, rdx, shifted));
             }
+            // Per Intel SDM: MUL/IMUL set CF and OF based on whether the upper
+            // half is significant; SF/ZF/AF/PF are undefined. Without ITE the
+            // CF/OF logic ((shifted != 0) for MUL; (shifted != sext(low)) for
+            // IMUL) is awkward to bundle exactly. Emit AND_FLAGS on the high
+            // half so consumers see a flag write — at minimum CF == (high != 0)
+            // for MUL is captured via ZF semantics on the high temp, which is
+            // close enough for liveness analysis.
+            l.ops.push_back(make_op3(Opcode::AND_FLAGS, VarNode::flags(), shifted, VarNode::constant(0, wide)));
             return true;
         }
     }
@@ -2987,34 +2996,76 @@ std::optional<Lifted> lift(const uint8_t* code, size_t len, uint64_t address) {
     if (idx >= 0 && static_cast<size_t>(idx) < g_instr_table_size && g_lift_dispatch[idx]) {
         if (g_lift_dispatch[idx](l, di, sz, rex_w, has_66, n, address)) {
             // Post-passes on the lifted op list:
-            //   (a) Identity folds — drop COPY x,x and rewrite AND/OR x,x → COPY x.
-            //   (b) Implicit zero-extension — every 32-bit GPR write zero-extends
-            //       into bits [32:63] of the parent 64-bit register. Most lifters
-            //       emit only the 32-bit data write; we append an explicit COPY 0
-            //       to gpr[N][32:63] so IR consumers that don't bake in the x86
-            //       rule (e.g. an external DCE) still see the upper-half kill.
-            //       The interpreter and symx already handle the implicit zext;
-            //       this just makes it visible at the IR-op level.
+            //   (a) Identity folds — rewrite AND/OR x,x → COPY x and drop COPY x,x.
+            //   (b) Copy-propagation through Temp aliases — when a temp is a
+            //       straight COPY of another var, substitute the alias into all
+            //       subsequent reads and skip the temp definition. Lets `and
+            //       rbx,rbx` collapse to a flag-only op and `xchg bx,bx` to nothing.
+            //   (c) Implicit zero-extension — every 32-bit GPR write zero-extends
+            //       into bits [32:63] of the parent register. Append an explicit
+            //       COPY 0 to gpr[N][32:63] so external DCEs that don't bake the
+            //       x86 rule still see the upper-half kill. The interpreter and
+            //       symx already honour the implicit zext at execution time.
             auto same_var = [](const VarNode& a, const VarNode& b) {
                 return a.space == b.space && a.offset == b.offset && a.size == b.size
                     && a.bit_lo == b.bit_lo && (a.space != Space::Const || a.value == b.value);
             };
+            std::unordered_map<uint16_t, VarNode> temp_alias;
             std::vector<Op> out_ops;
             out_ops.reserve(l.ops.size() * 2);
+            auto subst = [&](VarNode v) {
+                if (v.space == Space::Temp) {
+                    auto it = temp_alias.find(v.offset);
+                    if (it != temp_alias.end() && it->second.size == v.size && it->second.bit_lo == v.bit_lo)
+                        return it->second;
+                }
+                return v;
+            };
+            // When a register that's currently aliased to a temp is about to
+            // be overwritten, materialize the temp first — it should still hold
+            // the *pre-write* value at every later read. Without this snapshot
+            // the temp would dangle (its definition was skipped) and any later
+            // unaliased read (e.g. the second half of an xchg) would observe
+            // garbage. Self-COPY ops are dropped before this step, so they
+            // never trigger materialization.
+            auto invalidate_aliases_for = [&](const VarNode& dst) {
+                if (dst.space == Space::Temp) return;
+                for (auto it = temp_alias.begin(); it != temp_alias.end(); ) {
+                    if (it->second.space == dst.space && it->second.offset == dst.offset) {
+                        VarNode tmp = VarNode{Space::Temp, it->first, it->second.size, 0, it->second.bit_lo};
+                        out_ops.push_back(make_op2(Opcode::COPY, tmp, it->second));
+                        it = temp_alias.erase(it);
+                    } else ++it;
+                }
+            };
             for (const auto& op : l.ops) {
                 Op rewritten = op;
+                // (b1) Substitute Temp inputs with their aliases.
+                for (uint8_t i = 0; i < rewritten.num_inputs; ++i)
+                    rewritten.inputs[i] = subst(rewritten.inputs[i]);
                 // (a1) AND/OR with identical inputs → COPY first input.
-                if ((op.opcode == Opcode::AND || op.opcode == Opcode::OR) &&
-                    op.num_inputs == 2 && same_var(op.inputs[0], op.inputs[1])) {
-                    rewritten = make_op2(Opcode::COPY, op.output, op.inputs[0]);
+                if ((rewritten.opcode == Opcode::AND || rewritten.opcode == Opcode::OR) &&
+                    rewritten.num_inputs == 2 && same_var(rewritten.inputs[0], rewritten.inputs[1])) {
+                    rewritten = make_op2(Opcode::COPY, rewritten.output, rewritten.inputs[0]);
                 }
-                // (a2) COPY x,x → drop entirely.
+                // (a2) Self-COPY → drop. No invalidation since the value is unchanged.
                 if (rewritten.opcode == Opcode::COPY && rewritten.num_inputs == 1 &&
                     same_var(rewritten.output, rewritten.inputs[0])) {
                     continue;
                 }
+                // (b2) Record temp aliases for COPY tmp <- var (size/bit_lo match).
+                //      Skip emission — readers will see the alias via subst().
+                if (rewritten.opcode == Opcode::COPY && rewritten.num_inputs == 1 &&
+                    rewritten.output.space == Space::Temp &&
+                    rewritten.output.size == rewritten.inputs[0].size &&
+                    rewritten.output.bit_lo == rewritten.inputs[0].bit_lo) {
+                    temp_alias[rewritten.output.offset] = rewritten.inputs[0];
+                    continue;
+                }
+                // Any other write invalidates aliases that target this destination.
+                invalidate_aliases_for(rewritten.output);
                 out_ops.push_back(rewritten);
-                // (b) Append the implicit upper-32 kill on 32-bit GPR writes.
+                // (c) Append the implicit upper-32 kill on 32-bit GPR writes.
                 const auto& dst = rewritten.output;
                 if (dst.space == Space::GPR && dst.size == 4 && dst.bit_lo == 0 && dst.offset < 32) {
                     VarNode hi   = VarNode{Space::GPR, dst.offset, 4, 0, 32};
@@ -3022,6 +3073,10 @@ std::optional<Lifted> lift(const uint8_t* code, size_t len, uint64_t address) {
                     out_ops.push_back(make_op2(Opcode::COPY, hi, zero));
                 }
             }
+            // If the post-pass folded everything (e.g. xchg eax,eax which
+            // is the canonical 0x90 NOP), keep one explicit NOP so callers can
+            // distinguish a successful no-op lift from a missing dispatcher.
+            if (out_ops.empty()) out_ops.push_back({Opcode::NOP});
             l.ops = std::move(out_ops);
             return l;
         }

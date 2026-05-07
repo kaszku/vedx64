@@ -908,6 +908,63 @@ int main() {
             }
         }
     }
+
+    // and rbx,rbx and or rbx,rbx should leave only the flag write — the
+    // copy-propagation pass eliminates the redundant data round-trip.
+    {
+        uint8_t and_rbx_rbx[] = {0x48, 0x21, 0xDB};
+        auto l = ir::lift(and_rbx_rbx, sizeof(and_rbx_rbx));
+        CHECK(l && ir::is_fully_lifted(*l), "and rbx,rbx fully lifted");
+        CHECK(l->ops.size() == 1, "and rbx,rbx collapses to 1 op (flag-only)");
+        CHECK(l->ops[0].opcode == ir::Opcode::AND_FLAGS,
+              "and rbx,rbx leaves only the AND_FLAGS bundle");
+    }
+    {
+        uint8_t or_rbx_rbx[] = {0x48, 0x09, 0xDB};
+        auto l = ir::lift(or_rbx_rbx, sizeof(or_rbx_rbx));
+        CHECK(l && ir::is_fully_lifted(*l), "or rbx,rbx fully lifted");
+        CHECK(l->ops.size() == 1, "or rbx,rbx collapses to 1 op (flag-only)");
+        CHECK(l->ops[0].opcode == ir::Opcode::AND_FLAGS,
+              "or rbx,rbx leaves only the AND_FLAGS bundle");
+    }
+    // xchg bx,bx and mov rax,rax fold to a single synthetic NOP.
+    {
+        uint8_t xchg_bx_bx[] = {0x66, 0x87, 0xDB};
+        auto l = ir::lift(xchg_bx_bx, sizeof(xchg_bx_bx));
+        CHECK(l && l->ops.size() == 1 && l->ops[0].opcode == ir::Opcode::NOP,
+              "xchg bx,bx folds to a single NOP");
+    }
+    {
+        uint8_t mov_rax_rax[] = {0x48, 0x89, 0xC0};
+        auto l = ir::lift(mov_rax_rax, sizeof(mov_rax_rax));
+        CHECK(l && l->ops.size() == 1 && l->ops[0].opcode == ir::Opcode::NOP,
+              "mov rax,rax folds to a single NOP");
+    }
+    // xchg with two distinct registers must still preserve the swap (the
+    // copy-propagation pass materializes the temp before the conflicting write).
+    {
+        uint8_t xchg_rax_rcx[] = {0x48, 0x87, 0xC1};
+        auto l = ir::lift(xchg_rax_rcx, sizeof(xchg_rax_rcx));
+        CHECK(l && ir::is_fully_lifted(*l), "xchg rax,rcx fully lifted");
+        ir::Context ctx{};
+        ctx.gpr[0] = 10; ctx.gpr[1] = 20;
+        ir::execute(ctx, *l);
+        CHECK(ctx.gpr[0] == 20 && ctx.gpr[1] == 10, "xchg rax,rcx swaps values");
+    }
+
+    // MUL/IMUL emit a flag-bundle write so DCE can kill prior flag defs.
+    {
+        uint8_t mul_rcx[] = {0x48, 0xF7, 0xE1};
+        auto l = ir::lift(mul_rcx, sizeof(mul_rcx));
+        CHECK(l && ir::is_fully_lifted(*l), "mul rcx fully lifted");
+        CHECK(count_op(*l, ir::Opcode::AND_FLAGS) >= 1, "mul rcx emits a flag bundle");
+    }
+    {
+        uint8_t imul_r10w[] = {0x66, 0x41, 0xF7, 0xEA};
+        auto l = ir::lift(imul_r10w, sizeof(imul_r10w));
+        CHECK(l && ir::is_fully_lifted(*l), "imul r10w fully lifted");
+        CHECK(count_op(*l, ir::Opcode::AND_FLAGS) >= 1, "imul r10w emits a flag bundle");
+    }
     // DIV r/m8 (F6 /6): AX / src → AL=quot, AH=rem
     {
         uint8_t div_cl[] = {0xF6, 0xF1};
