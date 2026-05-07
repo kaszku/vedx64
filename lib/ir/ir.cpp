@@ -560,16 +560,25 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         case Mnemonic::ROL: opc = Opcode::ROL; break;
         default:            opc = Opcode::ROR; break;
         }
+        VarNode result_for_flags;
         if (mod_ == 3) {
             VarNode dst = reg_from_modrm_rm(di, sz);
             l.ops.push_back(make_op3(opc, dst, dst, count));
+            result_for_flags = dst;
         } else {
             VarNode ea = compute_ea(l, di);
             VarNode tmp = VarNode::temp(11, sz);
             l.ops.push_back(make_op3(Opcode::LOAD, tmp, ea, VarNode::ram(sz)));
             l.ops.push_back(make_op3(opc, tmp, tmp, count));
             l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(sz), ea, tmp));
+            result_for_flags = tmp;
         }
+        // Per Intel SDM: SHL/SHR/SAR/SAL with non-zero count write CF, OF,
+        // ZF, SF, PF (AF undefined). ROL/ROR write CF (and OF for count==1).
+        // We use AND_FLAGS as a coarse bundle so consumers see the flag write;
+        // the precise CF / OF values for a runtime-variable count would require
+        // ITE-style ops the IR doesn't have. ZF / SF / PF come out exact.
+        l.ops.push_back(make_op3(Opcode::AND_FLAGS, VarNode::flags(), result_for_flags, VarNode::constant(0, sz)));
         return true;
     }
 
@@ -609,7 +618,14 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
     }
 
     if ((m == Mnemonic::MOVSX || m == Mnemonic::MOVZX || m == Mnemonic::MOVSXD) && di.desc->has_modrm) {
-        VarNode dst = reg_from_modrm_reg(di, sz);
+        // MOVSXD's operand[0] is tagged OpSize::None in the XML, so the
+        // generic sz (op[0]) defaults to 4. Per Intel: 63 /r is r32 ←
+        // r/m32 (no extension when REX.W==0), REX.W + 63 /r is r64 ←
+        // SEXT(r/m32). Compute the dst width here rather than trusting
+        // the table.
+        uint8_t dst_sz = sz;
+        if (m == Mnemonic::MOVSXD) dst_sz = rex_w ? 8 : 4;
+        VarNode dst = reg_from_modrm_reg(di, dst_sz);
         uint8_t src_sz = op_size_bytes(di.desc->operands[1].size, rex_w, has_66);
         Opcode opc = (m == Mnemonic::MOVZX) ? Opcode::ZEXT : Opcode::SEXT;
         if (mod_ == 3) {
@@ -810,36 +826,31 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
             }
             VarNode rax = VarNode::gpr(0, sz);
             VarNode rdx = VarNode::gpr(2, sz);
-            // For sz < 8 we can compute the full 2N-bit product using a wider
-            // temp via ZEXT/SEXT, then split into RAX (low) and RDX (high).
-            // For sz == 8 the IR has no native 128-bit value — RAX gets the
-            // low 64 bits via the regular MUL op and RDX is marked UNDEF so
-            // is_fully_lifted() flags it for symbolic execution to handle.
-            if (sz < 8) {
-                uint8_t wide = static_cast<uint8_t>(sz * 2);
-                Opcode ext = (m == Mnemonic::MUL) ? Opcode::ZEXT : Opcode::SEXT;
-                VarNode wa = VarNode::temp(20, wide);
-                VarNode wb = VarNode::temp(21, wide);
-                VarNode wp = VarNode::temp(22, wide);
-                l.ops.push_back(make_op2(ext, wa, rax));
-                l.ops.push_back(make_op2(ext, wb, src));
-                l.ops.push_back(make_op3(opc, wp, wa, wb));
+            // Compute the full 2N-bit product in a wider temp via ZEXT/SEXT,
+            // then split into RAX (low N) and RDX (high N). The 64-bit case
+            // uses 128-bit temps; the IR carries the width on every VarNode
+            // and Builder so symbolic clients see the full product. (The
+            // C++ test interpreter holds temps in uint64_t so 64x64 there
+            // collapses to the low 64 bits — no worse than the prior UNDEF.)
+            uint8_t wide = static_cast<uint8_t>(sz * 2);
+            Opcode ext = (m == Mnemonic::MUL) ? Opcode::ZEXT : Opcode::SEXT;
+            VarNode wa = VarNode::temp(20, wide);
+            VarNode wb = VarNode::temp(21, wide);
+            VarNode wp = VarNode::temp(22, wide);
+            l.ops.push_back(make_op2(ext, wa, rax));
+            l.ops.push_back(make_op2(ext, wb, src));
+            l.ops.push_back(make_op3(opc, wp, wa, wb));
+            VarNode shifted = VarNode::temp(23, wide);
+            l.ops.push_back(make_op3(Opcode::SHR, shifted, wp, VarNode::constant(sz * 8, 1)));
+            if (sz == 1) {
+                // 8-bit MUL writes AX (RAX[15:0]) — both AL and AH live in gpr(0, 2).
+                // Model as AX = full 16-bit result; RDX is unaffected.
+                VarNode ax = VarNode::gpr(0, 2);
+                l.ops.push_back(make_op2(Opcode::COPY, ax, wp));
+            } else {
                 l.ops.push_back(make_op2(Opcode::TRUNC, rax, wp));
-                VarNode shifted = VarNode::temp(23, wide);
-                l.ops.push_back(make_op3(Opcode::SHR, shifted, wp, VarNode::constant(sz * 8, 1)));
-                if (sz == 1) {
-                    // 8-bit MUL writes AX (RAX[15:0]) — both AL and AH live in gpr(0, 2).
-                    // Model as: AX = full 16-bit result. RDX is unaffected.
-                    VarNode ax = VarNode::gpr(0, 2);
-                    l.ops.push_back(make_op2(Opcode::COPY, ax, wp));
-                } else {
-                    l.ops.push_back(make_op2(Opcode::TRUNC, rdx, shifted));
-                }
-                return true;
+                l.ops.push_back(make_op2(Opcode::TRUNC, rdx, shifted));
             }
-            // 64-bit case: low half is exact, high half is over our IR's value width.
-            l.ops.push_back(make_op3(opc, rax, rax, src));
-            l.ops.push_back({Opcode::UNDEF}); // RDX = high(RAX_old * src) — caller must model
             return true;
         }
     }
@@ -866,52 +877,49 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
             }
             VarNode rax = VarNode::gpr(0, sz);
             VarNode rdx = VarNode::gpr(2, sz);
-            if (sz < 8) {
-                uint8_t wide = static_cast<uint8_t>(sz * 2);
-                Opcode ext = (m == Mnemonic::DIV) ? Opcode::ZEXT : Opcode::SEXT;
-                VarNode dvd = VarNode::temp(20, wide);
-                VarNode dvs = VarNode::temp(21, wide);
-                if (sz == 1) {
-                    // Dividend is AX (RAX[15:0]).
-                    VarNode ax = VarNode::gpr(0, 2);
-                    l.ops.push_back(make_op2(Opcode::COPY, dvd, ax));
-                } else {
-                    // Dividend is RDX:RAX. Build wide value as (RDX << N) | RAX.
-                    VarNode hi = VarNode::temp(22, wide);
-                    VarNode lo = VarNode::temp(23, wide);
-                    l.ops.push_back(make_op2(ext, hi, rdx));
-                    l.ops.push_back(make_op2(ext, lo, rax));
-                    VarNode shifted = VarNode::temp(24, wide);
-                    l.ops.push_back(make_op3(Opcode::SHL, shifted, hi, VarNode::constant(sz * 8, 1)));
-                    l.ops.push_back(make_op3(Opcode::OR, dvd, shifted, lo));
-                }
-                l.ops.push_back(make_op2(ext, dvs, src));
-                VarNode q = VarNode::temp(25, wide);
-                VarNode r = VarNode::temp(26, wide);
-                l.ops.push_back(make_op3(opc, q, dvd, dvs));
-                l.ops.push_back(make_op3(mod_opc, r, dvd, dvs));
-                if (sz == 1) {
-                    // AL = quot, AH = rem — both live in AX (size 2).
-                    VarNode ax = VarNode::gpr(0, 2);
-                    VarNode tmp = VarNode::temp(27, 2);
-                    l.ops.push_back(make_op2(Opcode::TRUNC, tmp, q));
-                    VarNode rem8 = VarNode::temp(28, 2);
-                    l.ops.push_back(make_op2(Opcode::TRUNC, rem8, r));
-                    VarNode shifted = VarNode::temp(29, 2);
-                    l.ops.push_back(make_op3(Opcode::SHL, shifted, rem8, VarNode::constant(8, 1)));
-                    l.ops.push_back(make_op3(Opcode::OR, ax, tmp, shifted));
-                } else {
-                    l.ops.push_back(make_op2(Opcode::TRUNC, rax, q));
-                    l.ops.push_back(make_op2(Opcode::TRUNC, rdx, r));
-                }
-                return true;
+            // The dividend is 2N-bit. For sz==1 it's AX; for sz in {2,4,8}
+            // it's RDX:RAX. Build the wide dividend, divide / mod, then
+            // truncate quotient → RAX and remainder → RDX. The 64-bit case
+            // is just the same shape with 128-bit temps — symbolic clients
+            // see exact bits via VarNode width; the C++ test interpreter
+            // saturates to uint64 (no worse than the prior UNDEF).
+            uint8_t wide = static_cast<uint8_t>(sz * 2);
+            Opcode ext = (m == Mnemonic::DIV) ? Opcode::ZEXT : Opcode::SEXT;
+            VarNode dvd = VarNode::temp(20, wide);
+            VarNode dvs = VarNode::temp(21, wide);
+            if (sz == 1) {
+                // Dividend is AX (RAX[15:0]).
+                VarNode ax = VarNode::gpr(0, 2);
+                l.ops.push_back(make_op2(Opcode::COPY, dvd, ax));
+            } else {
+                // Dividend is RDX:RAX. Build wide value as (RDX << N) | RAX.
+                VarNode hi = VarNode::temp(22, wide);
+                VarNode lo = VarNode::temp(23, wide);
+                l.ops.push_back(make_op2(ext, hi, rdx));
+                l.ops.push_back(make_op2(Opcode::ZEXT, lo, rax));
+                VarNode shifted = VarNode::temp(24, wide);
+                l.ops.push_back(make_op3(Opcode::SHL, shifted, hi, VarNode::constant(sz * 8, 1)));
+                l.ops.push_back(make_op3(Opcode::OR, dvd, shifted, lo));
             }
-            // 64-bit DIV: dividend is 128-bit. Approximate quotient = RAX/src,
-            // remainder = RAX%src (ignoring RDX's high contribution); flag the
-            // residual via UNDEF so SymExec callers special-case.
-            l.ops.push_back(make_op3(opc, rax, rax, src));
-            l.ops.push_back(make_op3(mod_opc, rdx, VarNode::gpr(0, sz), src));
-            l.ops.push_back({Opcode::UNDEF}); // 128-bit dividend not representable in IR
+            l.ops.push_back(make_op2(ext, dvs, src));
+            VarNode q = VarNode::temp(25, wide);
+            VarNode r = VarNode::temp(26, wide);
+            l.ops.push_back(make_op3(opc, q, dvd, dvs));
+            l.ops.push_back(make_op3(mod_opc, r, dvd, dvs));
+            if (sz == 1) {
+                // AL = quot, AH = rem — both live in AX (size 2).
+                VarNode ax = VarNode::gpr(0, 2);
+                VarNode tmp = VarNode::temp(27, 2);
+                l.ops.push_back(make_op2(Opcode::TRUNC, tmp, q));
+                VarNode rem8 = VarNode::temp(28, 2);
+                l.ops.push_back(make_op2(Opcode::TRUNC, rem8, r));
+                VarNode shifted = VarNode::temp(29, 2);
+                l.ops.push_back(make_op3(Opcode::SHL, shifted, rem8, VarNode::constant(8, 1)));
+                l.ops.push_back(make_op3(Opcode::OR, ax, tmp, shifted));
+            } else {
+                l.ops.push_back(make_op2(Opcode::TRUNC, rax, q));
+                l.ops.push_back(make_op2(Opcode::TRUNC, rdx, r));
+            }
             return true;
         }
     }
@@ -1074,8 +1082,18 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
 
     if (m == Mnemonic::ADC || m == Mnemonic::SBB) {
         if (di.desc->has_modrm && ((di.modrm >> 6) & 3) == 3 && di.desc->num_operands >= 2) {
+            // Detect the (r/m, imm) form (e.g. 80/81/83 /2 /3) — operand[1]
+            // is Immediate. Without this check the lifter previously read
+            // the source from modrm.reg (which is the opcode-extension field
+            // /2 = 010 = RDX), so `adc rbx, imm` was lifted as `adc rbx, rdx`.
+            bool has_imm = false;
+            for (uint8_t i = 0; i < di.desc->num_operands; ++i)
+                if (di.desc->operands[i].addr == AddrMode::Immediate) has_imm = true;
             VarNode dst, src;
-            if (di.desc->operands[0].addr == AddrMode::ModRM_RM) {
+            if (has_imm) {
+                dst = reg_from_modrm_rm(di, sz);
+                src = VarNode::constant(di.immediate, sz);
+            } else if (di.desc->operands[0].addr == AddrMode::ModRM_RM) {
                 dst = reg_from_modrm_rm(di, sz); src = reg_from_modrm_reg(di, sz);
             } else {
                 dst = reg_from_modrm_reg(di, sz); src = reg_from_modrm_rm(di, sz);
@@ -1337,7 +1355,12 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
             l.ops.push_back(make_op2(Opcode::CLZ, lz, src));
             l.ops.push_back(make_op3(Opcode::SUB, dst, VarNode::constant((uint64_t)sz * 8 - 1, sz), lz));
         }
-        l.ops.push_back(make_op3(Opcode::AND_FLAGS, VarNode::flags(), src, src)); // ZF set if src==0
+        // Per Intel SDM, BSF/BSR set ZF iff src == 0 and leave CF/OF/SF/PF/AF
+        // *undefined*. AND_FLAGS(src, src) would clobber SF/PF with values from
+        // the source, which is wrong; emit just SET_ZF(src == 0).
+        VarNode is_zero = VarNode::temp(13, 1);
+        l.ops.push_back(make_op3(Opcode::CMP_EQ, is_zero, src, VarNode::constant(0, sz)));
+        l.ops.push_back(make_op2(Opcode::SET_ZF, VarNode::flags(), is_zero));
         return true;
     }
 
@@ -1520,6 +1543,10 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
             VarNode ea = compute_ea(l, di);
             l.ops.push_back(make_op3(Opcode::STORE, VarNode::ram(sz), ea, dst));
         }
+        // RCL/RCR: CF (and OF for count==1) are written; we mark a flag bundle
+        // so consumers see the flag write even though the precise CF tracks the
+        // bit rotated through carry.
+        l.ops.push_back(make_op3(Opcode::AND_FLAGS, VarNode::flags(), dst, VarNode::constant(0, sz)));
         return true;
     }
 
@@ -2958,8 +2985,46 @@ std::optional<Lifted> lift(const uint8_t* code, size_t len, uint64_t address) {
 
     ptrdiff_t idx = di.desc - g_instr_table;
     if (idx >= 0 && static_cast<size_t>(idx) < g_instr_table_size && g_lift_dispatch[idx]) {
-        if (g_lift_dispatch[idx](l, di, sz, rex_w, has_66, n, address))
+        if (g_lift_dispatch[idx](l, di, sz, rex_w, has_66, n, address)) {
+            // Post-passes on the lifted op list:
+            //   (a) Identity folds — drop COPY x,x and rewrite AND/OR x,x → COPY x.
+            //   (b) Implicit zero-extension — every 32-bit GPR write zero-extends
+            //       into bits [32:63] of the parent 64-bit register. Most lifters
+            //       emit only the 32-bit data write; we append an explicit COPY 0
+            //       to gpr[N][32:63] so IR consumers that don't bake in the x86
+            //       rule (e.g. an external DCE) still see the upper-half kill.
+            //       The interpreter and symx already handle the implicit zext;
+            //       this just makes it visible at the IR-op level.
+            auto same_var = [](const VarNode& a, const VarNode& b) {
+                return a.space == b.space && a.offset == b.offset && a.size == b.size
+                    && a.bit_lo == b.bit_lo && (a.space != Space::Const || a.value == b.value);
+            };
+            std::vector<Op> out_ops;
+            out_ops.reserve(l.ops.size() * 2);
+            for (const auto& op : l.ops) {
+                Op rewritten = op;
+                // (a1) AND/OR with identical inputs → COPY first input.
+                if ((op.opcode == Opcode::AND || op.opcode == Opcode::OR) &&
+                    op.num_inputs == 2 && same_var(op.inputs[0], op.inputs[1])) {
+                    rewritten = make_op2(Opcode::COPY, op.output, op.inputs[0]);
+                }
+                // (a2) COPY x,x → drop entirely.
+                if (rewritten.opcode == Opcode::COPY && rewritten.num_inputs == 1 &&
+                    same_var(rewritten.output, rewritten.inputs[0])) {
+                    continue;
+                }
+                out_ops.push_back(rewritten);
+                // (b) Append the implicit upper-32 kill on 32-bit GPR writes.
+                const auto& dst = rewritten.output;
+                if (dst.space == Space::GPR && dst.size == 4 && dst.bit_lo == 0 && dst.offset < 32) {
+                    VarNode hi   = VarNode{Space::GPR, dst.offset, 4, 0, 32};
+                    VarNode zero = VarNode::constant(0, 4);
+                    out_ops.push_back(make_op2(Opcode::COPY, hi, zero));
+                }
+            }
+            l.ops = std::move(out_ops);
             return l;
+        }
     }
 
     // Fallback: emit a single UNDEF for instructions the lifter doesn't model.

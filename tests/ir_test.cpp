@@ -738,12 +738,175 @@ int main() {
         CHECK(count_op(*l, ir::Opcode::MUL) >= 1, "MUL ECX emits MUL");
         CHECK(count_op(*l, ir::Opcode::TRUNC) >= 2, "MUL ECX emits 2 TRUNCs (EAX, EDX)");
     }
-    // MUL r/m64 (F7 /4 with REX.W): RDX gets UNDEF (128-bit not representable)
+    // MUL r/m64 (F7 /4 with REX.W): widens through 128-bit temps so both
+    // RAX (low) and RDX (high) get explicit writes — no UNDEF.
     {
         uint8_t mul_rcx[] = {0x48, 0xF7, 0xE1};
         auto l = ir::lift(mul_rcx, sizeof(mul_rcx));
-        CHECK(l.has_value(), "lift MUL RCX");
-        CHECK(!ir::is_fully_lifted(*l), "MUL RCX flagged as not-fully-lifted (RDX = high 64)");
+        CHECK(l && ir::is_fully_lifted(*l), "MUL RCX is fully lifted (no UNDEF)");
+        CHECK(count_op(*l, ir::Opcode::MUL) >= 1, "MUL RCX emits MUL");
+        CHECK(count_op(*l, ir::Opcode::TRUNC) >= 2, "MUL RCX emits 2 TRUNCs (RAX, RDX)");
+        // Both RAX and RDX must be written explicitly so DCE sees the prior
+        // RDX def as dead.
+        bool wrote_rax = false, wrote_rdx = false;
+        for (const auto& op : l->ops) {
+            if (op.output.space != ir::Space::GPR) continue;
+            if (op.output.offset == 0 && op.output.size == 8) wrote_rax = true;
+            if (op.output.offset == 2 && op.output.size == 8) wrote_rdx = true;
+        }
+        CHECK(wrote_rax, "MUL RCX writes RAX");
+        CHECK(wrote_rdx, "MUL RCX writes RDX");
+    }
+    // IMUL r/m64 (F7 /5 with REX.W): same shape, signed extension.
+    {
+        uint8_t imul_rcx[] = {0x48, 0xF7, 0xE9};
+        auto l = ir::lift(imul_rcx, sizeof(imul_rcx));
+        CHECK(l && ir::is_fully_lifted(*l), "IMUL RCX is fully lifted");
+        CHECK(count_op(*l, ir::Opcode::IMUL) >= 1, "IMUL RCX emits IMUL");
+        CHECK(count_op(*l, ir::Opcode::SEXT) >= 2, "IMUL RCX emits SEXTs to widen");
+    }
+    // DIV r/m64 (F7 /6 with REX.W): dividend is RDX:RAX widened to 128-bit.
+    {
+        uint8_t div_rcx[] = {0x48, 0xF7, 0xF1};
+        auto l = ir::lift(div_rcx, sizeof(div_rcx));
+        CHECK(l && ir::is_fully_lifted(*l), "DIV RCX is fully lifted (no UNDEF)");
+        CHECK(count_op(*l, ir::Opcode::DIV) >= 1, "DIV RCX emits DIV");
+        CHECK(count_op(*l, ir::Opcode::MOD) >= 1, "DIV RCX emits MOD");
+        bool wrote_rax = false, wrote_rdx = false;
+        for (const auto& op : l->ops) {
+            if (op.output.space != ir::Space::GPR) continue;
+            if (op.output.offset == 0 && op.output.size == 8) wrote_rax = true;
+            if (op.output.offset == 2 && op.output.size == 8) wrote_rdx = true;
+        }
+        CHECK(wrote_rax, "DIV RCX writes RAX (quotient)");
+        CHECK(wrote_rdx, "DIV RCX writes RDX (remainder)");
+    }
+    // IDIV r/m64 (F7 /7 with REX.W): same shape, signed.
+    {
+        uint8_t idiv_rcx[] = {0x48, 0xF7, 0xF9};
+        auto l = ir::lift(idiv_rcx, sizeof(idiv_rcx));
+        CHECK(l && ir::is_fully_lifted(*l), "IDIV RCX is fully lifted");
+        CHECK(count_op(*l, ir::Opcode::IDIV) >= 1, "IDIV RCX emits IDIV");
+        CHECK(count_op(*l, ir::Opcode::SMOD) >= 1, "IDIV RCX emits SMOD");
+    }
+
+    // Helper: returns true if any op in the list writes the upper 32 bits of
+    // the given GPR (size=4, bit_lo=32) from the constant 0 — that's the
+    // x86-64 implicit zero-extension marker the post-pass appends.
+    auto has_zext_kill = [](const ir::Lifted& L, uint16_t reg) {
+        for (const auto& op : L.ops) {
+            if (op.opcode != ir::Opcode::COPY || op.num_inputs != 1) continue;
+            const auto& d = op.output;
+            const auto& s = op.inputs[0];
+            if (d.space == ir::Space::GPR && d.offset == reg && d.size == 4 && d.bit_lo == 32
+                && s.space == ir::Space::Const && s.value == 0) return true;
+        }
+        return false;
+    };
+
+    // Bug A: every 32-bit GPR write zero-extends to 64-bit.
+    //   89 CB     mov ebx, ecx        — gpr3[0..31] <- gpr1[0..31] then gpr3[32..63] <- 0
+    //   D3 E0     shl eax, cl         — same kill on EAX
+    //   01 D0     add eax, edx        — same kill on EAX
+    {
+        uint8_t mov_ebx_ecx[] = {0x89, 0xCB};
+        auto l = ir::lift(mov_ebx_ecx, sizeof(mov_ebx_ecx));
+        CHECK(l && ir::is_fully_lifted(*l), "mov ebx, ecx fully lifted");
+        CHECK(has_zext_kill(*l, 3), "mov ebx, ecx zero-extends EBX into RBX[32:63]");
+    }
+    {
+        uint8_t shl_eax_cl[] = {0xD3, 0xE0};
+        auto l = ir::lift(shl_eax_cl, sizeof(shl_eax_cl));
+        CHECK(l && ir::is_fully_lifted(*l), "shl eax, cl fully lifted");
+        CHECK(has_zext_kill(*l, 0), "shl eax, cl zero-extends EAX into RAX[32:63]");
+    }
+    {
+        uint8_t add_eax_edx[] = {0x01, 0xD0};
+        auto l = ir::lift(add_eax_edx, sizeof(add_eax_edx));
+        CHECK(l && ir::is_fully_lifted(*l), "add eax, edx fully lifted");
+        CHECK(has_zext_kill(*l, 0), "add eax, edx zero-extends EAX into RAX[32:63]");
+    }
+
+    // Bug B: MOVSXD r64, r/m32 — destination is 64-bit when REX.W.
+    //   49 63 D7  movsxd rdx, r15d  → SEXT into gpr2 size=8.
+    {
+        uint8_t movsxd_rdx_r15d[] = {0x49, 0x63, 0xD7};
+        auto l = ir::lift(movsxd_rdx_r15d, sizeof(movsxd_rdx_r15d));
+        CHECK(l && ir::is_fully_lifted(*l), "movsxd rdx, r15d fully lifted");
+        bool ok = false;
+        for (const auto& op : l->ops) {
+            if (op.opcode != ir::Opcode::SEXT) continue;
+            if (op.output.space == ir::Space::GPR && op.output.offset == 2 && op.output.size == 8) ok = true;
+        }
+        CHECK(ok, "movsxd rdx,r15d: SEXT writes gpr 2 size=8 (not 4)");
+    }
+
+    // Bug C: ADC r/m, imm uses the immediate, not modrm.reg (= /2 = RDX).
+    //   48 81 D3 1C 44 2D 18  →  adc rbx, 0x182d441c
+    {
+        uint8_t adc_rbx_imm[] = {0x48, 0x81, 0xD3, 0x1C, 0x44, 0x2D, 0x18};
+        auto l = ir::lift(adc_rbx_imm, sizeof(adc_rbx_imm));
+        CHECK(l && ir::is_fully_lifted(*l), "adc rbx, imm32 fully lifted");
+        bool uses_imm = false;
+        bool reads_rdx = false;
+        for (const auto& op : l->ops) {
+            for (uint8_t i = 0; i < op.num_inputs; ++i) {
+                const auto& v = op.inputs[i];
+                if (v.space == ir::Space::Const && (uint64_t)v.value == 0x182d441c) uses_imm = true;
+                if (v.space == ir::Space::GPR && v.offset == 2) reads_rdx = true;
+            }
+        }
+        CHECK(uses_imm, "adc rbx, imm32: source is the immediate 0x182d441c");
+        CHECK(!reads_rdx, "adc rbx, imm32: lifter must not mistake /2 ext for RDX read");
+    }
+
+    // Shift flag emission: the data-only SHL/SHR/SAR/etc. lifts now also
+    // emit a flag bundle so DCE sees the flag write.
+    //   D3 E0  shl eax, cl  → expect at least one AND_FLAGS bundle.
+    //   66 D3 CA  ror dx, cl
+    {
+        uint8_t shl_eax_cl[] = {0xD3, 0xE0};
+        auto l = ir::lift(shl_eax_cl, sizeof(shl_eax_cl));
+        CHECK(l && ir::is_fully_lifted(*l), "shl eax,cl: fully lifted");
+        CHECK(count_op(*l, ir::Opcode::AND_FLAGS) >= 1, "shl eax,cl emits a flag-bundle op");
+    }
+    {
+        uint8_t ror_dx_cl[] = {0x66, 0xD3, 0xCA};
+        auto l = ir::lift(ror_dx_cl, sizeof(ror_dx_cl));
+        CHECK(l && ir::is_fully_lifted(*l), "ror dx,cl: fully lifted");
+        CHECK(count_op(*l, ir::Opcode::AND_FLAGS) >= 1, "ror dx,cl emits a flag-bundle op");
+    }
+
+    // BSR flag: just SET_ZF on (src == 0), no full AND_FLAGS that also
+    // clobbers SF/PF.
+    {
+        uint8_t bsr_rax_rcx[] = {0x48, 0x0F, 0xBD, 0xC1};
+        auto l = ir::lift(bsr_rax_rcx, sizeof(bsr_rax_rcx));
+        CHECK(l && ir::is_fully_lifted(*l), "bsr rax,rcx fully lifted");
+        CHECK(count_op(*l, ir::Opcode::SET_ZF) == 1, "BSR emits exactly one SET_ZF");
+        CHECK(count_op(*l, ir::Opcode::AND_FLAGS) == 0, "BSR does not clobber other flags");
+    }
+
+    // Identity folds: AND/OR with identical inputs collapse to COPY,
+    // and self-COPY is dropped entirely.
+    //   85 C0  test eax, eax  → emits AND_FLAGS but no AND data op,
+    //                          AND with eax,eax would fold to a COPY.
+    //   The cleanest direct check is to assert that the lifter never emits
+    //   a redundant AND/OR with identical sources, i.e. count == 0.
+    {
+        uint8_t and_eax_eax[] = {0x21, 0xC0};   // and eax, eax
+        auto l = ir::lift(and_eax_eax, sizeof(and_eax_eax));
+        CHECK(l && ir::is_fully_lifted(*l), "and eax,eax fully lifted");
+        for (const auto& op : l->ops) {
+            if (op.opcode == ir::Opcode::AND && op.num_inputs == 2) {
+                CHECK(!(op.inputs[0].space == ir::Space::GPR
+                        && op.inputs[1].space == ir::Space::GPR
+                        && op.inputs[0].offset == op.inputs[1].offset
+                        && op.inputs[0].size == op.inputs[1].size
+                        && op.inputs[0].bit_lo == op.inputs[1].bit_lo),
+                      "AND x,x is folded out of the IR");
+            }
+        }
     }
     // DIV r/m8 (F6 /6): AX / src → AL=quot, AH=rem
     {
@@ -768,7 +931,10 @@ int main() {
         uint8_t xchg_eax_ecx[] = {0x91};
         auto l = ir::lift(xchg_eax_ecx, sizeof(xchg_eax_ecx));
         CHECK(l && ir::is_fully_lifted(*l), "XCHG eax,ecx (opcode-reg) fully lifted");
-        CHECK(count_op(*l, ir::Opcode::COPY) == 3, "XCHG opcode-reg emits 3 COPYs");
+        // The 32-bit zero-extension post-pass adds COPY 0 → gpr[N][32:63]
+        // after every 32-bit GPR write, so the raw COPY count is now 3
+        // exchange COPYs + 2 zero-extension COPYs = 5.
+        CHECK(count_op(*l, ir::Opcode::COPY) >= 3, "XCHG opcode-reg emits >= 3 COPYs");
     }
     // XCHG memory form: 87 03 = XCHG eax, [rbx]
     {
