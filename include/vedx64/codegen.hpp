@@ -3231,10 +3231,11 @@ public:
         return *this;
     }
     CodeGen& imul(Reg dst, Reg src, int64_t imm) {
+        if (dst.bits == 16) emit8(0x66);
         emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
         emit8(0x69);
         emit_modrm(3, dst.id, src.id);
-        emit_imm(imm, dst.bits/8);
+        emit_imm(imm, (dst.bits == 16 ? 2 : 4));
         return *this;
     }
     CodeGen& imul(Reg r) {
@@ -8324,10 +8325,11 @@ public:
     }
 
     CodeGen& shld(Reg dst, Reg src, int64_t imm) {
-        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
+        if (dst.bits == 16) emit8(0x66);
+        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
         emit8(0x0F); emit8(0xA4);
-        emit_modrm(3, dst.id, src.id);
-        emit_imm(imm, dst.bits/8);
+        emit_modrm(3, src.id, dst.id);
+        emit_imm(imm, 1);
         return *this;
     }
 
@@ -8358,10 +8360,11 @@ public:
     }
 
     CodeGen& shrd(Reg dst, Reg src, int64_t imm) {
-        emit_rex_if_needed(dst.bits==64, dst.id, 0, src.id);
+        if (dst.bits == 16) emit8(0x66);
+        emit_rex_if_needed(dst.bits==64, src.id, 0, dst.id);
         emit8(0x0F); emit8(0xAC);
-        emit_modrm(3, dst.id, src.id);
-        emit_imm(imm, dst.bits/8);
+        emit_modrm(3, src.id, dst.id);
+        emit_imm(imm, 1);
         return *this;
     }
 

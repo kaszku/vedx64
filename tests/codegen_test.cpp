@@ -131,6 +131,13 @@ int main() {
     TEST_ASM("cmov(Z,ecx,eax)",  g.cmov(0x4, ecx, eax), 0x0F, 0x44, 0xC8);
     TEST_ASM("cmov(NZ,ecx,eax)", g.cmov(0x5, ecx, eax), 0x0F, 0x45, 0xC8);
     TEST_ASM("cmov(Z,rcx,rax)",  g.cmov(0x4, rcx, rax), 0x48, 0x0F, 0x44, 0xC8);
+    TEST_ASM("shld eax,ecx,4",   g.shld(eax, ecx, 4),                0x0F, 0xA4, 0xC8, 0x04);
+    TEST_ASM("shld rax,rcx,4",   g.shld(rax, rcx, 4),                0x48, 0x0F, 0xA4, 0xC8, 0x04);
+    TEST_ASM("shld ax,cx,4",     g.shld(ax,  cx,  4),                0x66, 0x0F, 0xA4, 0xC8, 0x04);
+    TEST_ASM("shrd rax,rcx,4",   g.shrd(rax, rcx, 4),                0x48, 0x0F, 0xAC, 0xC8, 0x04);
+    TEST_ASM("imul eax,ecx,imm32", g.imul(eax, ecx, (int64_t)0x12345678), 0x69, 0xC1, 0x78, 0x56, 0x34, 0x12);
+    TEST_ASM("imul rax,rcx,imm32", g.imul(rax, rcx, (int64_t)0x12345678), 0x48, 0x69, 0xC1, 0x78, 0x56, 0x34, 0x12);
+    TEST_ASM("imul ax,cx,imm16",   g.imul(ax,  cx,  (int64_t)0x1234),     0x66, 0x69, 0xC1, 0x34, 0x12);
 
     printf("\n%d/%d codegen tests passed\n", g_pass, g_pass+g_fail);
     return g_fail > 0 ? 1 : 0;
