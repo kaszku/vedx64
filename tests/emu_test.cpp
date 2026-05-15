@@ -642,6 +642,110 @@ static void test_bts_btr_btc() {
     CHECK(mem[0x8FF] == 0x80, "BTS dword [rdx],ECX(-1): mem[-1]=0x80 (negative EA adj, bit 31)");
 }
 
+static void test_memfault_default_abort() {
+    uint8_t mem[256] = {0};
+    CpuState cpu; emu_init(cpu, mem, sizeof(mem));
+    static const uint8_t code[] = {0xAD}; // lodsd: eax = [rsi]
+    memcpy(mem + 0x10, code, sizeof(code));
+    cpu.rip = 0x10;
+    cpu.gpr[6] = 0x1000; // OOB (mem_size=256)
+    StepResult r = emu_step(cpu);
+    CHECK(r == StepResult::MemFault, "memfault: no handler -> MemFault");
+    CHECK(cpu.rip == 0x10, "memfault: no handler -> RIP not advanced");
+}
+
+static void test_memfault_handler_info() {
+    uint8_t mem[256] = {0};
+    CpuState cpu; emu_init(cpu, mem, sizeof(mem));
+    static const uint8_t code[] = {0xAD}; // lodsd: eax = [rsi]
+    memcpy(mem + 0x10, code, sizeof(code));
+    cpu.rip = 0x10;
+    cpu.gpr[6] = 0xDEAD0000ULL;
+    MemFaultInfo captured{};
+    bool called = false;
+    set_mem_fault_handler(cpu, [&](const MemFaultInfo& fi) {
+        captured = fi; called = true; return FaultAction::Abort;
+    });
+    StepResult r = emu_step(cpu);
+    CHECK(r == StepResult::MemFault, "memfault info: Abort -> MemFault");
+    CHECK(called, "memfault info: handler was invoked");
+    CHECK(captured.va == 0xDEAD0000ULL, "memfault info: va");
+    CHECK(captured.size == 4, "memfault info: size");
+    CHECK(captured.is_write == false, "memfault info: is_write=false");
+    CHECK(captured.rip == 0x10, "memfault info: rip == instruction start");
+}
+
+static void test_memfault_skip_load() {
+    uint8_t mem[256] = {0};
+    CpuState cpu; emu_init(cpu, mem, sizeof(mem));
+    static const uint8_t code[] = {0xAD}; // lodsd: eax = [rsi]
+    memcpy(mem + 0x10, code, sizeof(code));
+    cpu.rip = 0x10;
+    cpu.gpr[6] = 0x1000;
+    cpu.gpr[0] = 0xAAAAAAAAAAAAAAAAULL; // sentinel: skip should NOT clobber to zero
+    set_mem_fault_handler(cpu, [](const MemFaultInfo&) { return FaultAction::Skip; });
+    StepResult r = emu_step(cpu);
+    CHECK(r == StepResult::OK, "memfault skip load: no fault");
+    CHECK(cpu.rip == 0x11, "memfault skip load: RIP advanced past instr");
+    CHECK(cpu.gpr[0] == 0xAAAAAAAAAAAAAAAAULL, "memfault skip load: dst register preserved (Skip != zero-fill)");
+}
+
+static void test_memfault_skip_store() {
+    uint8_t mem[256] = {0};
+    CpuState cpu; emu_init(cpu, mem, sizeof(mem));
+    static const uint8_t code[] = {0xAB}; // stosd: [rdi]=eax
+    memcpy(mem + 0x10, code, sizeof(code));
+    cpu.rip = 0x10;
+    cpu.gpr[7] = 0x1000; // OOB RDI
+    cpu.gpr[0] = 0xDEADBEEF;
+    uint8_t before[256]; memcpy(before, mem, sizeof(mem));
+    set_mem_fault_handler(cpu, [](const MemFaultInfo& fi) {
+        return fi.is_write ? FaultAction::Skip : FaultAction::Abort;
+    });
+    StepResult r = emu_step(cpu);
+    CHECK(r == StepResult::OK, "memfault skip store: no fault");
+    CHECK(cpu.rip == 0x11, "memfault skip store: RIP advanced");
+    CHECK(memcmp(before, mem, sizeof(mem)) == 0, "memfault skip store: no memory modified");
+}
+
+static void test_memfault_retry_after_poke() {
+    static uint8_t big[0x10000]; memset(big, 0, sizeof(big));
+    CpuState cpu; emu_init(cpu, big, 0x100); // only 0x100 mapped initially
+    static const uint8_t code[] = {0xAD}; // lodsd: eax = [rsi]
+    memcpy(big + 0x10, code, sizeof(code));
+    cpu.rip = 0x10;
+    cpu.gpr[6] = 0x500;
+    set_mem_fault_handler(cpu, [&](const MemFaultInfo& fi) {
+        // "poke" by writing into the underlying buffer past the current mem_size,
+        // then enlarge mem_size to expose it. Returning Retry re-runs the access.
+        uint32_t v = 0xCAFEBABEu;
+        memcpy(big + fi.va, &v, 4);
+        cpu.mem_size = fi.va + fi.size;
+        return FaultAction::Retry;
+    });
+    StepResult r = emu_step(cpu);
+    CHECK(r == StepResult::OK, "memfault retry: success after poke");
+    CHECK((uint32_t)cpu.gpr[0] == 0xCAFEBABEu, "memfault retry: load got poked value");
+    CHECK(cpu.rip == 0x11, "memfault retry: RIP advanced");
+}
+
+static void test_memfault_retry_caller_terminates() {
+    uint8_t mem[256] = {0};
+    CpuState cpu; emu_init(cpu, mem, sizeof(mem));
+    static const uint8_t code[] = {0xAD}; // lodsd
+    memcpy(mem + 0x10, code, sizeof(code));
+    cpu.rip = 0x10;
+    cpu.gpr[6] = 0x1000;
+    int invocations = 0;
+    set_mem_fault_handler(cpu, [&](const MemFaultInfo&) {
+        invocations++;
+        return (invocations <= 3) ? FaultAction::Retry : FaultAction::Abort;
+    });
+    StepResult r = emu_step(cpu);
+    CHECK(r == StepResult::MemFault, "memfault retry-cap: abort on 4th call");
+    CHECK(invocations == 4, "memfault retry-cap: handler called 4 times (3 retries + 1 abort)");
+}
+
 int main() {
     test_add();
     test_sub();
@@ -674,6 +778,12 @@ int main() {
     test_vpermq();
     test_vex_basic();
     test_bts_btr_btc();
+    test_memfault_default_abort();
+    test_memfault_handler_info();
+    test_memfault_skip_load();
+    test_memfault_skip_store();
+    test_memfault_retry_after_poke();
+    test_memfault_retry_caller_terminates();
 
     printf("vedx64_emu: %d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;

@@ -5,9 +5,34 @@
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
+#include <functional>
 #include "vedx64/core.hpp"
 
 namespace vedx64 {
+
+// Reported to a MemFaultHandler when emu_step would otherwise return
+// StepResult::MemFault. `rip` is the start-of-instruction RIP that issued the
+// access; `va` is the unmapped virtual address; `size` is the access width in
+// bytes; `is_write` distinguishes stores from loads.
+struct MemFaultInfo {
+    uint64_t va;
+    uint64_t rip;
+    uint32_t size;
+    bool     is_write;
+};
+
+enum class FaultAction : uint8_t {
+    Abort,   // default: return StepResult::MemFault
+    // Skip: abandon the faulting access and finish the instruction with OK.
+    // emu_step advances RIP past the instruction. For loads the destination
+    // retains its prior value (it is NOT explicitly zeroed); for stores the
+    // write is dropped. Callers that need a specific value should poke memory
+    // and return Retry instead.
+    Skip,
+    Retry,   // re-attempt the same access (handler is expected to have populated it)
+};
+
+using MemFaultHandler = std::function<FaultAction(const MemFaultInfo&)>;
 
 struct CpuState {
     uint64_t gpr[16];      // RAX=0, RCX=1, RDX=2, RBX=3, RSP=4, RBP=5, RSI=6, RDI=7, R8-R15=8-15
@@ -31,6 +56,10 @@ struct CpuState {
     uint16_t seg[6]; // ES=0, CS=1, SS=2, DS=3, FS=4, GS=5
     uint64_t fs_base;
     uint64_t gs_base;
+
+    // Optional user-installed callback fired before emu_step would return
+    // StepResult::MemFault. Default-empty preserves abort-on-fault behavior.
+    MemFaultHandler mem_fault_handler;
 
     // Convenience accessors
     uint64_t& rax() { return gpr[0]; }
@@ -63,6 +92,13 @@ constexpr uint64_t RFLAG_OF = 1ULL << 11;
 
 // Initialize CPU state
 void emu_init(CpuState& cpu, uint8_t* mem, size_t mem_size);
+
+// Install (or clear, with an empty std::function) a callback invoked just
+// before emu_step would return StepResult::MemFault. Returning Abort
+// preserves the default behavior; Skip synthesizes a zero load / drops a
+// store; Retry re-issues the access (the handler is expected to have poked
+// the missing memory — caller is responsible for retry termination).
+void set_mem_fault_handler(CpuState& cpu, MemFaultHandler handler);
 
 // Step a single instruction. Returns result code.
 StepResult emu_step(CpuState& cpu);

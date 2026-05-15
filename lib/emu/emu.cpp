@@ -11,16 +11,68 @@
 namespace vedx64 {
 
 void emu_init(CpuState& cpu, uint8_t* mem, size_t mem_size) {
-    memset(&cpu, 0, sizeof(cpu));
+    for (int i = 0; i < 16; ++i) cpu.gpr[i] = 0;
+    cpu.rip = 0;
+    cpu.rflags = 0x202;
     cpu.mem = mem;
     cpu.mem_size = mem_size;
-    cpu.rflags = 0x202;
-    cpu.fpu_control = 0x037F; // default FPU control word
+    for (int i = 0; i < 32; ++i) for (int j = 0; j < 8; ++j) cpu.zmm[i][j] = 0.0;
     cpu.mxcsr = 0x1F80; // default MXCSR
+    for (int i = 0; i < 8; ++i) cpu.opmask[i] = 0;
+    for (int i = 0; i < 8; ++i) cpu.fpu_stack[i] = 0.0;
+    cpu.fpu_top = 0;
+    cpu.fpu_status = 0;
+    cpu.fpu_control = 0x037F; // default FPU control word
+    for (int i = 0; i < 6; ++i) cpu.seg[i] = 0;
+    cpu.fs_base = 0;
+    cpu.gs_base = 0;
+    cpu.mem_fault_handler = nullptr;
+}
+
+void set_mem_fault_handler(CpuState& cpu, MemFaultHandler handler) {
+    cpu.mem_fault_handler = std::move(handler);
 }
 
 static bool mem_check(const CpuState& cpu, uint64_t addr, size_t size) {
-    return addr + size <= cpu.mem_size;
+    return addr + size <= cpu.mem_size && addr + size >= addr;
+}
+
+static bool emu_mem_dispatch(CpuState& cpu, uint64_t va, uint32_t sz, bool is_write, bool* skip) {
+    *skip = false;
+    for (;;) {
+        if (mem_check(cpu, va, sz)) return true;
+        if (!cpu.mem_fault_handler) return false;
+        MemFaultInfo fi{va, cpu.rip, sz, is_write};
+        FaultAction a = cpu.mem_fault_handler(fi);
+        if (a == FaultAction::Abort) return false;
+        if (a == FaultAction::Skip)  { *skip = true; return true; }
+        // Retry: loop back and re-check.
+    }
+}
+
+// Read `sz` bytes from `ea` into `dst`. Returns false on fault.
+// On a Skip-handled fault, `dst` is zero-filled.
+static bool emu_read(CpuState& cpu, uint64_t ea, uint32_t sz, void* dst) {
+    bool skip;
+    if (!emu_mem_dispatch(cpu, ea, sz, false, &skip)) return false;
+    if (skip) { memset(dst, 0, sz); return true; }
+    memcpy(dst, cpu.mem + ea, sz);
+    return true;
+}
+
+#define EMU_CHK(cpu_, ea_, sz_, is_w_) do { \
+    bool _vedx64_sk; \
+    if (!emu_mem_dispatch((cpu_), (ea_), (sz_), (is_w_), &_vedx64_sk)) return StepResult::MemFault; \
+    if (_vedx64_sk) return StepResult::OK; \
+} while (0)
+
+// Write `sz` bytes from `src` to `ea`. Returns false on fault. Skip drops the store.
+static bool emu_write(CpuState& cpu, uint64_t ea, uint32_t sz, const void* src) {
+    bool skip;
+    if (!emu_mem_dispatch(cpu, ea, sz, true, &skip)) return false;
+    if (skip) return true;
+    memcpy(cpu.mem + ea, src, sz);
+    return true;
 }
 
 static uint64_t mem_read(const CpuState& cpu, uint64_t addr, int bytes) {
@@ -398,28 +450,30 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         while (cpu.gpr[1] != 0) {
             int64_t delta = (cpu.rflags & RFLAG_DF) ? -str_sz : str_sz;
             if (base_mn == Mnemonic::STOS) {
-                if (!mem_check(cpu, cpu.gpr[7], str_sz)) return StepResult::MemFault;
+                EMU_CHK(cpu, cpu.gpr[7], (uint32_t)str_sz, true);
                 mem_write(cpu, cpu.gpr[7], cpu.gpr[0], str_sz);
                 cpu.gpr[7] += delta;
             } else if (base_mn == Mnemonic::LODS) {
-                if (!mem_check(cpu, cpu.gpr[6], str_sz)) return StepResult::MemFault;
+                EMU_CHK(cpu, cpu.gpr[6], (uint32_t)str_sz, false);
                 uint64_t val = mem_read(cpu, cpu.gpr[6], str_sz);
                 if (str_sz == 4) cpu.gpr[0] = val & 0xFFFFFFFF;
                 else if (str_sz == 8) cpu.gpr[0] = val;
                 else cpu.gpr[0] = (cpu.gpr[0] & ~mask(str_sz*8)) | val;
                 cpu.gpr[6] += delta;
             } else if (base_mn == Mnemonic::MOVS) {
-                if (!mem_check(cpu, cpu.gpr[6], str_sz) || !mem_check(cpu, cpu.gpr[7], str_sz)) return StepResult::MemFault;
+                EMU_CHK(cpu, cpu.gpr[6], (uint32_t)str_sz, false);
+                EMU_CHK(cpu, cpu.gpr[7], (uint32_t)str_sz, true);
                 mem_write(cpu, cpu.gpr[7], mem_read(cpu, cpu.gpr[6], str_sz), str_sz);
                 cpu.gpr[6] += delta; cpu.gpr[7] += delta;
             } else if (base_mn == Mnemonic::SCAS) {
-                if (!mem_check(cpu, cpu.gpr[7], str_sz)) return StepResult::MemFault;
+                EMU_CHK(cpu, cpu.gpr[7], (uint32_t)str_sz, false);
                 uint64_t a = cpu.gpr[0] & mask(str_sz*8);
                 uint64_t b = mem_read(cpu, cpu.gpr[7], str_sz);
                 update_flags_sub(cpu, a, b, (a - b) & mask(str_sz*8), str_sz*8);
                 cpu.gpr[7] += delta;
             } else if (base_mn == Mnemonic::CMPS) {
-                if (!mem_check(cpu, cpu.gpr[6], str_sz) || !mem_check(cpu, cpu.gpr[7], str_sz)) return StepResult::MemFault;
+                EMU_CHK(cpu, cpu.gpr[6], (uint32_t)str_sz, false);
+                EMU_CHK(cpu, cpu.gpr[7], (uint32_t)str_sz, false);
                 uint64_t a = mem_read(cpu, cpu.gpr[6], str_sz);
                 uint64_t b = mem_read(cpu, cpu.gpr[7], str_sz);
                 update_flags_sub(cpu, a, b, (a - b) & mask(str_sz*8), str_sz*8);
@@ -1283,6 +1337,7 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         int str_sz = 4; uint8_t base_op = opcode & 0xFF;
         if ((base_op & 1) == 0) str_sz = 1;
         else { if (di.rex & 0x08) str_sz = 8; for (int i=0;i<di.num_prefixes;i++) if(di.legacy_prefix[i]==0x66) str_sz=2; }
+        EMU_CHK(cpu, cpu.gpr[7], (uint32_t)str_sz, true);
         mem_write(cpu, cpu.gpr[7], cpu.gpr[0], str_sz);
         cpu.gpr[7] += (cpu.rflags & RFLAG_DF) ? -str_sz : str_sz;
         break;
@@ -1291,6 +1346,7 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         int str_sz = 4; uint8_t base_op = opcode & 0xFF;
         if ((base_op & 1) == 0) str_sz = 1;
         else { if (di.rex & 0x08) str_sz = 8; for (int i=0;i<di.num_prefixes;i++) if(di.legacy_prefix[i]==0x66) str_sz=2; }
+        EMU_CHK(cpu, cpu.gpr[6], (uint32_t)str_sz, false);
         uint64_t val = mem_read(cpu, cpu.gpr[6], str_sz);
         if (str_sz == 4) cpu.gpr[0] = val & 0xFFFFFFFF;
         else if (str_sz == 8) cpu.gpr[0] = val;
@@ -1302,6 +1358,8 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         int str_sz = 4; uint8_t base_op = opcode & 0xFF;
         if ((base_op & 1) == 0) str_sz = 1;
         else { if (di.rex & 0x08) str_sz = 8; for (int i=0;i<di.num_prefixes;i++) if(di.legacy_prefix[i]==0x66) str_sz=2; }
+        EMU_CHK(cpu, cpu.gpr[6], (uint32_t)str_sz, false);
+        EMU_CHK(cpu, cpu.gpr[7], (uint32_t)str_sz, true);
         mem_write(cpu, cpu.gpr[7], mem_read(cpu, cpu.gpr[6], str_sz), str_sz);
         int64_t d = (cpu.rflags & RFLAG_DF) ? -str_sz : str_sz;
         cpu.gpr[6] += d; cpu.gpr[7] += d;
@@ -1311,6 +1369,7 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         int str_sz = 4; uint8_t base_op = opcode & 0xFF;
         if ((base_op & 1) == 0) str_sz = 1;
         else { if (di.rex & 0x08) str_sz = 8; for (int i=0;i<di.num_prefixes;i++) if(di.legacy_prefix[i]==0x66) str_sz=2; }
+        EMU_CHK(cpu, cpu.gpr[7], (uint32_t)str_sz, false);
         uint64_t a = cpu.gpr[0] & mask(str_sz*8);
         uint64_t b = mem_read(cpu, cpu.gpr[7], str_sz);
         update_flags_sub(cpu, a, b, (a - b) & mask(str_sz*8), str_sz*8);
@@ -1321,6 +1380,8 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         int str_sz = 4; uint8_t base_op = opcode & 0xFF;
         if ((base_op & 1) == 0) str_sz = 1;
         else { if (di.rex & 0x08) str_sz = 8; for (int i=0;i<di.num_prefixes;i++) if(di.legacy_prefix[i]==0x66) str_sz=2; }
+        EMU_CHK(cpu, cpu.gpr[6], (uint32_t)str_sz, false);
+        EMU_CHK(cpu, cpu.gpr[7], (uint32_t)str_sz, false);
         uint64_t a = mem_read(cpu, cpu.gpr[6], str_sz);
         uint64_t b = mem_read(cpu, cpu.gpr[7], str_sz);
         update_flags_sub(cpu, a, b, (a - b) & mask(str_sz*8), str_sz*8);
@@ -1465,7 +1526,7 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     }
     case Mnemonic::CMPXCHG8B: {
         uint64_t ea = compute_ea(cpu, di);
-        if (!mem_check(cpu, ea, 8)) return StepResult::MemFault;
+        EMU_CHK(cpu, ea, 8, true);
         uint32_t lo = (uint32_t)mem_read(cpu, ea, 4);
         uint32_t hi = (uint32_t)mem_read(cpu, ea + 4, 4);
         if ((uint32_t)cpu.gpr[0] == lo && (uint32_t)cpu.gpr[2] == hi) {
@@ -1498,20 +1559,20 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         uint16_t alloc_size = (uint16_t)di.immediate;
         int nesting = (int)(di.displacement & 0x1F);
         cpu.gpr[4] -= 8;
-        if (!mem_check(cpu, cpu.gpr[4], 8)) return StepResult::MemFault;
+        EMU_CHK(cpu, cpu.gpr[4], 8, true);
         mem_write(cpu, cpu.gpr[4], cpu.gpr[5], 8);
         uint64_t frame_temp = cpu.gpr[4];
         if (nesting > 0) {
             for (int i = 1; i < nesting; i++) {
                 cpu.gpr[5] -= 8;
-                if (!mem_check(cpu, cpu.gpr[5], 8)) return StepResult::MemFault;
+                EMU_CHK(cpu, cpu.gpr[5], 8, false);
                 uint64_t fp = mem_read(cpu, cpu.gpr[5], 8);
                 cpu.gpr[4] -= 8;
-                if (!mem_check(cpu, cpu.gpr[4], 8)) return StepResult::MemFault;
+                EMU_CHK(cpu, cpu.gpr[4], 8, true);
                 mem_write(cpu, cpu.gpr[4], fp, 8);
             }
             cpu.gpr[4] -= 8;
-            if (!mem_check(cpu, cpu.gpr[4], 8)) return StepResult::MemFault;
+            EMU_CHK(cpu, cpu.gpr[4], 8, true);
             mem_write(cpu, cpu.gpr[4], frame_temp, 8);
         }
         cpu.gpr[5] = frame_temp;
@@ -1520,7 +1581,7 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     }
     case Mnemonic::XLATB: {
         uint64_t addr = cpu.gpr[3] + (cpu.gpr[0] & 0xFF);
-        if (!mem_check(cpu, addr, 1)) return StepResult::MemFault;
+        EMU_CHK(cpu, addr, 1, false);
         cpu.gpr[0] = (cpu.gpr[0] & ~0xFFULL) | mem_read(cpu, addr, 1);
         break;
     }
@@ -1880,13 +1941,13 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         int sz = (di.has_vex && di.vex_L >= 1) ? ((di.vex_L >= 2) ? 64 : 32) : 16;
         if (is_xmm_mem(di, op1)) {
             uint64_t ea = compute_ea(cpu, di);
-            if (!mem_check(cpu, ea, sz)) return StepResult::MemFault;
+            EMU_CHK(cpu, ea, (uint32_t)sz, false);
             int r = xmm_reg_index(di, op0);
             memcpy(cpu.zmm[r], cpu.mem + ea, sz);
             vex_zero_upper(cpu, di, r);
         } else if (is_xmm_mem(di, op0)) {
             uint64_t ea = compute_ea(cpu, di);
-            if (!mem_check(cpu, ea, sz)) return StepResult::MemFault;
+            EMU_CHK(cpu, ea, (uint32_t)sz, true);
             int r = xmm_reg_index(di, op1);
             memcpy(cpu.mem + ea, cpu.zmm[r], sz);
         } else {
@@ -1903,13 +1964,13 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         int sz = (di.has_vex && di.vex_L >= 1) ? ((di.vex_L >= 2) ? 64 : 32) : 16;
         if (is_xmm_mem(di, op1)) {
             uint64_t ea = compute_ea(cpu, di);
-            if (!mem_check(cpu, ea, sz)) return StepResult::MemFault;
+            EMU_CHK(cpu, ea, (uint32_t)sz, false);
             int r = xmm_reg_index(di, op0);
             memcpy(cpu.zmm[r], cpu.mem + ea, sz);
             vex_zero_upper(cpu, di, r);
         } else if (is_xmm_mem(di, op0)) {
             uint64_t ea = compute_ea(cpu, di);
-            if (!mem_check(cpu, ea, sz)) return StepResult::MemFault;
+            EMU_CHK(cpu, ea, (uint32_t)sz, true);
             int r = xmm_reg_index(di, op1);
             memcpy(cpu.mem + ea, cpu.zmm[r], sz);
         } else {
@@ -1926,13 +1987,13 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         int sz = (di.has_vex && di.vex_L >= 1) ? ((di.vex_L >= 2) ? 64 : 32) : 16;
         if (is_xmm_mem(di, op1)) {
             uint64_t ea = compute_ea(cpu, di);
-            if (!mem_check(cpu, ea, sz)) return StepResult::MemFault;
+            EMU_CHK(cpu, ea, (uint32_t)sz, false);
             int r = xmm_reg_index(di, op0);
             memcpy(cpu.zmm[r], cpu.mem + ea, sz);
             vex_zero_upper(cpu, di, r);
         } else if (is_xmm_mem(di, op0)) {
             uint64_t ea = compute_ea(cpu, di);
-            if (!mem_check(cpu, ea, sz)) return StepResult::MemFault;
+            EMU_CHK(cpu, ea, (uint32_t)sz, true);
             int r = xmm_reg_index(di, op1);
             memcpy(cpu.mem + ea, cpu.zmm[r], sz);
         } else {
@@ -1949,13 +2010,13 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         int sz = (di.has_vex && di.vex_L >= 1) ? ((di.vex_L >= 2) ? 64 : 32) : 16;
         if (is_xmm_mem(di, op1)) {
             uint64_t ea = compute_ea(cpu, di);
-            if (!mem_check(cpu, ea, sz)) return StepResult::MemFault;
+            EMU_CHK(cpu, ea, (uint32_t)sz, false);
             int r = xmm_reg_index(di, op0);
             memcpy(cpu.zmm[r], cpu.mem + ea, sz);
             vex_zero_upper(cpu, di, r);
         } else if (is_xmm_mem(di, op0)) {
             uint64_t ea = compute_ea(cpu, di);
-            if (!mem_check(cpu, ea, sz)) return StepResult::MemFault;
+            EMU_CHK(cpu, ea, (uint32_t)sz, true);
             int r = xmm_reg_index(di, op1);
             memcpy(cpu.mem + ea, cpu.zmm[r], sz);
         } else {
@@ -1972,13 +2033,13 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         int sz = (di.has_vex && di.vex_L >= 1) ? ((di.vex_L >= 2) ? 64 : 32) : 16;
         if (is_xmm_mem(di, op1)) {
             uint64_t ea = compute_ea(cpu, di);
-            if (!mem_check(cpu, ea, sz)) return StepResult::MemFault;
+            EMU_CHK(cpu, ea, (uint32_t)sz, false);
             int r = xmm_reg_index(di, op0);
             memcpy(cpu.zmm[r], cpu.mem + ea, sz);
             vex_zero_upper(cpu, di, r);
         } else if (is_xmm_mem(di, op0)) {
             uint64_t ea = compute_ea(cpu, di);
-            if (!mem_check(cpu, ea, sz)) return StepResult::MemFault;
+            EMU_CHK(cpu, ea, (uint32_t)sz, true);
             int r = xmm_reg_index(di, op1);
             memcpy(cpu.mem + ea, cpu.zmm[r], sz);
         } else {
@@ -1995,13 +2056,13 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         int sz = (di.has_vex && di.vex_L >= 1) ? ((di.vex_L >= 2) ? 64 : 32) : 16;
         if (is_xmm_mem(di, op1)) {
             uint64_t ea = compute_ea(cpu, di);
-            if (!mem_check(cpu, ea, sz)) return StepResult::MemFault;
+            EMU_CHK(cpu, ea, (uint32_t)sz, false);
             int r = xmm_reg_index(di, op0);
             memcpy(cpu.zmm[r], cpu.mem + ea, sz);
             vex_zero_upper(cpu, di, r);
         } else if (is_xmm_mem(di, op0)) {
             uint64_t ea = compute_ea(cpu, di);
-            if (!mem_check(cpu, ea, sz)) return StepResult::MemFault;
+            EMU_CHK(cpu, ea, (uint32_t)sz, true);
             int r = xmm_reg_index(di, op1);
             memcpy(cpu.mem + ea, cpu.zmm[r], sz);
         } else {
@@ -3310,12 +3371,12 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     }
     case Mnemonic::MOVNTPS: case Mnemonic::MOVNTPD: case Mnemonic::MOVNTDQ: {
         int src = xmm_reg_index(di, di.desc->operands[1]); uint64_t ea = compute_ea(cpu, di);
-        if (!mem_check(cpu, ea, 16)) return StepResult::MemFault;
+        EMU_CHK(cpu, ea, 16, true);
         memcpy(cpu.mem + ea, cpu.zmm[src], 16); break;
     }
     case Mnemonic::MOVNTDQA: {
         int dst = xmm_reg_index(di, di.desc->operands[0]); uint64_t ea = compute_ea(cpu, di);
-        if (!mem_check(cpu, ea, 16)) return StepResult::MemFault;
+        EMU_CHK(cpu, ea, 16, false);
         memcpy(cpu.zmm[dst], cpu.mem + ea, 16); break;
     }
     case Mnemonic::EXTRACTPS: {
@@ -3986,7 +4047,7 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     case Mnemonic::VBROADCASTF128: {
         int dst = xmm_reg_index(di, di.desc->operands[0]);
         uint64_t ea = compute_ea(cpu, di);
-        if (!mem_check(cpu, ea, 16)) return StepResult::MemFault;
+        EMU_CHK(cpu, ea, 16, false);
         memcpy(&cpu.zmm[dst][0], cpu.mem + ea, 16);
         memcpy(&cpu.zmm[dst][2], cpu.mem + ea, 16);
         vex_zero_upper(cpu, di, dst); break;
@@ -4041,7 +4102,7 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         int lane = (int)di.immediate & 1;
         if (is_xmm_mem(di, di.desc->operands[0])) {
             uint64_t ea = compute_ea(cpu, di);
-            if (!mem_check(cpu, ea, 16)) return StepResult::MemFault;
+            EMU_CHK(cpu, ea, 16, true);
             memcpy(cpu.mem + ea, &cpu.zmm[src][lane * 2], 16);
         } else {
             int dst = xmm_reg_index(di, di.desc->operands[0]);
@@ -5013,19 +5074,19 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     }
     case Mnemonic::PUSHF: case Mnemonic::PUSHFD: case Mnemonic::PUSHFQ: {
         cpu.rsp() -= 8;
-        if (!mem_check(cpu, cpu.rsp(), 8)) return StepResult::MemFault;
+        EMU_CHK(cpu, cpu.rsp(), 8, true);
         mem_write(cpu, cpu.rsp(), cpu.rflags, 8);
         break;
     }
     case Mnemonic::POPF: case Mnemonic::POPFD: case Mnemonic::POPFQ: {
-        if (!mem_check(cpu, cpu.rsp(), 8)) return StepResult::MemFault;
+        EMU_CHK(cpu, cpu.rsp(), 8, false);
         cpu.rflags = mem_read(cpu, cpu.rsp(), 8);
         cpu.rsp() += 8;
         break;
     }
     case Mnemonic::XLAT: {
         uint64_t addr = cpu.rbx() + (cpu.rax() & 0xFF);
-        if (!mem_check(cpu, addr, 1)) return StepResult::MemFault;
+        EMU_CHK(cpu, addr, 1, false);
         cpu.rax() = (cpu.rax() & ~0xFFULL) | mem_read(cpu, addr, 1);
         break;
     }
@@ -5049,13 +5110,13 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         break;
     case Mnemonic::STMXCSR: {
         uint64_t addr = compute_ea(cpu, di);
-        if (!mem_check(cpu, addr, 4)) return StepResult::MemFault;
+        EMU_CHK(cpu, addr, 4, true);
         mem_write(cpu, addr, cpu.mxcsr, 4);
         break;
     }
     case Mnemonic::LDMXCSR: {
         uint64_t addr = compute_ea(cpu, di);
-        if (!mem_check(cpu, addr, 4)) return StepResult::MemFault;
+        EMU_CHK(cpu, addr, 4, false);
         cpu.mxcsr = (uint32_t)mem_read(cpu, addr, 4);
         break;
     }
@@ -5066,7 +5127,7 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     }
     case Mnemonic::CMPXCHG16B: {
         uint64_t addr = compute_ea(cpu, di);
-        if (!mem_check(cpu, addr, 16)) return StepResult::MemFault;
+        EMU_CHK(cpu, addr, 16, true);
         uint64_t lo = mem_read(cpu, addr, 8);
         uint64_t hi = mem_read(cpu, addr + 8, 8);
         if (cpu.rax() == lo && cpu.rdx() == hi) {
@@ -5088,8 +5149,8 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         break;
     case Mnemonic::CMPSB: case Mnemonic::CMPSW: case Mnemonic::CMPSQ: {
         int str_sz = forced_str_sz;
-        if (!mem_check(cpu, cpu.gpr[7], str_sz)) return StepResult::MemFault;
-        if (!mem_check(cpu, cpu.gpr[6], str_sz)) return StepResult::MemFault;
+        EMU_CHK(cpu, cpu.gpr[7], (uint32_t)str_sz, false);
+        EMU_CHK(cpu, cpu.gpr[6], (uint32_t)str_sz, false);
         uint64_t a = mem_read(cpu, cpu.gpr[6], str_sz);
         uint64_t b = mem_read(cpu, cpu.gpr[7], str_sz);
         update_flags_sub(cpu, a, b, (a - b) & mask(str_sz*8), str_sz*8);
@@ -5099,8 +5160,8 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     }
     case Mnemonic::MOVSB: case Mnemonic::MOVSW: case Mnemonic::MOVSQ: {
         int str_sz = forced_str_sz;
-        if (!mem_check(cpu, cpu.gpr[7], str_sz)) return StepResult::MemFault;
-        if (!mem_check(cpu, cpu.gpr[6], str_sz)) return StepResult::MemFault;
+        EMU_CHK(cpu, cpu.gpr[7], (uint32_t)str_sz, true);
+        EMU_CHK(cpu, cpu.gpr[6], (uint32_t)str_sz, false);
         mem_write(cpu, cpu.gpr[7], mem_read(cpu, cpu.gpr[6], str_sz), str_sz);
         int64_t d = (cpu.rflags & RFLAG_DF) ? -str_sz : str_sz;
         cpu.gpr[6] += d; cpu.gpr[7] += d;
@@ -5108,8 +5169,8 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     }
     case Mnemonic::LODSB: case Mnemonic::LODSW: case Mnemonic::LODSD: case Mnemonic::LODSQ: {
         int str_sz = forced_str_sz;
-        if (!mem_check(cpu, cpu.gpr[7], str_sz)) return StepResult::MemFault;
-        if (!mem_check(cpu, cpu.gpr[6], str_sz)) return StepResult::MemFault;
+        EMU_CHK(cpu, cpu.gpr[7], (uint32_t)str_sz, false);
+        EMU_CHK(cpu, cpu.gpr[6], (uint32_t)str_sz, false);
         uint64_t val = mem_read(cpu, cpu.gpr[6], str_sz);
         if (str_sz == 4) cpu.gpr[0] = val & 0xFFFFFFFF;
         else if (str_sz == 8) cpu.gpr[0] = val;
@@ -5119,14 +5180,14 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     }
     case Mnemonic::STOSB: case Mnemonic::STOSD: case Mnemonic::STOSQ: case Mnemonic::STOSW: {
         int str_sz = forced_str_sz;
-        if (!mem_check(cpu, cpu.gpr[7], str_sz)) return StepResult::MemFault;
+        EMU_CHK(cpu, cpu.gpr[7], (uint32_t)str_sz, true);
         mem_write(cpu, cpu.gpr[7], cpu.gpr[0], str_sz);
         cpu.gpr[7] += (cpu.rflags & RFLAG_DF) ? -str_sz : str_sz;
         break;
     }
     case Mnemonic::SCASB: case Mnemonic::SCASD: case Mnemonic::SCASQ: case Mnemonic::SCASW: {
         int str_sz = forced_str_sz;
-        if (!mem_check(cpu, cpu.gpr[7], str_sz)) return StepResult::MemFault;
+        EMU_CHK(cpu, cpu.gpr[7], (uint32_t)str_sz, false);
         uint64_t a = cpu.gpr[0] & mask(str_sz*8);
         uint64_t b = mem_read(cpu, cpu.gpr[7], str_sz);
         update_flags_sub(cpu, a, b, (a - b) & mask(str_sz*8), str_sz*8);
@@ -5184,7 +5245,7 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     case Mnemonic::LDDQU: {
         int d = ((di.modrm >> 3) & 7) | ((di.rex & 0x04) ? 8 : 0);
         uint64_t addr = compute_ea(cpu, di);
-        if (!mem_check(cpu, addr, 16)) return StepResult::MemFault;
+        EMU_CHK(cpu, addr, 16, false);
         for (int i = 0; i < 2; i++) cpu.zmm[d][i] = 0;
         uint64_t lo = mem_read(cpu, addr, 8); uint64_t hi = mem_read(cpu, addr+8, 8);
         memcpy(&cpu.zmm[d][0], &lo, 8); memcpy(&cpu.zmm[d][1], &hi, 8);
@@ -5296,7 +5357,7 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         int msk = (di.modrm & 7) | ((di.rex & 0x01) ? 8 : 0);
         uint8_t sv[16], mv[16]; memcpy(sv, cpu.zmm[src], 16); memcpy(mv, cpu.zmm[msk], 16);
         for (int i=0;i<16;i++) if (mv[i] & 0x80) {
-            if (!mem_check(cpu, cpu.gpr[7]+i, 1)) return StepResult::MemFault;
+            EMU_CHK(cpu, cpu.gpr[7]+i, 1, true);
             mem_write(cpu, cpu.gpr[7]+i, sv[i], 1);
         }
         break;
@@ -5337,7 +5398,7 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
             cpu.zmm[d][0] = cpu.zmm[s][0]; // reg-reg: only low qword
         } else {
             uint64_t addr = compute_ea(cpu, di);
-            if (!mem_check(cpu, addr, 8)) return StepResult::MemFault;
+            EMU_CHK(cpu, addr, 8, false);
             uint64_t v = mem_read(cpu, addr, 8);
             memcpy(&cpu.zmm[d][0], &v, 8); cpu.zmm[d][1] = 0;
         }
@@ -5687,7 +5748,7 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         for (int i=0;i<count;i++) {
             if (mask_v[i] & 0x80000000) {
                 uint64_t addr = base + (int64_t)indices[i] * scale;
-                if (!mem_check(cpu, addr, 4)) return StepResult::MemFault;
+                EMU_CHK(cpu, addr, 4, false);
                 dst_v[i] = (uint32_t)mem_read(cpu, addr, 4);
             }
             mask_v[i] = 0; // clear mask after use
@@ -5709,7 +5770,7 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         for (int i=0;i<count;i++) {
             if (mask_v[i] >> 63) {
                 uint64_t addr = base + (int64_t)indices[i] * scale;
-                if (!mem_check(cpu, addr, 8)) return StepResult::MemFault;
+                EMU_CHK(cpu, addr, 8, false);
                 cpu.zmm[dst][i] = 0; uint64_t v = mem_read(cpu, addr, 8); memcpy(&cpu.zmm[dst][i], &v, 8);
             }
             mask_v[i] = 0;
@@ -5730,7 +5791,7 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         for (int i=0;i<count;i++) {
             if (mask_v[i] & 0x80000000) {
                 uint64_t addr = base + indices[i] * scale;
-                if (!mem_check(cpu, addr, 4)) return StepResult::MemFault;
+                EMU_CHK(cpu, addr, 4, false);
                 dst_v[i] = (uint32_t)mem_read(cpu, addr, 4);
             }
             mask_v[i] = 0;
@@ -5751,7 +5812,7 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
         for (int i=0;i<count;i++) {
             if (mask_v[i] >> 63) {
                 uint64_t addr = base + indices[i] * scale;
-                if (!mem_check(cpu, addr, 8)) return StepResult::MemFault;
+                EMU_CHK(cpu, addr, 8, false);
                 cpu.zmm[dst][i] = 0; uint64_t v = mem_read(cpu, addr, 8); memcpy(&cpu.zmm[dst][i], &v, 8);
             }
             mask_v[i] = 0;
