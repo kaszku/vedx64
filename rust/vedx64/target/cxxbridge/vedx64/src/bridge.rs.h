@@ -811,6 +811,7 @@ namespace vedx64 {
     using Decoded = ::vedx64::bridge::Decoded;
     using Emu = ::vedx64::bridge::Emu;
     using IrLifted = ::vedx64::bridge::IrLifted;
+    using SymxSession = ::vedx64::bridge::SymxSession;
   }
 }
 

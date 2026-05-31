@@ -38,6 +38,7 @@ pub mod ffi {
         type Decoded;
         type Emu;
         type IrLifted;
+        type SymxSession;
 
         // Core
         fn decode(code: &[u8]) -> UniquePtr<Decoded>;
@@ -54,6 +55,11 @@ pub mod ffi {
         fn decoded_vex_vvvv(d: &Decoded) -> u8;
         fn decoded_vex_l(d: &Decoded) -> u8;
         fn decoded_vex_w(d: &Decoded) -> bool;
+        fn decoded_has_evex(d: &Decoded) -> bool;
+        fn decoded_evex_aaa(d: &Decoded) -> u8;
+        fn decoded_evex_z(d: &Decoded) -> bool;
+        fn decoded_evex_b(d: &Decoded) -> bool;
+        fn decoded_evex_rc(d: &Decoded) -> u8;
 
         fn disassemble(code: &[u8], rip: u64) -> String;
         fn mnemonic_name(m: u16) -> String;
@@ -116,6 +122,18 @@ pub mod ffi {
         fn emu_set_rflags(e: Pin<&mut Emu>, v: u64);
         fn emu_write_mem(e: Pin<&mut Emu>, offset: usize, data: &[u8]);
         fn emu_read_mem(e: &Emu, offset: usize, len: usize) -> Vec<u8>;
+        // Default memory-fault action: 0=Abort, 1=Skip, 2=Retry.
+        fn emu_set_default_fault_action(e: Pin<&mut Emu>, action: u8);
+
+        // Symbolic execution
+        fn symx_new(code: &[u8], base: u64, entry: u64) -> UniquePtr<SymxSession>;
+        fn symx_set_gpr_concrete(s: Pin<&mut SymxSession>, reg: u8, value: u64);
+        fn symx_run_block(s: Pin<&mut SymxSession>, max_instructions: usize) -> usize;
+        fn symx_rip(s: &SymxSession) -> u64;
+        fn symx_gpr_is_const(s: &SymxSession, reg: u8) -> bool;
+        fn symx_gpr_const_value(s: &SymxSession, reg: u8) -> u64;
+        fn symx_gpr_str(s: &SymxSession, reg: u8) -> String;
+        fn symx_solver_is_smt_backed() -> bool;
 
         // IR
         fn ir_lift(code: &[u8], addr: u64) -> UniquePtr<IrLifted>;

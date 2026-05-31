@@ -47,6 +47,12 @@ struct Expr {
 class Builder {
 public:
     Builder();
+    // Non-copyable: the hash-consing arena (vector<unique_ptr<Expr>>) must
+    // never be duplicated. Movable so it can be held by value in Engine.
+    Builder(const Builder&) = delete;
+    Builder& operator=(const Builder&) = delete;
+    Builder(Builder&&) = default;
+    Builder& operator=(Builder&&) = default;
 
     const Expr* k(uint64_t v, uint16_t width);   // canonical ConstU
     const Expr* sym(uint16_t width);              // fresh Symbol
@@ -178,6 +184,16 @@ struct PathCondition {
 enum FlagBit { CF = 0, PF, AF, ZF, SF, OF, DF }; // matches vedx64::ir flag layout
 
 struct State {
+    // State owns a unique_ptr<Memory>, so copying is ill-formed. Make that
+    // explicit (defeats nanobind's false-positive copy detection) and keep
+    // the move members the engine relies on (deque<State>, vector<State>,
+    // fork()/run() by value).
+    State() = default;
+    State(const State&) = delete;
+    State& operator=(const State&) = delete;
+    State(State&&) = default;
+    State& operator=(State&&) = default;
+
     Builder*       b;
     const Expr*    gpr[16]   = {};       // width=64 each
     const Expr*    flags[7]  = {};       // width=1 each
@@ -299,6 +315,11 @@ public:
     using ReadCode = std::function<bool(uint64_t addr, uint8_t* out, size_t n)>;
 
     Engine(Config cfg, ReadCode read_code);
+    // Holds a Builder + non-copyable Solver + State seed; never copied
+    // (nanobind placement-constructs it). Deleting copy stops nanobind from
+    // instantiating an ill-formed copy thunk.
+    Engine(const Engine&) = delete;
+    Engine& operator=(const Engine&) = delete;
 
     // Mutate the seed state before run() — caller can fix concrete inputs.
     State& seed_state() { return seed_; }

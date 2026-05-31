@@ -88,6 +88,10 @@ def test_vex_fields():
     di = v.decode(b'\x90')  # nop - no VEX
     assert di is not None
     assert di.has_vex == False
+    # EVEX/AVX-512 accessors exist and read False/0 for a plain insn.
+    assert di.has_evex == False
+    assert di.evex_aaa == 0
+    assert di.evex_z == False
 
 def test_encoding_id_enum():
     # Just verify the type exists
@@ -148,7 +152,7 @@ def test_analysis_mnemonic_queries():
 def test_analysis_patchers():
     a = v.analysis
     assert a.build_jmp_rel32(0x12345678) == bytes([0xE9, 0x78, 0x56, 0x34, 0x12])
-    jcc = a.build_jcc_rel32(int(a.CondCode.Z), -16)
+    jcc = a.build_jcc_rel32(a.CondCode.Z.value, -16)
     assert jcc[:2] == bytes([0x0F, 0x84])
     mov = a.build_mov_imm64(1, 0xCAFEBABE_DEADBEEF)  # RCX
     assert mov[:2] == bytes([0x48, 0xB9])
@@ -232,6 +236,83 @@ def test_assemble_block_ex():
         assert False, 'should have raised'
     except RuntimeError as e:
         assert 'line' in str(e)
+
+def test_emulator_memory():
+    if not hasattr(v, 'Emulator'):
+        return  # VEDX64_EMU not enabled
+    e = v.Emulator(0x1000)
+    # mov eax, 0x12345678
+    e.write_mem(0, b'\xb8\x78\x56\x34\x12')
+    assert e.read_mem(0, 5) == b'\xb8\x78\x56\x34\x12'
+    e.cpu.rip = 0
+    e.step()
+    assert e.cpu.rax & 0xFFFFFFFF == 0x12345678
+
+def test_cpustate_all_gprs():
+    if not hasattr(v, 'CpuState'):
+        return
+    s = v.CpuState()
+    # r8..r15 must be accessible (the old binding only had rax..rdi).
+    for name in ['r8','r9','r10','r11','r12','r13','r14','r15']:
+        setattr(s, name, 0x1000 + len(name))
+        assert getattr(s, name) == 0x1000 + len(name)
+    s.set_gpr(8, 0xABC)
+    assert s.gpr(8) == 0xABC and s.r8 == 0xABC
+
+def test_emulator_fault_callback():
+    if not hasattr(v, 'Emulator'):
+        return
+    e = v.Emulator(0x100)
+    seen = []
+    def handler(info):
+        seen.append(info.va)
+        return v.FaultAction.Skip
+    e.set_mem_fault_handler(handler)
+    # mov rax, [rbx] with rbx out of bounds → fault → handler → Skip.
+    e.write_mem(0, b'\x48\x8b\x03')
+    e.cpu.set_gpr(3, 0xDEAD00000000)
+    e.cpu.rip = 0
+    r = e.step()
+    assert r != v.StepResult.MemFault
+    assert len(seen) >= 1
+
+def test_ir_opcode_coverage():
+    if not hasattr(v, 'IrOpcode'):
+        return  # VEDX64_IR not enabled
+    # These were all MISSING from the old hand-maintained list.
+    for name in ['LEA','MOD','SMOD','BSWAP','BITREV','TEST','EXTRACT','INSERT',
+                 'CONCAT','BITCAST','SELECT','BITSEL','I2F','F2I','F2F','GET_DF',
+                 'SET_DF','INDIRECT_JMP','VCALL','POPCNT','CTZ','CLZ','FADD','FMAX',
+                 'VADD','VBROADCAST','RDTSC','SYSCALL','UD2','ARCH_X64']:
+        assert hasattr(v.IrOpcode, name), f'IrOpcode.{name} missing'
+    assert hasattr(v.IrSpace, 'OpMask')
+
+def test_symx_run_block():
+    if not hasattr(v, 'SymxEngine'):
+        return  # symx not built (needs VEDX64_IR)
+    # mov eax, 5 ; add eax, 3  →  eax == 8
+    code = b'\xb8\x05\x00\x00\x00\x83\xc0\x03'
+    base = 0x1000
+    def read_code(addr, n):
+        off = addr - base
+        if off < 0 or off + n > len(code):
+            return None
+        return code[off:off+n]
+    eng = v.SymxEngine(v.SymxConfig(), read_code)
+    st = eng.seed_state()
+    st.rip = base
+    n = eng.run_block(st, 8)
+    assert n >= 2
+    rax = st.gpr(0)
+    assert rax is not None
+    assert rax.is_const
+    assert rax.const_value & 0xFFFFFFFF == 8
+
+def test_symx_solver():
+    if not hasattr(v, 'SymxSolver'):
+        return
+    # Stub solver unless built with VEDX64_Z3; just exercise the API.
+    assert isinstance(v.SymxSolver.is_smt_backed(), bool)
 
 if __name__ == "__main__":
     tests = [v for k, v in globals().items() if k.startswith("test_")]

@@ -31,6 +31,11 @@ bool     decoded_has_vex(const Decoded& d) { return d.di.has_vex; }
 uint8_t  decoded_vex_vvvv(const Decoded& d) { return d.di.vex_vvvv; }
 uint8_t  decoded_vex_l(const Decoded& d) { return d.di.vex_L; }
 bool     decoded_vex_w(const Decoded& d) { return d.di.vex_W; }
+bool     decoded_has_evex(const Decoded& d) { return d.di.has_evex; }
+uint8_t  decoded_evex_aaa(const Decoded& d) { return d.di.evex_aaa; }
+bool     decoded_evex_z(const Decoded& d) { return d.di.evex_z; }
+bool     decoded_evex_b(const Decoded& d) { return d.di.evex_b; }
+uint8_t  decoded_evex_rc(const Decoded& d) { return d.di.evex_rc; }
 
 rust::String disassemble(rust::Slice<const uint8_t> code, uint64_t rip) {
 #ifdef VEDX64_STRINGS
@@ -173,6 +178,11 @@ rust::Vec<uint8_t> emu_read_mem(const Emu& e, size_t offset, size_t len) {
     for (size_t i = offset; i < end; ++i) out.push_back(e.memory[i]);
     return out;
 }
+void emu_set_default_fault_action(Emu& e, uint8_t action) {
+    if (action == 0) { vedx64::set_mem_fault_handler(e.cpu, vedx64::MemFaultHandler{}); return; }
+    auto act = static_cast<vedx64::FaultAction>(action);
+    vedx64::set_mem_fault_handler(e.cpu, [act](const vedx64::MemFaultInfo&) { return act; });
+}
 #endif // VEDX64_EMU
 
 #ifdef VEDX64_IR
@@ -210,6 +220,49 @@ bool ir_is_fully_lifted(const IrLifted& l) {
     for (auto& op : l.ops) if (op.opcode == undef) return false;
     return true;
 }
+#endif // VEDX64_IR
+
+#ifdef VEDX64_IR
+std::unique_ptr<SymxSession> symx_new(rust::Slice<const uint8_t> code, uint64_t base, uint64_t entry) {
+    auto s = std::make_unique<SymxSession>();
+    s->code.assign(code.data(), code.data() + code.size());
+    s->base = base;
+    SymxSession* raw = s.get();
+    auto read_code = [raw](uint64_t addr, uint8_t* outp, size_t n) -> bool {
+        if (addr < raw->base) return false;
+        size_t off = (size_t)(addr - raw->base);
+        if (off + n > raw->code.size()) return false;
+        std::memcpy(outp, raw->code.data() + off, n);
+        return true;
+    };
+    s->engine = std::make_unique<vedx64::symx::Engine>(vedx64::symx::Config{}, read_code);
+    // State owns a unique_ptr<Memory> (move-only); fork() returns a deep
+    // copy by value so we can store it without copy-assignment.
+    s->state = s->engine->seed_state().fork();
+    s->state.rip = entry;
+    return s;
+}
+void symx_set_gpr_concrete(SymxSession& s, uint8_t reg, uint64_t value) {
+    if (reg < 16) s.state.set_gpr(reg, s.engine->builder().k(value, 64));
+}
+size_t symx_run_block(SymxSession& s, size_t max_instructions) {
+    return s.engine->run_block(s.state, max_instructions);
+}
+uint64_t symx_rip(const SymxSession& s) { return s.state.rip; }
+bool symx_gpr_is_const(const SymxSession& s, uint8_t reg) {
+    if (reg >= 16) return false;
+    return vedx64::symx::is_const(s.state.get_gpr(reg));
+}
+uint64_t symx_gpr_const_value(const SymxSession& s, uint8_t reg) {
+    if (reg >= 16) return 0;
+    auto e = s.state.get_gpr(reg);
+    return vedx64::symx::is_const(e) ? vedx64::symx::const_value(e) : 0;
+}
+rust::String symx_gpr_str(const SymxSession& s, uint8_t reg) {
+    if (reg >= 16) return rust::String();
+    return rust::String(vedx64::symx::Builder::to_string(s.state.get_gpr(reg)));
+}
+bool symx_solver_is_smt_backed() { return vedx64::symx::Solver::is_smt_backed(); }
 #endif // VEDX64_IR
 
 } // namespace bridge

@@ -36,6 +36,14 @@ fn main() {
             }
         }
     }
+    if let Ok(entries) = std::fs::read_dir(lib_dir.join("symx")) {
+        for entry in entries {
+            let path = entry.unwrap().path();
+            if path.extension().map_or(false, |e| e == "cpp") {
+                cpp_sources.push(path);
+            }
+        }
+    }
     if let Ok(entries) = std::fs::read_dir(lib_dir.join("emu")) {
         for entry in entries {
             let path = entry.unwrap().path();

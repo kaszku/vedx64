@@ -21,6 +21,9 @@
 #ifdef VEDX64_IR
 #include "vedx64/ir.hpp"
 #endif
+#ifdef VEDX64_IR
+#include "vedx64/symx.hpp"
+#endif
 #include "rust/cxx.h"
 
 namespace vedx64 {
@@ -53,6 +56,15 @@ struct IrLifted {
 };
 #endif
 
+#ifdef VEDX64_IR
+struct SymxSession {
+    std::vector<uint8_t> code;
+    uint64_t base{0};
+    std::unique_ptr<vedx64::symx::Engine> engine;
+    vedx64::symx::State state;
+};
+#endif // VEDX64_IR
+
 // Forward declarations — defined by cxx in bridge.rs.h.
 struct FlowResult;
 struct SemResult;
@@ -72,6 +84,12 @@ bool     decoded_has_vex(const Decoded& d);
 uint8_t  decoded_vex_vvvv(const Decoded& d);
 uint8_t  decoded_vex_l(const Decoded& d);
 bool     decoded_vex_w(const Decoded& d);
+// EVEX / AVX-512 fields.
+bool     decoded_has_evex(const Decoded& d);
+uint8_t  decoded_evex_aaa(const Decoded& d);  // opmask reg k0-k7
+bool     decoded_evex_z(const Decoded& d);    // zeroing-masking
+bool     decoded_evex_b(const Decoded& d);    // broadcast / SAE / rc
+uint8_t  decoded_evex_rc(const Decoded& d);   // rounding control
 
 // Strings + table
 rust::String disassemble(rust::Slice<const uint8_t> code, uint64_t rip);
@@ -140,6 +158,8 @@ uint64_t emu_rflags(const Emu& e);
 void     emu_set_rflags(Emu& e, uint64_t v);
 void     emu_write_mem(Emu& e, size_t offset, rust::Slice<const uint8_t> data);
 rust::Vec<uint8_t> emu_read_mem(const Emu& e, size_t offset, size_t len);
+// Default memory-fault action: 0=Abort, 1=Skip, 2=Retry.
+void emu_set_default_fault_action(Emu& e, uint8_t action);
 #endif // VEDX64_EMU
 
 #ifdef VEDX64_IR
@@ -150,6 +170,24 @@ size_t   ir_lifted_op_count(const IrLifted& l);
 uint8_t  ir_lifted_op_opcode(const IrLifted& l, size_t i);
 uint8_t  ir_lifted_op_num_inputs(const IrLifted& l, size_t i);
 bool     ir_is_fully_lifted(const IrLifted& l);
+#endif // VEDX64_IR
+
+#ifdef VEDX64_IR
+std::unique_ptr<SymxSession> symx_new(rust::Slice<const uint8_t> code, uint64_t base, uint64_t entry);
+// Seed a concrete GPR value into the session's seed state before running.
+void     symx_set_gpr_concrete(SymxSession& s, uint8_t reg, uint64_t value);
+// Straight-line run of up to max_instructions from the seed state.
+// Returns the number of instructions executed.
+size_t   symx_run_block(SymxSession& s, size_t max_instructions);
+uint64_t symx_rip(const SymxSession& s);
+// True if GPR `reg` currently holds a concrete (constant) symbolic value.
+bool     symx_gpr_is_const(const SymxSession& s, uint8_t reg);
+// Concrete value of GPR `reg` (only meaningful when symx_gpr_is_const).
+uint64_t symx_gpr_const_value(const SymxSession& s, uint8_t reg);
+// Human-readable rendering of GPR `reg`'s symbolic expression.
+rust::String symx_gpr_str(const SymxSession& s, uint8_t reg);
+// True when the symbolic Solver is SMT-backed (VEDX64_Z3); else a stub.
+bool     symx_solver_is_smt_backed();
 #endif // VEDX64_IR
 
 } // namespace bridge

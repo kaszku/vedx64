@@ -77,11 +77,21 @@ static bool emu_write(CpuState& cpu, uint64_t ea, uint32_t sz, const void* src) 
 
 static uint64_t mem_read(const CpuState& cpu, uint64_t addr, int bytes) {
     uint64_t val = 0;
+    // Bounds-check + fault dispatch. The legacy operand path routes through
+    // here, so without this an out-of-bounds base register (e.g. mov rax,[rbx]
+    // with garbage rbx) would memcpy past cpu.mem and crash the process.
+    bool _vedx64_skip = false;
+    if (!emu_mem_dispatch(const_cast<CpuState&>(cpu), addr, (uint32_t)bytes, false, &_vedx64_skip))
+        return 0; // Abort/unhandled fault: yield zero rather than touch bad memory.
+    if (_vedx64_skip) return 0; // Skip: zero-load.
     memcpy(&val, cpu.mem + addr, bytes);
     return val;
 }
 
 static void mem_write(CpuState& cpu, uint64_t addr, uint64_t val, int bytes) {
+    bool _vedx64_skip = false;
+    if (!emu_mem_dispatch(cpu, addr, (uint32_t)bytes, true, &_vedx64_skip)) return; // Abort/unhandled fault.
+    if (_vedx64_skip) return; // Skip: drop the store.
     memcpy(cpu.mem + addr, &val, bytes);
 }
 

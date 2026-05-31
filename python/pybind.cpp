@@ -5,7 +5,6 @@
 #include "vedx64/operand.hpp"
 #include "vedx64/instruction.hpp"
 #include "vedx64/encoding_id.hpp"
-#endif
 #ifdef VEDX64_EMU
 #include "vedx64/emu.hpp"
 #endif
@@ -19,13 +18,33 @@
 #ifdef VEDX64_ASSEMBLER
 #include "vedx64/assembler.hpp"
 #endif
+#if defined(VEDX64_IR)
+#define VEDX64_SYMX_AVAILABLE 1
+#include "vedx64/symx.hpp"
+#endif
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
+#include <nanobind/stl/optional.h>
+#include <nanobind/stl/function.h>
 #include <cstring>
+#include <vector>
 
 namespace nb = nanobind;
 using namespace vedx64;
+
+#ifdef VEDX64_EMU
+namespace {
+struct PyEmu {
+    CpuState cpu{};
+    std::vector<uint8_t> memory;
+    explicit PyEmu(size_t mem_size) {
+        memory.resize(mem_size, 0);
+        emu_init(cpu, memory.data(), memory.size());
+    }
+};
+} // anonymous namespace
+#endif // VEDX64_EMU
 
 NB_MODULE(vedx64_py, m) {
     m.doc() = "x86-64 instruction toolkit: decoder, encoder, disassembler, assembler, emulator, and more";
@@ -775,7 +794,12 @@ NB_MODULE(vedx64_py, m) {
         .def_ro("has_vex", &DecodedInstr::has_vex)
         .def_ro("vex_vvvv", &DecodedInstr::vex_vvvv)
         .def_ro("vex_L", &DecodedInstr::vex_L)
-        .def_ro("vex_W", &DecodedInstr::vex_W);
+        .def_ro("vex_W", &DecodedInstr::vex_W)
+        .def_ro("has_evex", &DecodedInstr::has_evex)
+        .def_ro("evex_aaa", &DecodedInstr::evex_aaa)  // opmask reg k0-k7
+        .def_ro("evex_z", &DecodedInstr::evex_z)      // zeroing-masking
+        .def_ro("evex_b", &DecodedInstr::evex_b)      // broadcast / SAE / rc
+        .def_ro("evex_rc", &DecodedInstr::evex_rc);   // rounding control
 
     m.def("decode", [](nb::bytes data) -> nb::object {
         const uint8_t* ptr = (const uint8_t*)data.c_str();
@@ -1070,34 +1094,92 @@ NB_MODULE(vedx64_py, m) {
         .value("DivByZero", StepResult::DivByZero)
         .export_values();
 
-    nb::class_<CpuState>(m, "CpuState")
+    nb::enum_<FaultAction>(m, "FaultAction")
+        .value("Abort", FaultAction::Abort)
+        .value("Skip", FaultAction::Skip)
+        .value("Retry", FaultAction::Retry)
+        .export_values();
+
+    nb::class_<MemFaultInfo>(m, "MemFaultInfo")
+        .def_ro("va", &MemFaultInfo::va)
+        .def_ro("rip", &MemFaultInfo::rip)
+        .def_ro("size", &MemFaultInfo::size)
+        .def_ro("is_write", &MemFaultInfo::is_write);
+
+    auto cpu_cls = nb::class_<CpuState>(m, "CpuState")
         .def(nb::init<>())
         .def_rw("rip", &CpuState::rip)
         .def_rw("rflags", &CpuState::rflags)
-        .def_prop_rw("rax",
-            [](const CpuState& s) { return s.gpr[0]; },
-            [](CpuState& s, uint64_t v) { s.gpr[0] = v; })
-        .def_prop_rw("rcx",
-            [](const CpuState& s) { return s.gpr[1]; },
-            [](CpuState& s, uint64_t v) { s.gpr[1] = v; })
-        .def_prop_rw("rdx",
-            [](const CpuState& s) { return s.gpr[2]; },
-            [](CpuState& s, uint64_t v) { s.gpr[2] = v; })
-        .def_prop_rw("rbx",
-            [](const CpuState& s) { return s.gpr[3]; },
-            [](CpuState& s, uint64_t v) { s.gpr[3] = v; })
-        .def_prop_rw("rsp",
-            [](const CpuState& s) { return s.gpr[4]; },
-            [](CpuState& s, uint64_t v) { s.gpr[4] = v; })
-        .def_prop_rw("rbp",
-            [](const CpuState& s) { return s.gpr[5]; },
-            [](CpuState& s, uint64_t v) { s.gpr[5] = v; })
-        .def_prop_rw("rsi",
-            [](const CpuState& s) { return s.gpr[6]; },
-            [](CpuState& s, uint64_t v) { s.gpr[6] = v; })
-        .def_prop_rw("rdi",
-            [](const CpuState& s) { return s.gpr[7]; },
-            [](CpuState& s, uint64_t v) { s.gpr[7] = v; });
+        .def_rw("mxcsr", &CpuState::mxcsr)
+        .def_rw("fs_base", &CpuState::fs_base)
+        .def_rw("gs_base", &CpuState::gs_base)
+        .def("gpr", [](const CpuState& s, size_t i) -> uint64_t {
+            return i < 16 ? s.gpr[i] : 0; }, nb::arg("i"))
+        .def("set_gpr", [](CpuState& s, size_t i, uint64_t v) {
+            if (i < 16) s.gpr[i] = v; }, nb::arg("i"), nb::arg("value"))
+        .def("opmask", [](const CpuState& s, size_t i) -> uint64_t {
+            return i < 8 ? s.opmask[i] : 0; }, nb::arg("i"))
+        .def("set_opmask", [](CpuState& s, size_t i, uint64_t v) {
+            if (i < 8) s.opmask[i] = v; }, nb::arg("i"), nb::arg("value"))
+        .def("seg", [](const CpuState& s, size_t i) -> uint16_t {
+            return i < 6 ? s.seg[i] : 0; }, nb::arg("i"))
+        .def("set_seg", [](CpuState& s, size_t i, uint16_t v) {
+            if (i < 6) s.seg[i] = v; }, nb::arg("i"), nb::arg("value"));
+
+    cpu_cls.def_prop_rw("rax",
+        [](const CpuState& s) { return s.gpr[0]; },
+        [](CpuState& s, uint64_t v) { s.gpr[0] = v; });
+    cpu_cls.def_prop_rw("rcx",
+        [](const CpuState& s) { return s.gpr[1]; },
+        [](CpuState& s, uint64_t v) { s.gpr[1] = v; });
+    cpu_cls.def_prop_rw("rdx",
+        [](const CpuState& s) { return s.gpr[2]; },
+        [](CpuState& s, uint64_t v) { s.gpr[2] = v; });
+    cpu_cls.def_prop_rw("rbx",
+        [](const CpuState& s) { return s.gpr[3]; },
+        [](CpuState& s, uint64_t v) { s.gpr[3] = v; });
+    cpu_cls.def_prop_rw("rsp",
+        [](const CpuState& s) { return s.gpr[4]; },
+        [](CpuState& s, uint64_t v) { s.gpr[4] = v; });
+    cpu_cls.def_prop_rw("rbp",
+        [](const CpuState& s) { return s.gpr[5]; },
+        [](CpuState& s, uint64_t v) { s.gpr[5] = v; });
+    cpu_cls.def_prop_rw("rsi",
+        [](const CpuState& s) { return s.gpr[6]; },
+        [](CpuState& s, uint64_t v) { s.gpr[6] = v; });
+    cpu_cls.def_prop_rw("rdi",
+        [](const CpuState& s) { return s.gpr[7]; },
+        [](CpuState& s, uint64_t v) { s.gpr[7] = v; });
+    cpu_cls.def_prop_rw("r8",
+        [](const CpuState& s) { return s.gpr[8]; },
+        [](CpuState& s, uint64_t v) { s.gpr[8] = v; });
+    cpu_cls.def_prop_rw("r9",
+        [](const CpuState& s) { return s.gpr[9]; },
+        [](CpuState& s, uint64_t v) { s.gpr[9] = v; });
+    cpu_cls.def_prop_rw("r10",
+        [](const CpuState& s) { return s.gpr[10]; },
+        [](CpuState& s, uint64_t v) { s.gpr[10] = v; });
+    cpu_cls.def_prop_rw("r11",
+        [](const CpuState& s) { return s.gpr[11]; },
+        [](CpuState& s, uint64_t v) { s.gpr[11] = v; });
+    cpu_cls.def_prop_rw("r12",
+        [](const CpuState& s) { return s.gpr[12]; },
+        [](CpuState& s, uint64_t v) { s.gpr[12] = v; });
+    cpu_cls.def_prop_rw("r13",
+        [](const CpuState& s) { return s.gpr[13]; },
+        [](CpuState& s, uint64_t v) { s.gpr[13] = v; });
+    cpu_cls.def_prop_rw("r14",
+        [](const CpuState& s) { return s.gpr[14]; },
+        [](CpuState& s, uint64_t v) { s.gpr[14] = v; });
+    cpu_cls.def_prop_rw("r15",
+        [](const CpuState& s) { return s.gpr[15]; },
+        [](CpuState& s, uint64_t v) { s.gpr[15] = v; });
+
+    m.def("set_mem_fault_handler", [](CpuState& cpu, nb::object cb) {
+        if (cb.is_none()) { set_mem_fault_handler(cpu, MemFaultHandler{}); return; }
+        auto fn = nb::cast<std::function<FaultAction(const MemFaultInfo&)>>(cb);
+        set_mem_fault_handler(cpu, std::move(fn));
+    }, nb::arg("cpu"), nb::arg("handler"), "Install (or clear with None) a memory-fault callback returning a FaultAction");
 
     m.def("emu_step", [](CpuState& cpu) -> StepResult {
         return emu_step(cpu);
@@ -1105,7 +1187,127 @@ NB_MODULE(vedx64_py, m) {
     m.def("emu_run", [](CpuState& cpu, size_t max_steps) -> size_t {
         return emu_run(cpu, max_steps);
     }, nb::arg("cpu"), nb::arg("max_steps") = 1000000, "Run until halt/error or max_steps");
+
+    nb::class_<PyEmu>(m, "Emulator")
+        .def(nb::init<size_t>(), nb::arg("mem_size"),
+            "Create an emulator with a zero-filled memory image of mem_size bytes.")
+        .def_prop_ro("cpu", [](PyEmu& e) -> CpuState& { return e.cpu; },
+            nb::rv_policy::reference_internal, "The underlying CpuState (registers/flags).")
+        .def_prop_ro("mem_size", [](const PyEmu& e) { return e.memory.size(); })
+        .def("write_mem", [](PyEmu& e, size_t offset, nb::bytes data) {
+            size_t n = data.size();
+            if (offset + n <= e.memory.size())
+                std::memcpy(&e.memory[offset], data.c_str(), n);
+        }, nb::arg("offset"), nb::arg("data"), "Copy bytes into the memory image at offset.")
+        .def("read_mem", [](const PyEmu& e, size_t offset, size_t len) -> nb::bytes {
+            size_t end = (offset + len <= e.memory.size()) ? offset + len : e.memory.size();
+            size_t n = end > offset ? end - offset : 0;
+            return nb::bytes((const char*)(n ? &e.memory[offset] : nullptr), n);
+        }, nb::arg("offset"), nb::arg("len"), "Read len bytes from the memory image at offset.")
+        .def("set_mem_fault_handler", [](PyEmu& e, nb::object cb) {
+            if (cb.is_none()) { set_mem_fault_handler(e.cpu, MemFaultHandler{}); return; }
+            auto fn = nb::cast<std::function<FaultAction(const MemFaultInfo&)>>(cb);
+            set_mem_fault_handler(e.cpu, std::move(fn));
+        }, nb::arg("handler"), "Install/clear a memory-fault callback (returns FaultAction).")
+        .def("step", [](PyEmu& e) -> StepResult { return emu_step(e.cpu); },
+            "Execute one instruction.")
+        .def("run", [](PyEmu& e, size_t max_steps) -> size_t { return emu_run(e.cpu, max_steps); },
+            nb::arg("max_steps") = 1000000, "Run until halt/error or max_steps.");
 #endif // VEDX64_EMU
+
+#ifdef VEDX64_SYMX_AVAILABLE
+    // Symbolic execution (vedx64::symx). High-value entry points: build an
+    // engine, seed registers, run a basic block, and read back symbolic
+    // register expressions. The full expression-builder / per-op API and
+    // diamond-merge controls are deferred — exposed enough to drive analysis.
+    nb::enum_<symx::SolveResult>(m, "SolveResult")
+        .value("Sat", symx::SolveResult::Sat)
+        .value("Unsat", symx::SolveResult::Unsat)
+        .value("Unknown", symx::SolveResult::Unknown)
+        .export_values();
+
+    nb::class_<symx::Config>(m, "SymxConfig")
+        .def(nb::init<>())
+        .def_rw("max_fork_depth", &symx::Config::max_fork_depth)
+        .def_rw("max_steps_per_path", &symx::Config::max_steps_per_path)
+        .def_rw("max_visits_per_rip", &symx::Config::max_visits_per_rip)
+        .def_rw("enable_merging", &symx::Config::enable_merging)
+        .def_rw("max_enumerate_targets", &symx::Config::max_enumerate_targets)
+        .def_rw("max_rep_iterations", &symx::Config::max_rep_iterations)
+        .def_rw("stop_on_undef", &symx::Config::stop_on_undef)
+        .def_rw("verbose", &symx::Config::verbose);
+
+    nb::class_<symx::Builder>(m, "SymxBuilder")
+        .def("arena_size", &symx::Builder::arena_size)
+        .def("symbol_count", &symx::Builder::symbol_count)
+        .def_static("to_string", &symx::Builder::to_string, nb::arg("expr"),
+            "Render an expression node as a human-readable string.");
+
+    nb::class_<symx::Expr>(m, "SymxExpr")
+        .def_prop_ro("width", [](const symx::Expr& e) { return e.width; })
+        .def_prop_ro("is_const", [](const symx::Expr& e) { return symx::is_const(&e); })
+        .def_prop_ro("const_value", [](const symx::Expr& e) { return e.k; })
+        .def("__str__", [](const symx::Expr& e) { return symx::Builder::to_string(&e); });
+
+    nb::class_<symx::State>(m, "SymxState")
+        .def_rw("rip", &symx::State::rip)
+        .def_ro("dead", &symx::State::dead)
+        .def_ro("fork_depth", &symx::State::fork_depth)
+        .def("gpr", [](const symx::State& s, uint8_t r) -> const symx::Expr* {
+            return s.get_gpr(r);
+        }, nb::arg("r"), nb::rv_policy::reference, "Symbolic value of GPR r (0..15), or None.")
+        .def("flag", [](const symx::State& s, size_t i) -> const symx::Expr* {
+            return i < 7 ? s.flags[i] : nullptr;
+        }, nb::arg("i"), nb::rv_policy::reference, "Symbolic 1-bit flag i (CF=0,PF,AF,ZF,SF,OF,DF), or None.")
+        .def_prop_ro("pc_len", [](const symx::State& s) { return s.pc.terms.size(); },
+            "Number of path-condition predicates accumulated on this state.");
+
+    nb::class_<symx::Solver>(m, "SymxSolver")
+        .def_static("is_smt_backed", &symx::Solver::is_smt_backed,
+            "True if built with VEDX64_Z3 (otherwise a constant-folding stub).")
+        .def("sat", [](symx::Solver& sv, const symx::State& s, const symx::Expr* cond) {
+            return sv.sat(s.pc, cond);
+        }, nb::arg("state"), nb::arg("cond"), "Satisfiability of cond under the state's path condition.")
+        .def("get_value", [](symx::Solver& sv, const symx::State& s, const symx::Expr* e) -> nb::object {
+            auto v = sv.get_value(s.pc, e);
+            if (!v) return nb::none();
+            return nb::cast(*v);
+        }, nb::arg("state"), nb::arg("expr"), "Concrete u64 value of expr if pinned, else None.");
+
+    nb::class_<symx::Engine>(m, "SymxEngine")
+        .def("__init__", [](symx::Engine* self, symx::Config cfg, nb::callable read_code) {
+            auto rc = [read_code](uint64_t addr, uint8_t* outp, size_t n) -> bool {
+                nb::gil_scoped_acquire gil;
+                nb::object r = read_code(addr, n);
+                if (r.is_none()) return false;
+                auto b = nb::cast<nb::bytes>(r);
+                if (b.size() < n) return false;
+                std::memcpy(outp, b.c_str(), n);
+                return true;
+            };
+            new (self) symx::Engine(cfg, rc);
+        }, nb::arg("config"), nb::arg("read_code"),
+            "Engine(config, read_code) where read_code(addr, n) -> bytes|None.")
+        .def("seed_state", [](symx::Engine& e) -> symx::State& { return e.seed_state(); },
+            nb::rv_policy::reference_internal, "Mutable seed state to fix concrete inputs before run.")
+        .def("builder", [](symx::Engine& e) -> symx::Builder& { return e.builder(); },
+            nb::rv_policy::reference_internal)
+        .def("solver", [](symx::Engine& e) -> symx::Solver& { return e.solver(); },
+            nb::rv_policy::reference_internal)
+        .def("step", &symx::Engine::step, nb::arg("state"),
+            "Decode+lift+apply one instruction at state.rip; returns False on failure/dead.")
+        .def("run_block", &symx::Engine::run_block, nb::arg("state"), nb::arg("max_instructions"),
+            "Straight-line run of one state (no fork enqueue); returns instructions executed.")
+        .def("run", [](symx::Engine& e, uint64_t entry, nb::callable stop) {
+            auto pred = [stop](const symx::State& s) -> bool {
+                nb::gil_scoped_acquire gil;
+                return nb::cast<bool>(stop(&s));
+            };
+            return e.run(entry, pred);
+        }, nb::arg("entry"), nb::arg("stop"),
+            "Explore from entry until each path terminates or stop(state) returns True.")
+        .def("diagnostics", [](symx::Engine& e) { return e.diagnostics(); });
+#endif // VEDX64_SYMX_AVAILABLE
 
 #ifdef VEDX64_IR
     // IR subsystem
@@ -1113,6 +1315,7 @@ NB_MODULE(vedx64_py, m) {
         .value("COPY", ir::Opcode::COPY)
         .value("LOAD", ir::Opcode::LOAD)
         .value("STORE", ir::Opcode::STORE)
+        .value("LEA", ir::Opcode::LEA)
         .value("ADD", ir::Opcode::ADD)
         .value("SUB", ir::Opcode::SUB)
         .value("MUL", ir::Opcode::MUL)
@@ -1120,6 +1323,8 @@ NB_MODULE(vedx64_py, m) {
         .value("DIV", ir::Opcode::DIV)
         .value("IDIV", ir::Opcode::IDIV)
         .value("NEG", ir::Opcode::NEG)
+        .value("MOD", ir::Opcode::MOD)
+        .value("SMOD", ir::Opcode::SMOD)
         .value("AND", ir::Opcode::AND)
         .value("OR", ir::Opcode::OR)
         .value("XOR", ir::Opcode::XOR)
@@ -1129,15 +1334,27 @@ NB_MODULE(vedx64_py, m) {
         .value("SAR", ir::Opcode::SAR)
         .value("ROL", ir::Opcode::ROL)
         .value("ROR", ir::Opcode::ROR)
+        .value("BSWAP", ir::Opcode::BSWAP)
+        .value("BITREV", ir::Opcode::BITREV)
+        .value("TEST", ir::Opcode::TEST)
+        .value("EXTRACT", ir::Opcode::EXTRACT)
+        .value("INSERT", ir::Opcode::INSERT)
+        .value("CONCAT", ir::Opcode::CONCAT)
+        .value("BITCAST", ir::Opcode::BITCAST)
         .value("CMP_EQ", ir::Opcode::CMP_EQ)
         .value("CMP_NE", ir::Opcode::CMP_NE)
         .value("CMP_SLT", ir::Opcode::CMP_SLT)
         .value("CMP_ULT", ir::Opcode::CMP_ULT)
         .value("CMP_SLE", ir::Opcode::CMP_SLE)
         .value("CMP_ULE", ir::Opcode::CMP_ULE)
+        .value("SELECT", ir::Opcode::SELECT)
+        .value("BITSEL", ir::Opcode::BITSEL)
         .value("ZEXT", ir::Opcode::ZEXT)
         .value("SEXT", ir::Opcode::SEXT)
         .value("TRUNC", ir::Opcode::TRUNC)
+        .value("I2F", ir::Opcode::I2F)
+        .value("F2I", ir::Opcode::F2I)
+        .value("F2F", ir::Opcode::F2F)
         .value("ADD_FLAGS", ir::Opcode::ADD_FLAGS)
         .value("SUB_FLAGS", ir::Opcode::SUB_FLAGS)
         .value("AND_FLAGS", ir::Opcode::AND_FLAGS)
@@ -1146,18 +1363,48 @@ NB_MODULE(vedx64_py, m) {
         .value("GET_SF", ir::Opcode::GET_SF)
         .value("GET_OF", ir::Opcode::GET_OF)
         .value("GET_PF", ir::Opcode::GET_PF)
+        .value("GET_DF", ir::Opcode::GET_DF)
         .value("SET_CF", ir::Opcode::SET_CF)
         .value("SET_ZF", ir::Opcode::SET_ZF)
         .value("SET_SF", ir::Opcode::SET_SF)
         .value("SET_OF", ir::Opcode::SET_OF)
         .value("SET_PF", ir::Opcode::SET_PF)
+        .value("SET_DF", ir::Opcode::SET_DF)
         .value("BRANCH", ir::Opcode::BRANCH)
         .value("CBRANCH", ir::Opcode::CBRANCH)
+        .value("INDIRECT_JMP", ir::Opcode::INDIRECT_JMP)
         .value("CALL", ir::Opcode::CALL)
+        .value("VCALL", ir::Opcode::VCALL)
         .value("RET", ir::Opcode::RET)
+        .value("POPCNT", ir::Opcode::POPCNT)
+        .value("CTZ", ir::Opcode::CTZ)
+        .value("CLZ", ir::Opcode::CLZ)
+        .value("FADD", ir::Opcode::FADD)
+        .value("FSUB", ir::Opcode::FSUB)
+        .value("FMUL", ir::Opcode::FMUL)
+        .value("FDIV", ir::Opcode::FDIV)
+        .value("FSQRT", ir::Opcode::FSQRT)
+        .value("FMIN", ir::Opcode::FMIN)
+        .value("FMAX", ir::Opcode::FMAX)
+        .value("VADD", ir::Opcode::VADD)
+        .value("VSUB", ir::Opcode::VSUB)
+        .value("VMUL", ir::Opcode::VMUL)
+        .value("VAND", ir::Opcode::VAND)
+        .value("VOR", ir::Opcode::VOR)
+        .value("VXOR", ir::Opcode::VXOR)
+        .value("VSHL", ir::Opcode::VSHL)
+        .value("VSHR", ir::Opcode::VSHR)
+        .value("VCMP", ir::Opcode::VCMP)
+        .value("VEXTRACT_ELEM", ir::Opcode::VEXTRACT_ELEM)
+        .value("VINSERT_ELEM", ir::Opcode::VINSERT_ELEM)
+        .value("VBROADCAST", ir::Opcode::VBROADCAST)
+        .value("RDTSC", ir::Opcode::RDTSC)
+        .value("SYSCALL", ir::Opcode::SYSCALL)
+        .value("UD2", ir::Opcode::UD2)
         .value("NOP", ir::Opcode::NOP)
         .value("UNDEF", ir::Opcode::UNDEF)
         .value("BARRIER", ir::Opcode::BARRIER)
+        .value("ARCH_X64", ir::Opcode::ARCH_X64)
         .export_values();
 
     nb::enum_<ir::Space>(m, "IrSpace")
@@ -1169,6 +1416,7 @@ NB_MODULE(vedx64_py, m) {
         .value("MMX", ir::Space::MMX)
         .value("Seg", ir::Space::Seg)
         .value("RAM", ir::Space::RAM)
+        .value("OpMask", ir::Space::OpMask)
         .export_values();
 
     nb::class_<ir::VarNode>(m, "IrVarNode")

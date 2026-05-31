@@ -821,6 +821,7 @@ namespace vedx64 {
     using Decoded = ::vedx64::bridge::Decoded;
     using Emu = ::vedx64::bridge::Emu;
     using IrLifted = ::vedx64::bridge::IrLifted;
+    using SymxSession = ::vedx64::bridge::SymxSession;
   }
 }
 
@@ -936,6 +937,31 @@ bool vedx64$bridge$cxxbridge1$194$decoded_has_vex(::vedx64::bridge::Decoded cons
 bool vedx64$bridge$cxxbridge1$194$decoded_vex_w(::vedx64::bridge::Decoded const &d) noexcept {
   bool (*decoded_vex_w$)(::vedx64::bridge::Decoded const &) = ::vedx64::bridge::decoded_vex_w;
   return decoded_vex_w$(d);
+}
+
+bool vedx64$bridge$cxxbridge1$194$decoded_has_evex(::vedx64::bridge::Decoded const &d) noexcept {
+  bool (*decoded_has_evex$)(::vedx64::bridge::Decoded const &) = ::vedx64::bridge::decoded_has_evex;
+  return decoded_has_evex$(d);
+}
+
+::std::uint8_t vedx64$bridge$cxxbridge1$194$decoded_evex_aaa(::vedx64::bridge::Decoded const &d) noexcept {
+  ::std::uint8_t (*decoded_evex_aaa$)(::vedx64::bridge::Decoded const &) = ::vedx64::bridge::decoded_evex_aaa;
+  return decoded_evex_aaa$(d);
+}
+
+bool vedx64$bridge$cxxbridge1$194$decoded_evex_z(::vedx64::bridge::Decoded const &d) noexcept {
+  bool (*decoded_evex_z$)(::vedx64::bridge::Decoded const &) = ::vedx64::bridge::decoded_evex_z;
+  return decoded_evex_z$(d);
+}
+
+bool vedx64$bridge$cxxbridge1$194$decoded_evex_b(::vedx64::bridge::Decoded const &d) noexcept {
+  bool (*decoded_evex_b$)(::vedx64::bridge::Decoded const &) = ::vedx64::bridge::decoded_evex_b;
+  return decoded_evex_b$(d);
+}
+
+::std::uint8_t vedx64$bridge$cxxbridge1$194$decoded_evex_rc(::vedx64::bridge::Decoded const &d) noexcept {
+  ::std::uint8_t (*decoded_evex_rc$)(::vedx64::bridge::Decoded const &) = ::vedx64::bridge::decoded_evex_rc;
+  return decoded_evex_rc$(d);
 }
 
 void vedx64$bridge$cxxbridge1$194$disassemble(::rust::Slice<::std::uint8_t const> code, ::std::uint64_t rip, ::rust::String *return$) noexcept {
@@ -1183,6 +1209,51 @@ void vedx64$bridge$cxxbridge1$194$emu_read_mem(::vedx64::bridge::Emu const &e, :
   new (return$) ::rust::Vec<::std::uint8_t>(emu_read_mem$(e, offset, len));
 }
 
+void vedx64$bridge$cxxbridge1$194$emu_set_default_fault_action(::vedx64::bridge::Emu &e, ::std::uint8_t action) noexcept {
+  void (*emu_set_default_fault_action$)(::vedx64::bridge::Emu &, ::std::uint8_t) = ::vedx64::bridge::emu_set_default_fault_action;
+  emu_set_default_fault_action$(e, action);
+}
+
+::vedx64::bridge::SymxSession *vedx64$bridge$cxxbridge1$194$symx_new(::rust::Slice<::std::uint8_t const> code, ::std::uint64_t base, ::std::uint64_t entry) noexcept {
+  ::std::unique_ptr<::vedx64::bridge::SymxSession> (*symx_new$)(::rust::Slice<::std::uint8_t const>, ::std::uint64_t, ::std::uint64_t) = ::vedx64::bridge::symx_new;
+  return symx_new$(code, base, entry).release();
+}
+
+void vedx64$bridge$cxxbridge1$194$symx_set_gpr_concrete(::vedx64::bridge::SymxSession &s, ::std::uint8_t reg, ::std::uint64_t value) noexcept {
+  void (*symx_set_gpr_concrete$)(::vedx64::bridge::SymxSession &, ::std::uint8_t, ::std::uint64_t) = ::vedx64::bridge::symx_set_gpr_concrete;
+  symx_set_gpr_concrete$(s, reg, value);
+}
+
+::std::size_t vedx64$bridge$cxxbridge1$194$symx_run_block(::vedx64::bridge::SymxSession &s, ::std::size_t max_instructions) noexcept {
+  ::std::size_t (*symx_run_block$)(::vedx64::bridge::SymxSession &, ::std::size_t) = ::vedx64::bridge::symx_run_block;
+  return symx_run_block$(s, max_instructions);
+}
+
+::std::uint64_t vedx64$bridge$cxxbridge1$194$symx_rip(::vedx64::bridge::SymxSession const &s) noexcept {
+  ::std::uint64_t (*symx_rip$)(::vedx64::bridge::SymxSession const &) = ::vedx64::bridge::symx_rip;
+  return symx_rip$(s);
+}
+
+bool vedx64$bridge$cxxbridge1$194$symx_gpr_is_const(::vedx64::bridge::SymxSession const &s, ::std::uint8_t reg) noexcept {
+  bool (*symx_gpr_is_const$)(::vedx64::bridge::SymxSession const &, ::std::uint8_t) = ::vedx64::bridge::symx_gpr_is_const;
+  return symx_gpr_is_const$(s, reg);
+}
+
+::std::uint64_t vedx64$bridge$cxxbridge1$194$symx_gpr_const_value(::vedx64::bridge::SymxSession const &s, ::std::uint8_t reg) noexcept {
+  ::std::uint64_t (*symx_gpr_const_value$)(::vedx64::bridge::SymxSession const &, ::std::uint8_t) = ::vedx64::bridge::symx_gpr_const_value;
+  return symx_gpr_const_value$(s, reg);
+}
+
+void vedx64$bridge$cxxbridge1$194$symx_gpr_str(::vedx64::bridge::SymxSession const &s, ::std::uint8_t reg, ::rust::String *return$) noexcept {
+  ::rust::String (*symx_gpr_str$)(::vedx64::bridge::SymxSession const &, ::std::uint8_t) = ::vedx64::bridge::symx_gpr_str;
+  new (return$) ::rust::String(symx_gpr_str$(s, reg));
+}
+
+bool vedx64$bridge$cxxbridge1$194$symx_solver_is_smt_backed() noexcept {
+  bool (*symx_solver_is_smt_backed$)() = ::vedx64::bridge::symx_solver_is_smt_backed;
+  return symx_solver_is_smt_backed$();
+}
+
 ::vedx64::bridge::IrLifted *vedx64$bridge$cxxbridge1$194$ir_lift(::rust::Slice<::std::uint8_t const> code, ::std::uint64_t addr) noexcept {
   ::std::unique_ptr<::vedx64::bridge::IrLifted> (*ir_lift$)(::rust::Slice<::std::uint8_t const>, ::std::uint64_t) = ::vedx64::bridge::ir_lift;
   return ir_lift$(code, addr).release();
@@ -1258,6 +1329,25 @@ void cxxbridge1$unique_ptr$vedx64$bridge$Emu$raw(::std::unique_ptr<::vedx64::bri
 }
 void cxxbridge1$unique_ptr$vedx64$bridge$Emu$drop(::std::unique_ptr<::vedx64::bridge::Emu> *ptr) noexcept {
   ::rust::deleter_if<::rust::detail::is_complete<::vedx64::bridge::Emu>::value>{}(ptr);
+}
+
+static_assert(::rust::detail::is_complete<::std::remove_extent<::vedx64::bridge::SymxSession>::type>::value, "definition of `::vedx64::bridge::SymxSession` is required");
+static_assert(sizeof(::std::unique_ptr<::vedx64::bridge::SymxSession>) == sizeof(void *), "");
+static_assert(alignof(::std::unique_ptr<::vedx64::bridge::SymxSession>) == alignof(void *), "");
+void cxxbridge1$unique_ptr$vedx64$bridge$SymxSession$null(::std::unique_ptr<::vedx64::bridge::SymxSession> *ptr) noexcept {
+  ::new (ptr) ::std::unique_ptr<::vedx64::bridge::SymxSession>();
+}
+void cxxbridge1$unique_ptr$vedx64$bridge$SymxSession$raw(::std::unique_ptr<::vedx64::bridge::SymxSession> *ptr, ::std::unique_ptr<::vedx64::bridge::SymxSession>::pointer raw) noexcept {
+  ::new (ptr) ::std::unique_ptr<::vedx64::bridge::SymxSession>(raw);
+}
+::std::unique_ptr<::vedx64::bridge::SymxSession>::element_type const *cxxbridge1$unique_ptr$vedx64$bridge$SymxSession$get(::std::unique_ptr<::vedx64::bridge::SymxSession> const &ptr) noexcept {
+  return ptr.get();
+}
+::std::unique_ptr<::vedx64::bridge::SymxSession>::pointer cxxbridge1$unique_ptr$vedx64$bridge$SymxSession$release(::std::unique_ptr<::vedx64::bridge::SymxSession> &ptr) noexcept {
+  return ptr.release();
+}
+void cxxbridge1$unique_ptr$vedx64$bridge$SymxSession$drop(::std::unique_ptr<::vedx64::bridge::SymxSession> *ptr) noexcept {
+  ::rust::deleter_if<::rust::detail::is_complete<::vedx64::bridge::SymxSession>::value>{}(ptr);
 }
 
 static_assert(::rust::detail::is_complete<::std::remove_extent<::vedx64::bridge::IrLifted>::type>::value, "definition of `::vedx64::bridge::IrLifted` is required");
