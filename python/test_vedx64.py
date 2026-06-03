@@ -314,6 +314,43 @@ def test_symx_solver():
     # Stub solver unless built with VEDX64_Z3; just exercise the API.
     assert isinstance(v.SymxSolver.is_smt_backed(), bool)
 
+def test_branch_recognize():
+    if not hasattr(v, 'branch'):
+        return  # branch submodule not built
+    br = v.branch
+    # direct rel32 jump
+    p = br.recognize(b'\xE9\x00\x01\x00\x00', 0x1000)
+    assert p.valid and p.form == br.Form.RelNear and p.target == 0x1105
+    assert p.total_length == 5 and not p.has_fallthrough
+    # indirect register
+    p = br.recognize(b'\xFF\xE0', 0x1000)
+    assert p.form == br.Form.IndirectReg and p.resolution == br.Resolution.RegisterDynamic and p.reg == 0
+    # push imm ; ret  (sign-extended)
+    p = br.recognize(b'\x68\xEF\xBE\xAD\xDE\xC3', 0x1000)
+    assert p.form == br.Form.PushImmRet and p.target == 0xFFFFFFFFDEADBEEF
+    assert p.insn_count == 2 and list(p.insn_len) == [5, 1]
+    # mov rax, imm64 ; jmp rax
+    p = br.recognize(b'\x48\xB8\x88\x77\x66\x55\x44\x33\x22\x11\xFF\xE0', 0x1000)
+    assert p.form == br.Form.MovRegBranch and p.target == 0x1122334455667788
+    # ret
+    p = br.recognize(b'\xC3', 0x1000)
+    assert p.form == br.Form.ReturnNear and p.resolution == br.Resolution.StackDynamic
+
+def test_branch_recognize_memptr():
+    if not hasattr(v, 'branch'):
+        return
+    br = v.branch
+    # jmp [rip+0]; pointer at 0x1006 -> 0xCAFEF00D via read_mem
+    def read_mem(addr, n):
+        if addr == 0x1006 and n == 8:
+            return (0xCAFEF00D).to_bytes(8, 'little')
+        return None
+    p = br.recognize(b'\xFF\x25\x00\x00\x00\x00', 0x1000, read_mem)
+    assert p.form == br.Form.IndirectMem and p.resolution == br.Resolution.MemoryPointer
+    assert p.slot.rip_relative and p.slot.abs_addr == 0x1006
+    assert p.resolved and p.final_target == 0xCAFEF00D
+
+
 if __name__ == "__main__":
     tests = [v for k, v in globals().items() if k.startswith("test_")]
     passed = 0

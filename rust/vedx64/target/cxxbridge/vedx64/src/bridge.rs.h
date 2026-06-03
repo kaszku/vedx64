@@ -812,6 +812,7 @@ namespace vedx64 {
     using Emu = ::vedx64::bridge::Emu;
     using IrLifted = ::vedx64::bridge::IrLifted;
     using SymxSession = ::vedx64::bridge::SymxSession;
+    using BranchPat = ::vedx64::bridge::BranchPat;
   }
 }
 

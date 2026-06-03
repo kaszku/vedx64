@@ -222,6 +222,29 @@ bool ir_is_fully_lifted(const IrLifted& l) {
 }
 #endif // VEDX64_IR
 
+std::unique_ptr<BranchPat> branch_recognize(rust::Slice<const uint8_t> code, uint64_t base, uint64_t addr) {
+    auto out = std::make_unique<BranchPat>();
+    if (addr < base) return out;
+    uint64_t off = addr - base;
+    if (off >= code.size()) return out;
+    out->p = vedx64::branch::recognize(code.data() + off, code.size() - off, addr);
+    return out;
+}
+bool     branch_valid(const BranchPat& b) { return b.p.valid; }
+uint8_t  branch_effect(const BranchPat& b) { return (uint8_t)b.p.effect; }
+uint8_t  branch_form(const BranchPat& b) { return (uint8_t)b.p.form; }
+uint8_t  branch_resolution(const BranchPat& b) { return (uint8_t)b.p.resolution; }
+uint32_t branch_total_length(const BranchPat& b) { return b.p.total_length; }
+uint8_t  branch_insn_count(const BranchPat& b) { return b.p.insn_count; }
+bool     branch_is_conditional(const BranchPat& b) { return b.p.is_conditional; }
+bool     branch_is_far(const BranchPat& b) { return b.p.is_far; }
+bool     branch_pushes_return(const BranchPat& b) { return b.p.pushes_return; }
+bool     branch_has_fallthrough(const BranchPat& b) { return b.p.has_fallthrough; }
+uint64_t branch_target(const BranchPat& b) { return b.p.target; }
+uint8_t  branch_reg(const BranchPat& b) { return b.p.reg; }
+bool     branch_slot_static(const BranchPat& b) { return b.p.slot.static_addr; }
+uint64_t branch_slot_addr(const BranchPat& b) { return b.p.slot.abs_addr; }
+
 #ifdef VEDX64_IR
 std::unique_ptr<SymxSession> symx_new(rust::Slice<const uint8_t> code, uint64_t base, uint64_t entry) {
     auto s = std::make_unique<SymxSession>();

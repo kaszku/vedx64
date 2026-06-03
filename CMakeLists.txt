@@ -37,6 +37,7 @@ set(VEDX64_CORE_SOURCES
     lib/core/instruction.cpp
     lib/relocation/relocation.cpp
     lib/branch_follow/branch_follow.cpp
+    lib/branch_resolve/branch_resolve.cpp
     lib/semantics/semantics.cpp
     lib/symx/symx.cpp
 )
@@ -156,6 +157,11 @@ if(VEDX64_TESTS)
     set_target_properties(branch_follow_test PROPERTIES FOLDER "tests")
     add_test(NAME branch_follow_test COMMAND branch_follow_test)
 
+    add_executable(branch_resolve_test tests/branch_resolve_test.cpp)
+    target_link_libraries(branch_resolve_test PRIVATE vedx64_core)
+    set_target_properties(branch_resolve_test PROPERTIES FOLDER "tests")
+    add_test(NAME branch_resolve_test COMMAND branch_resolve_test)
+
     add_executable(avx512_test tests/avx512_test.cpp)
     target_link_libraries(avx512_test PRIVATE vedx64_core)
     set_target_properties(avx512_test PROPERTIES FOLDER "tests")
@@ -228,6 +234,10 @@ if(VEDX64_EXAMPLES)
     add_executable(branch_follow_example examples/branch_follow_example.cpp)
     target_link_libraries(branch_follow_example PRIVATE vedx64_core)
     set_target_properties(branch_follow_example PROPERTIES FOLDER "examples")
+
+    add_executable(branch_resolve_example examples/branch_resolve_example.cpp)
+    target_link_libraries(branch_resolve_example PRIVATE vedx64_core)
+    set_target_properties(branch_resolve_example PROPERTIES FOLDER "examples")
 
     add_executable(semantics_example examples/semantics_example.cpp)
     target_link_libraries(semantics_example PRIVATE vedx64_core)

@@ -13,6 +13,7 @@
 #include "vedx64/assembler.hpp"
 #include "vedx64/relocation.hpp"
 #include "vedx64/branch_follow.hpp"
+#include "vedx64/branch_resolve.hpp"
 #include "vedx64/semantics.hpp"
 #include "vedx64/analysis.hpp"
 #ifdef VEDX64_EMU
@@ -55,6 +56,8 @@ struct IrLifted {
     uint8_t length{0};
 };
 #endif
+
+struct BranchPat { vedx64::branch::BranchPattern p{}; };
 
 #ifdef VEDX64_IR
 struct SymxSession {
@@ -171,6 +174,23 @@ uint8_t  ir_lifted_op_opcode(const IrLifted& l, size_t i);
 uint8_t  ir_lifted_op_num_inputs(const IrLifted& l, size_t i);
 bool     ir_is_fully_lifted(const IrLifted& l);
 #endif // VEDX64_IR
+
+// branch_resolve
+std::unique_ptr<BranchPat> branch_recognize(rust::Slice<const uint8_t> code, uint64_t base, uint64_t addr);
+bool     branch_valid(const BranchPat& b);
+uint8_t  branch_effect(const BranchPat& b);
+uint8_t  branch_form(const BranchPat& b);
+uint8_t  branch_resolution(const BranchPat& b);
+uint32_t branch_total_length(const BranchPat& b);
+uint8_t  branch_insn_count(const BranchPat& b);
+bool     branch_is_conditional(const BranchPat& b);
+bool     branch_is_far(const BranchPat& b);
+bool     branch_pushes_return(const BranchPat& b);
+bool     branch_has_fallthrough(const BranchPat& b);
+uint64_t branch_target(const BranchPat& b);
+uint8_t  branch_reg(const BranchPat& b);
+bool     branch_slot_static(const BranchPat& b);
+uint64_t branch_slot_addr(const BranchPat& b);
 
 #ifdef VEDX64_IR
 std::unique_ptr<SymxSession> symx_new(rust::Slice<const uint8_t> code, uint64_t base, uint64_t entry);

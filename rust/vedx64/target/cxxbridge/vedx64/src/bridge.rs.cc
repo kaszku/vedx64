@@ -822,6 +822,7 @@ namespace vedx64 {
     using Emu = ::vedx64::bridge::Emu;
     using IrLifted = ::vedx64::bridge::IrLifted;
     using SymxSession = ::vedx64::bridge::SymxSession;
+    using BranchPat = ::vedx64::bridge::BranchPat;
   }
 }
 
@@ -1288,6 +1289,81 @@ bool vedx64$bridge$cxxbridge1$194$ir_is_fully_lifted(::vedx64::bridge::IrLifted 
   bool (*ir_is_fully_lifted$)(::vedx64::bridge::IrLifted const &) = ::vedx64::bridge::ir_is_fully_lifted;
   return ir_is_fully_lifted$(l);
 }
+
+::vedx64::bridge::BranchPat *vedx64$bridge$cxxbridge1$194$branch_recognize(::rust::Slice<::std::uint8_t const> code, ::std::uint64_t base, ::std::uint64_t addr) noexcept {
+  ::std::unique_ptr<::vedx64::bridge::BranchPat> (*branch_recognize$)(::rust::Slice<::std::uint8_t const>, ::std::uint64_t, ::std::uint64_t) = ::vedx64::bridge::branch_recognize;
+  return branch_recognize$(code, base, addr).release();
+}
+
+bool vedx64$bridge$cxxbridge1$194$branch_valid(::vedx64::bridge::BranchPat const &b) noexcept {
+  bool (*branch_valid$)(::vedx64::bridge::BranchPat const &) = ::vedx64::bridge::branch_valid;
+  return branch_valid$(b);
+}
+
+::std::uint8_t vedx64$bridge$cxxbridge1$194$branch_effect(::vedx64::bridge::BranchPat const &b) noexcept {
+  ::std::uint8_t (*branch_effect$)(::vedx64::bridge::BranchPat const &) = ::vedx64::bridge::branch_effect;
+  return branch_effect$(b);
+}
+
+::std::uint8_t vedx64$bridge$cxxbridge1$194$branch_form(::vedx64::bridge::BranchPat const &b) noexcept {
+  ::std::uint8_t (*branch_form$)(::vedx64::bridge::BranchPat const &) = ::vedx64::bridge::branch_form;
+  return branch_form$(b);
+}
+
+::std::uint8_t vedx64$bridge$cxxbridge1$194$branch_resolution(::vedx64::bridge::BranchPat const &b) noexcept {
+  ::std::uint8_t (*branch_resolution$)(::vedx64::bridge::BranchPat const &) = ::vedx64::bridge::branch_resolution;
+  return branch_resolution$(b);
+}
+
+::std::uint32_t vedx64$bridge$cxxbridge1$194$branch_total_length(::vedx64::bridge::BranchPat const &b) noexcept {
+  ::std::uint32_t (*branch_total_length$)(::vedx64::bridge::BranchPat const &) = ::vedx64::bridge::branch_total_length;
+  return branch_total_length$(b);
+}
+
+::std::uint8_t vedx64$bridge$cxxbridge1$194$branch_insn_count(::vedx64::bridge::BranchPat const &b) noexcept {
+  ::std::uint8_t (*branch_insn_count$)(::vedx64::bridge::BranchPat const &) = ::vedx64::bridge::branch_insn_count;
+  return branch_insn_count$(b);
+}
+
+bool vedx64$bridge$cxxbridge1$194$branch_is_conditional(::vedx64::bridge::BranchPat const &b) noexcept {
+  bool (*branch_is_conditional$)(::vedx64::bridge::BranchPat const &) = ::vedx64::bridge::branch_is_conditional;
+  return branch_is_conditional$(b);
+}
+
+bool vedx64$bridge$cxxbridge1$194$branch_is_far(::vedx64::bridge::BranchPat const &b) noexcept {
+  bool (*branch_is_far$)(::vedx64::bridge::BranchPat const &) = ::vedx64::bridge::branch_is_far;
+  return branch_is_far$(b);
+}
+
+bool vedx64$bridge$cxxbridge1$194$branch_pushes_return(::vedx64::bridge::BranchPat const &b) noexcept {
+  bool (*branch_pushes_return$)(::vedx64::bridge::BranchPat const &) = ::vedx64::bridge::branch_pushes_return;
+  return branch_pushes_return$(b);
+}
+
+bool vedx64$bridge$cxxbridge1$194$branch_has_fallthrough(::vedx64::bridge::BranchPat const &b) noexcept {
+  bool (*branch_has_fallthrough$)(::vedx64::bridge::BranchPat const &) = ::vedx64::bridge::branch_has_fallthrough;
+  return branch_has_fallthrough$(b);
+}
+
+::std::uint64_t vedx64$bridge$cxxbridge1$194$branch_target(::vedx64::bridge::BranchPat const &b) noexcept {
+  ::std::uint64_t (*branch_target$)(::vedx64::bridge::BranchPat const &) = ::vedx64::bridge::branch_target;
+  return branch_target$(b);
+}
+
+::std::uint8_t vedx64$bridge$cxxbridge1$194$branch_reg(::vedx64::bridge::BranchPat const &b) noexcept {
+  ::std::uint8_t (*branch_reg$)(::vedx64::bridge::BranchPat const &) = ::vedx64::bridge::branch_reg;
+  return branch_reg$(b);
+}
+
+bool vedx64$bridge$cxxbridge1$194$branch_slot_static(::vedx64::bridge::BranchPat const &b) noexcept {
+  bool (*branch_slot_static$)(::vedx64::bridge::BranchPat const &) = ::vedx64::bridge::branch_slot_static;
+  return branch_slot_static$(b);
+}
+
+::std::uint64_t vedx64$bridge$cxxbridge1$194$branch_slot_addr(::vedx64::bridge::BranchPat const &b) noexcept {
+  ::std::uint64_t (*branch_slot_addr$)(::vedx64::bridge::BranchPat const &) = ::vedx64::bridge::branch_slot_addr;
+  return branch_slot_addr$(b);
+}
 } // extern "C"
 } // namespace bridge
 } // namespace vedx64
@@ -1367,5 +1443,24 @@ void cxxbridge1$unique_ptr$vedx64$bridge$IrLifted$raw(::std::unique_ptr<::vedx64
 }
 void cxxbridge1$unique_ptr$vedx64$bridge$IrLifted$drop(::std::unique_ptr<::vedx64::bridge::IrLifted> *ptr) noexcept {
   ::rust::deleter_if<::rust::detail::is_complete<::vedx64::bridge::IrLifted>::value>{}(ptr);
+}
+
+static_assert(::rust::detail::is_complete<::std::remove_extent<::vedx64::bridge::BranchPat>::type>::value, "definition of `::vedx64::bridge::BranchPat` is required");
+static_assert(sizeof(::std::unique_ptr<::vedx64::bridge::BranchPat>) == sizeof(void *), "");
+static_assert(alignof(::std::unique_ptr<::vedx64::bridge::BranchPat>) == alignof(void *), "");
+void cxxbridge1$unique_ptr$vedx64$bridge$BranchPat$null(::std::unique_ptr<::vedx64::bridge::BranchPat> *ptr) noexcept {
+  ::new (ptr) ::std::unique_ptr<::vedx64::bridge::BranchPat>();
+}
+void cxxbridge1$unique_ptr$vedx64$bridge$BranchPat$raw(::std::unique_ptr<::vedx64::bridge::BranchPat> *ptr, ::std::unique_ptr<::vedx64::bridge::BranchPat>::pointer raw) noexcept {
+  ::new (ptr) ::std::unique_ptr<::vedx64::bridge::BranchPat>(raw);
+}
+::std::unique_ptr<::vedx64::bridge::BranchPat>::element_type const *cxxbridge1$unique_ptr$vedx64$bridge$BranchPat$get(::std::unique_ptr<::vedx64::bridge::BranchPat> const &ptr) noexcept {
+  return ptr.get();
+}
+::std::unique_ptr<::vedx64::bridge::BranchPat>::pointer cxxbridge1$unique_ptr$vedx64$bridge$BranchPat$release(::std::unique_ptr<::vedx64::bridge::BranchPat> &ptr) noexcept {
+  return ptr.release();
+}
+void cxxbridge1$unique_ptr$vedx64$bridge$BranchPat$drop(::std::unique_ptr<::vedx64::bridge::BranchPat> *ptr) noexcept {
+  ::rust::deleter_if<::rust::detail::is_complete<::vedx64::bridge::BranchPat>::value>{}(ptr);
 }
 } // extern "C"

@@ -73,6 +73,32 @@ pub fn ir_is_fully_lifted(l: &ffi::IrLifted) -> bool { ffi::ir_is_fully_lifted(l
 
 pub use ffi::{FlowResult, SemResult, IrLifted, IndirectBranchInfo};
 
+/// A recognized control transfer (see vedx64::branch::Form / Resolution).
+pub struct BranchPattern { inner: cxx::UniquePtr<ffi::BranchPat> }
+
+impl BranchPattern {
+    pub fn effect(&self) -> u8 { ffi::branch_effect(&self.inner) }
+    pub fn form(&self) -> u8 { ffi::branch_form(&self.inner) }
+    pub fn resolution(&self) -> u8 { ffi::branch_resolution(&self.inner) }
+    pub fn total_length(&self) -> u32 { ffi::branch_total_length(&self.inner) }
+    pub fn insn_count(&self) -> u8 { ffi::branch_insn_count(&self.inner) }
+    pub fn is_conditional(&self) -> bool { ffi::branch_is_conditional(&self.inner) }
+    pub fn is_far(&self) -> bool { ffi::branch_is_far(&self.inner) }
+    pub fn pushes_return(&self) -> bool { ffi::branch_pushes_return(&self.inner) }
+    pub fn has_fallthrough(&self) -> bool { ffi::branch_has_fallthrough(&self.inner) }
+    pub fn target(&self) -> u64 { ffi::branch_target(&self.inner) }
+    pub fn reg(&self) -> u8 { ffi::branch_reg(&self.inner) }
+    pub fn slot_static(&self) -> bool { ffi::branch_slot_static(&self.inner) }
+    pub fn slot_addr(&self) -> u64 { ffi::branch_slot_addr(&self.inner) }
+}
+
+/// Recognize the control-transfer idiom at `addr` within `code`
+/// (code[0] is at VA `base`). Returns None if nothing valid is found.
+pub fn branch_recognize(code: &[u8], base: u64, addr: u64) -> Option<BranchPattern> {
+    let p = ffi::branch_recognize(code, base, addr);
+    if p.is_null() || !ffi::branch_valid(&p) { None } else { Some(BranchPattern { inner: p }) }
+}
+
 /// Default action taken on every emulator memory fault.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FaultAction { Abort = 0, Skip = 1, Retry = 2 }
@@ -294,5 +320,27 @@ mod tests {
         assert!(s.gpr_const(0).is_none(), "symbolic RAX should not be constant");
         // The solver is the constant-folding stub unless built with Z3.
         let _ = SymxSession::solver_is_smt_backed();
+    }
+    #[test] fn test_branch_recognize_rel32() {
+        // jmp rel32 (+0x100) at 0x1000 -> concrete 0x1105.
+        let code = [0xE9u8, 0x00, 0x01, 0x00, 0x00];
+        let p = branch_recognize(&code, 0x1000, 0x1000).unwrap();
+        assert_eq!(p.total_length(), 5);
+        assert_eq!(p.target(), 0x1105);
+        assert!(!p.has_fallthrough());
+    }
+    #[test] fn test_branch_recognize_push_ret() {
+        // push 0xDEADBEEF ; ret -> jump to sign-extended 0xFFFFFFFFDEADBEEF.
+        let code = [0x68u8, 0xEF, 0xBE, 0xAD, 0xDE, 0xC3];
+        let p = branch_recognize(&code, 0x1000, 0x1000).unwrap();
+        assert_eq!(p.insn_count(), 2);
+        assert_eq!(p.target(), 0xFFFFFFFFDEADBEEF);
+    }
+    #[test] fn test_branch_recognize_mov_jmp() {
+        // mov rax, imm64 ; jmp rax -> concrete imm64.
+        let code = [0x48u8, 0xB8, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0xFF, 0xE0];
+        let p = branch_recognize(&code, 0x1000, 0x1000).unwrap();
+        assert_eq!(p.target(), 0x1122334455667788);
+        assert_eq!(p.total_length(), 12);
     }
 }

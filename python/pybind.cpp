@@ -13,6 +13,7 @@
 #endif
 #include "vedx64/relocation.hpp"
 #include "vedx64/branch_follow.hpp"
+#include "vedx64/branch_resolve.hpp"
 #include "vedx64/semantics.hpp"
 #include "vedx64/analysis.hpp"
 #ifdef VEDX64_ASSEMBLER
@@ -973,6 +974,123 @@ NB_MODULE(vedx64_py, m) {
         size_t len = data.size();
         return vedx64::classify_flow(ptr, len, rip);
     }, nb::arg("data"), nb::arg("rip") = 0, "Classify the control flow of an instruction");
+
+    // branch_resolve: exhaustive control-transfer recognizer.
+    {
+        using namespace vedx64::branch;
+        nb::module_ br = m.def_submodule("branch",
+            "Recognize every control-transfer idiom (direct/indirect/far/ret/push-ret/"
+            "mov-jmp/lea/literal-pool/computed) and resolve its destination.");
+
+        nb::enum_<Effect>(br, "Effect")
+            .value("None", Effect::None).value("Jump", Effect::Jump)
+            .value("ConditionalJump", Effect::ConditionalJump).value("Call", Effect::Call)
+            .value("Return", Effect::Return).value("Interrupt", Effect::Interrupt)
+            .value("SysTransfer", Effect::SysTransfer).value("Unknown", Effect::Unknown)
+            .export_values();
+
+        nb::enum_<Form>(br, "Form")
+            .value("None", Form::None).value("RelNear", Form::RelNear)
+            .value("CountConditional", Form::CountConditional)
+            .value("IndirectReg", Form::IndirectReg).value("IndirectMem", Form::IndirectMem)
+            .value("FarDirect", Form::FarDirect).value("FarIndirect", Form::FarIndirect)
+            .value("ReturnNear", Form::ReturnNear).value("ReturnFar", Form::ReturnFar)
+            .value("ReturnInterrupt", Form::ReturnInterrupt).value("Interrupt", Form::Interrupt)
+            .value("Syscall", Form::Syscall).value("PushImmRet", Form::PushImmRet)
+            .value("PushRegRet", Form::PushRegRet).value("PushSplitImm64Ret", Form::PushSplitImm64Ret)
+            .value("MovRegBranch", Form::MovRegBranch).value("LeaRegBranch", Form::LeaRegBranch)
+            .value("MovLeaPushRet", Form::MovLeaPushRet).value("LoadMemBranch", Form::LoadMemBranch)
+            .value("ComputedRegBranch", Form::ComputedRegBranch)
+            .export_values();
+
+        nb::enum_<Resolution>(br, "Resolution")
+            .value("Concrete", Resolution::Concrete).value("MemoryPointer", Resolution::MemoryPointer)
+            .value("RegisterDynamic", Resolution::RegisterDynamic).value("FarPointer", Resolution::FarPointer)
+            .value("StackDynamic", Resolution::StackDynamic).value("Unknown", Resolution::Unknown)
+            .export_values();
+
+        nb::class_<MemRef>(br, "MemRef")
+            .def_ro("base", &MemRef::base).def_ro("index", &MemRef::index)
+            .def_ro("scale", &MemRef::scale).def_ro("disp", &MemRef::disp)
+            .def_ro("rip_relative", &MemRef::rip_relative).def_ro("segment", &MemRef::segment)
+            .def_ro("static_addr", &MemRef::static_addr).def_ro("abs_addr", &MemRef::abs_addr);
+
+        nb::class_<BranchPattern>(br, "BranchPattern")
+            .def_ro("valid", &BranchPattern::valid)
+            .def_ro("effect", &BranchPattern::effect)
+            .def_ro("form", &BranchPattern::form)
+            .def_ro("resolution", &BranchPattern::resolution)
+            .def_ro("address", &BranchPattern::address)
+            .def_ro("total_length", &BranchPattern::total_length)
+            .def_ro("insn_count", &BranchPattern::insn_count)
+            .def_ro("is_conditional", &BranchPattern::is_conditional)
+            .def_ro("is_far", &BranchPattern::is_far)
+            .def_ro("pushes_return", &BranchPattern::pushes_return)
+            .def_ro("has_fallthrough", &BranchPattern::has_fallthrough)
+            .def_ro("target", &BranchPattern::target)
+            .def_ro("selector", &BranchPattern::selector)
+            .def_ro("reg", &BranchPattern::reg)
+            .def_ro("slot", &BranchPattern::slot)
+            .def_ro("ptr_size", &BranchPattern::ptr_size)
+            .def_ro("resolved", &BranchPattern::resolved)
+            .def_ro("final_target", &BranchPattern::final_target)
+            .def_ro("chain_depth", &BranchPattern::chain_depth)
+            .def_prop_ro("insn_len", [](const BranchPattern& p) {
+                std::vector<uint8_t> v;
+                for (uint8_t i = 0; i < p.insn_count && i < 6; ++i) v.push_back(p.insn_len[i]);
+                return v;
+            });
+
+        // recognize(code_bytes, address, read_mem=None). code must contain the
+        // idiom bytes starting at `address`. Optional read_mem(addr, n)->bytes|None
+        // resolves a static MemoryPointer one level.
+        br.def("recognize", [](nb::bytes data, uint64_t address, nb::object read_mem) -> BranchPattern {
+            const uint8_t* ptr = (const uint8_t*)data.c_str();
+            size_t len = data.size();
+            ReadMem rm{};
+            if (!read_mem.is_none()) {
+                rm = [read_mem](uint64_t a, uint8_t* o, size_t n) -> bool {
+                    nb::gil_scoped_acquire gil;
+                    nb::object r = read_mem(a, n);
+                    if (r.is_none()) return false;
+                    auto b = nb::cast<nb::bytes>(r);
+                    if (b.size() < n) return false;
+                    std::memcpy(o, b.c_str(), n);
+                    return true;
+                };
+            }
+            return recognize(ptr, len, address, Options{}, rm);
+        }, nb::arg("code"), nb::arg("address") = 0, nb::arg("read_mem") = nb::none(),
+           "Recognize the control-transfer idiom at `address` in `code`.");
+
+        // recognize_at(read_code, address, read_mem=None): callback-driven form
+        // for when the idiom may span addresses you fetch lazily.
+        br.def("recognize_at", [](nb::callable read_code, uint64_t address, nb::object read_mem) -> BranchPattern {
+            ReadCode rc = [read_code](uint64_t a, uint8_t* o, size_t n) -> bool {
+                nb::gil_scoped_acquire gil;
+                nb::object r = read_code(a, n);
+                if (r.is_none()) return false;
+                auto b = nb::cast<nb::bytes>(r);
+                if (b.size() < n) return false;
+                std::memcpy(o, b.c_str(), n);
+                return true;
+            };
+            ReadMem rm{};
+            if (!read_mem.is_none()) {
+                rm = [read_mem](uint64_t a, uint8_t* o, size_t n) -> bool {
+                    nb::gil_scoped_acquire gil;
+                    nb::object r = read_mem(a, n);
+                    if (r.is_none()) return false;
+                    auto b = nb::cast<nb::bytes>(r);
+                    if (b.size() < n) return false;
+                    std::memcpy(o, b.c_str(), n);
+                    return true;
+                };
+            }
+            return recognize(address, rc, Options{}, rm);
+        }, nb::arg("read_code"), nb::arg("address") = 0, nb::arg("read_mem") = nb::none(),
+           "Recognize via a read_code(addr, n)->bytes|None callback.");
+    }
 
     // analysis submodule
     nb::module_ analysis_m = m.def_submodule("analysis",

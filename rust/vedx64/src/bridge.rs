@@ -39,6 +39,7 @@ pub mod ffi {
         type Emu;
         type IrLifted;
         type SymxSession;
+        type BranchPat;
 
         // Core
         fn decode(code: &[u8]) -> UniquePtr<Decoded>;
@@ -143,6 +144,23 @@ pub mod ffi {
         fn ir_lifted_op_opcode(l: &IrLifted, i: usize) -> u8;
         fn ir_lifted_op_num_inputs(l: &IrLifted, i: usize) -> u8;
         fn ir_is_fully_lifted(l: &IrLifted) -> bool;
+
+        // branch_resolve
+        fn branch_recognize(code: &[u8], base: u64, addr: u64) -> UniquePtr<BranchPat>;
+        fn branch_valid(b: &BranchPat) -> bool;
+        fn branch_effect(b: &BranchPat) -> u8;
+        fn branch_form(b: &BranchPat) -> u8;
+        fn branch_resolution(b: &BranchPat) -> u8;
+        fn branch_total_length(b: &BranchPat) -> u32;
+        fn branch_insn_count(b: &BranchPat) -> u8;
+        fn branch_is_conditional(b: &BranchPat) -> bool;
+        fn branch_is_far(b: &BranchPat) -> bool;
+        fn branch_pushes_return(b: &BranchPat) -> bool;
+        fn branch_has_fallthrough(b: &BranchPat) -> bool;
+        fn branch_target(b: &BranchPat) -> u64;
+        fn branch_reg(b: &BranchPat) -> u8;
+        fn branch_slot_static(b: &BranchPat) -> bool;
+        fn branch_slot_addr(b: &BranchPat) -> u64;
     }
 }
 

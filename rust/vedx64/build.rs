@@ -68,6 +68,14 @@ fn main() {
             }
         }
     }
+    if let Ok(entries) = std::fs::read_dir(lib_dir.join("branch_resolve")) {
+        for entry in entries {
+            let path = entry.unwrap().path();
+            if path.extension().map_or(false, |e| e == "cpp") {
+                cpp_sources.push(path);
+            }
+        }
+    }
     if let Ok(entries) = std::fs::read_dir(lib_dir.join("semantics")) {
         for entry in entries {
             let path = entry.unwrap().path();
