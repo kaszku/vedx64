@@ -161,6 +161,12 @@ pub mod ffi {
         fn branch_reg(b: &BranchPat) -> u8;
         fn branch_slot_static(b: &BranchPat) -> bool;
         fn branch_slot_addr(b: &BranchPat) -> u64;
+        fn branch_is_jump_table(b: &BranchPat) -> bool;
+        fn branch_table_addr(b: &BranchPat) -> u64;
+        fn branch_entry_size(b: &BranchPat) -> u8;
+        fn branch_resolved(b: &BranchPat) -> bool;
+        fn branch_final_target(b: &BranchPat) -> u64;
+        fn branch_chain_depth(b: &BranchPat) -> u8;
     }
 }
 

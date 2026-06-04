@@ -350,6 +350,40 @@ def test_branch_recognize_memptr():
     assert p.slot.rip_relative and p.slot.abs_addr == 0x1006
     assert p.resolved and p.final_target == 0xCAFEF00D
 
+def test_branch_jump_table():
+    if not hasattr(v, 'branch'):
+        return
+    br = v.branch
+    # jmp [rax*8 + 0x1000]  -> 48 FF 24 C5 00 10 00 00
+    p = br.recognize(b'\x48\xFF\x24\xC5\x00\x10\x00\x00', 0x1000)
+    assert p.is_jump_table and p.entry_size == 8 and p.table_addr == 0x1000
+    tbl = [0x4000, 0x4010, 0x4020]
+    def read_mem(addr, n):
+        base = 0x1000
+        if addr >= base and addr + n <= base + 8 * len(tbl):
+            raw = b''.join(t.to_bytes(8, 'little') for t in tbl)
+            off = addr - base
+            return raw[off:off+n]
+        return None
+    tgts = br.enumerate_jump_table(p, 3, read_mem)
+    assert tgts == [0x4000, 0x4010, 0x4020]
+
+def test_branch_recognize_all():
+    if not hasattr(v, 'branch'):
+        return
+    br = v.branch
+    # nop ; call .+0 ; mov rbx,rax ; jmp .+0 ; nop
+    code = b'\x90\xE8\x00\x00\x00\x00\x48\x89\xC3\xE9\x00\x00\x00\x00\x90'
+    def read_code(addr, n):
+        off = addr - 0x1000
+        if off < 0 or off + n > len(code):
+            return None
+        return code[off:off+n]
+    xfers = br.recognize_all(read_code, 0x1000)
+    assert len(xfers) == 2
+    assert xfers[0].effect == br.Effect.Call and xfers[0].address == 0x1001
+    assert xfers[1].effect == br.Effect.Jump and xfers[1].address == 0x1009
+
 
 if __name__ == "__main__":
     tests = [v for k, v in globals().items() if k.startswith("test_")]

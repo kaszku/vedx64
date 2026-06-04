@@ -4,6 +4,7 @@
 #include "vedx64/branch_resolve.hpp"
 #include "vedx64/analysis.hpp"
 #include "vedx64/branch_follow.hpp"
+#include "vedx64/relocation.hpp"
 #include <cstring>
 
 namespace vedx64 {
@@ -220,21 +221,80 @@ bool is_retn(const DecodedInstr& di) {
 
 } // anonymous namespace
 
-bool resolve_target(BranchPattern& p, const ReadMem& read_mem, const Options& opt) {
-    if (!read_mem) return false;
+bool resolve_target(BranchPattern& p, const ReadMem& read_mem,
+                    const Options& opt, const ReadCode& read_code) {
     if (!opt.follow_memory) return false;
-    if (p.resolution != Resolution::MemoryPointer) return false;
-    if (!p.slot.static_addr) return false;
-    uint8_t ps = p.ptr_size ? p.ptr_size : 8;
-    if (ps > 8) ps = 8;
-    uint8_t b[8] = {0};
-    if (!read_mem(p.slot.abs_addr, b, ps)) return false;
-    uint64_t v = 0;
-    std::memcpy(&v, b, ps);
-    p.final_target = v;
+
+    // Seed the chain with one destination VA, however this pattern computes it.
+    uint64_t dst;
+    bool have_dst = false;
+    if (p.resolution == Resolution::MemoryPointer && p.slot.static_addr && read_mem) {
+        uint8_t ps = p.ptr_size ? p.ptr_size : 8; if (ps > 8) ps = 8;
+        uint8_t b[8] = {0};
+        if (read_mem(p.slot.abs_addr, b, ps)) { std::memcpy(&dst, b, ps); have_dst = true; }
+    } else if (p.resolution == Resolution::Concrete) {
+        dst = p.target; have_dst = true;
+    }
+    if (!have_dst) return false;
+
+    p.final_target = dst;
     p.resolved = true;
-    p.chain_depth = 0;   // one level only; chain chasing needs read_code (see header).
+    p.chain_depth = 0;
+
+    // Chain following: re-recognize at the destination and chase unconditional
+    // JMP forwarders (rel JMP, mov/lea+jmp, push/ret, jmp [mem]) until we reach
+    // something that isn't a plain forwarding jump. Calls are NOT followed (they
+    // return). Bounded by max_chain_depth.
+    if (!opt.follow_chains || !read_code) return true;
+    Options sub = opt; sub.follow_chains = false;  // resolve one hop at a time
+    for (uint8_t d = 0; d < opt.max_chain_depth; ++d) {
+        BranchPattern n = recognize(p.final_target, read_code, sub, read_mem);
+        if (!n.valid || n.effect != Effect::Jump) break;        // not a forwarder
+        uint64_t next;
+        if (n.resolution == Resolution::Concrete)        next = n.target;
+        else if (n.resolved)                              next = n.final_target;  // mem hop resolved
+        else break;                                       // dynamic — can't follow
+        if (next == p.final_target) break;                // self-loop guard
+        p.final_target = next;
+        p.chain_depth = (uint8_t)(d + 1);
+    }
     return true;
+}
+
+std::vector<uint64_t> enumerate_jump_table(const BranchPattern& p, size_t count,
+                                           const ReadMem& read_mem) {
+    std::vector<uint64_t> out;
+    if (!p.is_jump_table || !read_mem || p.table_addr == 0) return out;
+    uint8_t es = p.entry_size ? p.entry_size : 8; if (es != 4 && es != 8) return out;
+    for (size_t i = 0; i < count; ++i) {
+        uint8_t b[8] = {0};
+        if (!read_mem(p.table_addr + (uint64_t)i * es, b, es)) break;
+        uint64_t v = 0; std::memcpy(&v, b, es);
+        out.push_back(v);
+    }
+    return out;
+}
+
+std::vector<BranchPattern> recognize_all(uint64_t entry, const ReadCode& read_code,
+                                         size_t max_transfers, const Options& opt,
+                                         const ReadMem& read_mem) {
+    std::vector<BranchPattern> out;
+    uint64_t pc = entry;
+    for (size_t i = 0; i < max_transfers; ++i) {
+        // Decode one instruction to know its length / whether it's a transfer.
+        DecodedInstr di; size_t l = fill_decode(pc, read_code, di);
+        if (l == 0 || !di.desc) break;
+        BranchPattern p = recognize(pc, read_code, opt, read_mem);
+        if (p.valid) {
+            out.push_back(p);
+            if (out.size() >= max_transfers) break;
+            if (!p.has_fallthrough) break;             // terminator: stop the run
+            pc += p.total_length;                       // skip the whole idiom
+        } else {
+            pc += l;                                     // ordinary instruction
+        }
+    }
+    return out;
 }
 
 BranchPattern recognize(uint64_t address, const ReadCode& read_code,
@@ -364,7 +424,7 @@ BranchPattern recognize(uint64_t address, const ReadCode& read_code,
                 break;
             }
             if (ip.valid) {
-                if (ip.resolution == Resolution::MemoryPointer) resolve_target(ip, read_mem, opt);
+                if (ip.resolution == Resolution::MemoryPointer) resolve_target(ip, read_mem, opt, read_code);
                 return ip;
             }
         }
@@ -408,7 +468,7 @@ BranchPattern recognize(uint64_t address, const ReadCode& read_code,
         if (di0.desc->has_modrm) {
             p.form = Form::FarIndirect; p.resolution = Resolution::MemoryPointer;
             p.slot = build_memref(di0, address); p.ptr_size = 8;
-            resolve_target(p, read_mem, opt);
+            resolve_target(p, read_mem, opt, read_code);
         } else {
             p.form = Form::FarDirect; p.resolution = Resolution::FarPointer;
             p.target = (uint64_t)(uint32_t)di0.immediate;
@@ -428,7 +488,18 @@ BranchPattern recognize(uint64_t address, const ReadCode& read_code,
         if (info.is_mem) {
             p.form = Form::IndirectMem; p.resolution = Resolution::MemoryPointer;
             p.slot = build_memref(di0, address); p.ptr_size = 8;
-            resolve_target(p, read_mem, opt);
+            // A scaled index makes this a computed jump-table dispatch
+            // (`jmp [base+idx*s]` / `jmp [rip+d+idx*s]`). Surface the table.
+            if (p.slot.index != 0xFF) {
+                p.is_jump_table = true;
+                p.entry_size = p.slot.scale;
+                // Table base is statically known only when there is no base
+                // register: `jmp [disp32 + idx*s]` (absolute) or RIP-relative.
+                // With a base register the table address is computed at runtime.
+                if (p.slot.base == 0xFF)
+                    p.table_addr = p.slot.rip_relative ? p.slot.abs_addr : (uint64_t)p.slot.disp;
+            }
+            resolve_target(p, read_mem, opt, read_code);
         } else {
             p.form = Form::IndirectReg; p.resolution = Resolution::RegisterDynamic;
             p.reg = info.reg_id;

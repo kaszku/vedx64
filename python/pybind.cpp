@@ -1032,6 +1032,9 @@ NB_MODULE(vedx64_py, m) {
             .def_ro("reg", &BranchPattern::reg)
             .def_ro("slot", &BranchPattern::slot)
             .def_ro("ptr_size", &BranchPattern::ptr_size)
+            .def_ro("is_jump_table", &BranchPattern::is_jump_table)
+            .def_ro("table_addr", &BranchPattern::table_addr)
+            .def_ro("entry_size", &BranchPattern::entry_size)
             .def_ro("resolved", &BranchPattern::resolved)
             .def_ro("final_target", &BranchPattern::final_target)
             .def_ro("chain_depth", &BranchPattern::chain_depth)
@@ -1090,6 +1093,54 @@ NB_MODULE(vedx64_py, m) {
             return recognize(address, rc, Options{}, rm);
         }, nb::arg("read_code"), nb::arg("address") = 0, nb::arg("read_mem") = nb::none(),
            "Recognize via a read_code(addr, n)->bytes|None callback.");
+
+        // enumerate_jump_table(pattern, count, read_mem) -> [target VA, ...]
+        br.def("enumerate_jump_table", [](const BranchPattern& p, size_t count, nb::object read_mem) -> std::vector<uint64_t> {
+            ReadMem rm{};
+            if (!read_mem.is_none()) {
+                rm = [read_mem](uint64_t a, uint8_t* o, size_t n) -> bool {
+                    nb::gil_scoped_acquire gil;
+                    nb::object r = read_mem(a, n);
+                    if (r.is_none()) return false;
+                    auto b = nb::cast<nb::bytes>(r);
+                    if (b.size() < n) return false;
+                    std::memcpy(o, b.c_str(), n);
+                    return true;
+                };
+            }
+            return enumerate_jump_table(p, count, rm);
+        }, nb::arg("pattern"), nb::arg("count"), nb::arg("read_mem"),
+           "Read up to `count` jump-table entries (target VAs) for an is_jump_table pattern.");
+
+        // recognize_all(read_code, entry, max_transfers=256, follow_chains=False, read_mem=None)
+        br.def("recognize_all", [](nb::callable read_code, uint64_t entry, size_t max_transfers,
+                                   bool follow_chains, nb::object read_mem) -> std::vector<BranchPattern> {
+            ReadCode rc = [read_code](uint64_t a, uint8_t* o, size_t n) -> bool {
+                nb::gil_scoped_acquire gil;
+                nb::object r = read_code(a, n);
+                if (r.is_none()) return false;
+                auto b = nb::cast<nb::bytes>(r);
+                if (b.size() < n) return false;
+                std::memcpy(o, b.c_str(), n);
+                return true;
+            };
+            ReadMem rm{};
+            if (!read_mem.is_none()) {
+                rm = [read_mem](uint64_t a, uint8_t* o, size_t n) -> bool {
+                    nb::gil_scoped_acquire gil;
+                    nb::object r = read_mem(a, n);
+                    if (r.is_none()) return false;
+                    auto b = nb::cast<nb::bytes>(r);
+                    if (b.size() < n) return false;
+                    std::memcpy(o, b.c_str(), n);
+                    return true;
+                };
+            }
+            Options opt; opt.follow_chains = follow_chains;
+            return recognize_all(entry, rc, max_transfers, opt, rm);
+        }, nb::arg("read_code"), nb::arg("entry"), nb::arg("max_transfers") = 256,
+           nb::arg("follow_chains") = false, nb::arg("read_mem") = nb::none(),
+           "Recognize every control transfer along the run starting at `entry`.");
     }
 
     // analysis submodule

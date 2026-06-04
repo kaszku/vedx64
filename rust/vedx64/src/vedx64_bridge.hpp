@@ -191,6 +191,12 @@ uint64_t branch_target(const BranchPat& b);
 uint8_t  branch_reg(const BranchPat& b);
 bool     branch_slot_static(const BranchPat& b);
 uint64_t branch_slot_addr(const BranchPat& b);
+bool     branch_is_jump_table(const BranchPat& b);
+uint64_t branch_table_addr(const BranchPat& b);
+uint8_t  branch_entry_size(const BranchPat& b);
+bool     branch_resolved(const BranchPat& b);
+uint64_t branch_final_target(const BranchPat& b);
+uint8_t  branch_chain_depth(const BranchPat& b);
 
 #ifdef VEDX64_IR
 std::unique_ptr<SymxSession> symx_new(rust::Slice<const uint8_t> code, uint64_t base, uint64_t entry);

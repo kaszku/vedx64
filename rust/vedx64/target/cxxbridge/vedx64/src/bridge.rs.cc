@@ -1364,6 +1364,36 @@ bool vedx64$bridge$cxxbridge1$194$branch_slot_static(::vedx64::bridge::BranchPat
   ::std::uint64_t (*branch_slot_addr$)(::vedx64::bridge::BranchPat const &) = ::vedx64::bridge::branch_slot_addr;
   return branch_slot_addr$(b);
 }
+
+bool vedx64$bridge$cxxbridge1$194$branch_is_jump_table(::vedx64::bridge::BranchPat const &b) noexcept {
+  bool (*branch_is_jump_table$)(::vedx64::bridge::BranchPat const &) = ::vedx64::bridge::branch_is_jump_table;
+  return branch_is_jump_table$(b);
+}
+
+::std::uint64_t vedx64$bridge$cxxbridge1$194$branch_table_addr(::vedx64::bridge::BranchPat const &b) noexcept {
+  ::std::uint64_t (*branch_table_addr$)(::vedx64::bridge::BranchPat const &) = ::vedx64::bridge::branch_table_addr;
+  return branch_table_addr$(b);
+}
+
+::std::uint8_t vedx64$bridge$cxxbridge1$194$branch_entry_size(::vedx64::bridge::BranchPat const &b) noexcept {
+  ::std::uint8_t (*branch_entry_size$)(::vedx64::bridge::BranchPat const &) = ::vedx64::bridge::branch_entry_size;
+  return branch_entry_size$(b);
+}
+
+bool vedx64$bridge$cxxbridge1$194$branch_resolved(::vedx64::bridge::BranchPat const &b) noexcept {
+  bool (*branch_resolved$)(::vedx64::bridge::BranchPat const &) = ::vedx64::bridge::branch_resolved;
+  return branch_resolved$(b);
+}
+
+::std::uint64_t vedx64$bridge$cxxbridge1$194$branch_final_target(::vedx64::bridge::BranchPat const &b) noexcept {
+  ::std::uint64_t (*branch_final_target$)(::vedx64::bridge::BranchPat const &) = ::vedx64::bridge::branch_final_target;
+  return branch_final_target$(b);
+}
+
+::std::uint8_t vedx64$bridge$cxxbridge1$194$branch_chain_depth(::vedx64::bridge::BranchPat const &b) noexcept {
+  ::std::uint8_t (*branch_chain_depth$)(::vedx64::bridge::BranchPat const &) = ::vedx64::bridge::branch_chain_depth;
+  return branch_chain_depth$(b);
+}
 } // extern "C"
 } // namespace bridge
 } // namespace vedx64

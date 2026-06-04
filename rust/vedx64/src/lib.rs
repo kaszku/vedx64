@@ -90,6 +90,12 @@ impl BranchPattern {
     pub fn reg(&self) -> u8 { ffi::branch_reg(&self.inner) }
     pub fn slot_static(&self) -> bool { ffi::branch_slot_static(&self.inner) }
     pub fn slot_addr(&self) -> u64 { ffi::branch_slot_addr(&self.inner) }
+    pub fn is_jump_table(&self) -> bool { ffi::branch_is_jump_table(&self.inner) }
+    pub fn table_addr(&self) -> u64 { ffi::branch_table_addr(&self.inner) }
+    pub fn entry_size(&self) -> u8 { ffi::branch_entry_size(&self.inner) }
+    pub fn resolved(&self) -> bool { ffi::branch_resolved(&self.inner) }
+    pub fn final_target(&self) -> u64 { ffi::branch_final_target(&self.inner) }
+    pub fn chain_depth(&self) -> u8 { ffi::branch_chain_depth(&self.inner) }
 }
 
 /// Recognize the control-transfer idiom at `addr` within `code`
@@ -342,5 +348,13 @@ mod tests {
         let p = branch_recognize(&code, 0x1000, 0x1000).unwrap();
         assert_eq!(p.target(), 0x1122334455667788);
         assert_eq!(p.total_length(), 12);
+    }
+    #[test] fn test_branch_jump_table() {
+        // jmp [rax*8 + 0x1000]  ->  48 FF 24 C5 00 10 00 00
+        let code = [0x48u8, 0xFF, 0x24, 0xC5, 0x00, 0x10, 0x00, 0x00];
+        let p = branch_recognize(&code, 0x1000, 0x1000).unwrap();
+        assert!(p.is_jump_table());
+        assert_eq!(p.entry_size(), 8);
+        assert_eq!(p.table_addr(), 0x1000);
     }
 }

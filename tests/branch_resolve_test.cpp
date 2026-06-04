@@ -177,6 +177,56 @@ int main() {
       auto p = rec(b, sizeof b);
       CHECK(!p.valid, "non-branch mov rejected"); }
 
+    // ---- jump table: jmp [rip+disp + rax*8] (RIP-relative table) ----
+    { uint8_t b[] = {0x48, 0xFF, 0x24, 0xC5, 0x00, 0x10, 0x00, 0x00}; // jmp [rip*... actually disp32+rax*8]
+      // NB: 48 FF 24 C5 d32 = jmp qword [rax*8 + disp32] (no base; SIB base=5,mod=0)
+      auto p = rec(b, sizeof b, 0x1000);
+      CHECK(p.valid && p.form == Form::IndirectMem && p.is_jump_table, "jump-table detected");
+      CHECK(p.entry_size == 8 && p.table_addr == 0x1000, "jump-table base+entry_size");
+      // enumerate 3 entries via a backing table.
+      ReadMem rm = [](uint64_t a, uint8_t* o, size_t n) -> bool {
+          static const uint64_t tbl[3] = {0x4000, 0x4010, 0x4020};
+          if (a >= 0x1000 && a + n <= 0x1000 + sizeof(tbl)) {
+              std::memcpy(o, (const uint8_t*)tbl + (a - 0x1000), n); return true; }
+          return false; };
+      auto tgts = enumerate_jump_table(p, 3, rm);
+      CHECK(tgts.size() == 3 && tgts[0] == 0x4000 && tgts[2] == 0x4020, "jump-table enumerate"); }
+
+    // ---- forwarding chain: jmp [rip+0] -> stub that does jmp rel32 -> final ----
+    { uint8_t b[] = {0xFF, 0x25, 0x00, 0x00, 0x00, 0x00}; // jmp [rip+0] at 0x1000; ptr@0x1006
+      // memory: pointer at 0x1006 -> 0x2000; code at 0x2000: E9 (jmp rel32 +0xFB -> 0x2100)
+      ReadMem rm = [](uint64_t a, uint8_t* o, size_t n) -> bool {
+          if (a == 0x1006 && n == 8) { uint64_t v = 0x2000; std::memcpy(o, &v, 8); return true; }
+          return false; };
+      ReadCode rc = [](uint64_t a, uint8_t* o, size_t n) -> bool {
+          // 0x1000: FF 25 00000000 ; 0x2000: E9 FB 00 00 00 (jmp +0xFB -> 0x2100)
+          static const uint8_t at1000[] = {0xFF,0x25,0,0,0,0};
+          static const uint8_t at2000[] = {0xE9,0xFB,0x00,0x00,0x00};
+          if (a >= 0x1000 && a + n <= 0x1000 + sizeof(at1000)) { std::memcpy(o, at1000 + (a-0x1000), n); return true; }
+          if (a >= 0x2000 && a + n <= 0x2000 + sizeof(at2000)) { std::memcpy(o, at2000 + (a-0x2000), n); return true; }
+          return false; };
+      Options opt; opt.follow_chains = true;
+      auto p = recognize(0x1000, rc, opt, rm);
+      CHECK(p.resolved && p.final_target == 0x2100, "forwarding chain followed");
+      CHECK(p.chain_depth == 1, "chain depth counted"); }
+
+    // ---- recognize_all: walk a stream of transfers + filler ----
+    { // 0: nop ; 1: call rel32 (+0) ; 6: mov eax,imm ; ... ; jmp rel32 (terminator)
+      uint8_t b[] = {
+          0x90,                               // nop                (skipped)
+          0xE8, 0x00, 0x00, 0x00, 0x00,       // call .+0  (transfer, fallthrough)
+          0x48, 0x89, 0xC3,                   // mov rbx,rax        (skipped)
+          0xE9, 0x00, 0x00, 0x00, 0x00,       // jmp .+0   (terminator, no fallthrough)
+          0x90                                // nop (never reached)
+      };
+      auto v = recognize_all(0x1000, [&b](uint64_t a, uint8_t* o, size_t n) -> bool {
+          uint64_t off = a - 0x1000;
+          if (off > sizeof(b) || off + n > sizeof(b)) return false;
+          std::memcpy(o, b + off, n); return true; });
+      CHECK(v.size() == 2, "recognize_all found 2 transfers");
+      CHECK(v.size() >= 1 && v[0].effect == Effect::Call && v[0].address == 0x1001, "recognize_all call");
+      CHECK(v.size() == 2 && v[1].effect == Effect::Jump && v[1].address == 0x1009, "recognize_all jmp terminator"); }
+
     std::printf("\n%d/%d branch_resolve checks passed\n", g_pass, g_pass + g_fail);
     return g_fail > 0 ? 1 : 0;
 }

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <functional>
+#include <vector>
 #include "vedx64/core.hpp"
 
 namespace vedx64 {
@@ -93,10 +94,15 @@ struct BranchPattern {
     MemRef     slot;              ///< MemoryPointer: where the pointer/element lives.
     uint8_t    ptr_size  = 8;     ///< bytes to read at the slot (2/4/8).
 
-    // ---- optional one-level resolution via read_mem ----
+    // ---- jump table (computed indirect `jmp [base+idx*s]` / `jmp [rip+d+idx*s]`) ----
+    bool       is_jump_table = false; ///< IndirectMem dispatch through a table.
+    uint64_t   table_addr    = 0;     ///< table base VA (0 if base is a register).
+    uint8_t    entry_size    = 0;     ///< 4 or 8 bytes per entry (0 if unknown).
+
+    // ---- optional resolution via read_mem (+ read_code for chains) ----
     bool       resolved     = false; ///< final_target was read through memory.
     uint64_t   final_target = 0;
-    uint8_t    chain_depth  = 0;     ///< # forwarding hops followed (0 by default).
+    uint8_t    chain_depth  = 0;     ///< # forwarding hops followed to reach final_target.
 };
 
 /// Provide instruction bytes / memory bytes at a virtual address.
@@ -124,10 +130,28 @@ BranchPattern recognize(const uint8_t* code, size_t len, uint64_t address,
                         const Options& opt = {}, const ReadMem& read_mem = {});
 
 /// Resolve (or re-resolve) the final target of an already-recognized pattern
-/// by reading its memory slot. Follows forwarding chains only when
-/// opt.follow_chains is set. Returns true if final_target was produced.
+/// by reading its memory slot. When opt.follow_chains is set AND `read_code`
+/// is provided, it then chases JMP->JMP / stub->stub forwarding chains up to
+/// opt.max_chain_depth, updating final_target and chain_depth. Returns true
+/// if final_target was produced.
 bool resolve_target(BranchPattern& p, const ReadMem& read_mem,
-                    const Options& opt = {});
+                    const Options& opt = {}, const ReadCode& read_code = {});
+
+/// Enumerate up to `count` table entries for a jump-table pattern (is_jump_table).
+/// Reads entry_size-byte slots starting at table_addr via read_mem; a 4-byte
+/// entry is treated as an absolute zero-extended VA (image-relative tables need
+/// a caller-side bias). Returns the decoded target VAs (empty if not a static
+/// table or read_mem is null).
+std::vector<uint64_t> enumerate_jump_table(const BranchPattern& p, size_t count,
+                                          const ReadMem& read_mem);
+
+/// Recognize every control transfer along the straight-line run starting at
+/// `entry`: each returned BranchPattern is a transfer (non-transfer instructions
+/// are skipped by length). Stops after a terminator with no fall-through (uncond
+/// jump / ret / uncond idiom), on a decode failure, or after `max_transfers`.
+std::vector<BranchPattern> recognize_all(uint64_t entry, const ReadCode& read_code,
+                                        size_t max_transfers = 256,
+                                        const Options& opt = {}, const ReadMem& read_mem = {});
 
 } // namespace branch
 } // namespace vedx64
