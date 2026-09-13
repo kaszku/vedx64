@@ -285,6 +285,10 @@ static uint64_t read_operand(const CpuState& cpu, const DecodedInstr& di, int op
     if (op.addr == AddrMode::Immediate || op.addr == AddrMode::RelOffset) {
         return (uint64_t)di.immediate & mask(bits);
     }
+    // Implicit constant baked into the opcode (D0/D1 shift-by-1, INT3).
+    if (op.addr == AddrMode::Const) {
+        return (uint64_t)op.fixed_reg & mask(bits);
+    }
     if (is_mem_operand(di, op)) {
         uint64_t ea = (op.addr == AddrMode::Moffset) ? (uint64_t)di.displacement : compute_ea(cpu, di);
         return mem_read(cpu, ea, bits / 8);
@@ -300,6 +304,11 @@ static void write_operand(CpuState& cpu, const DecodedInstr& di, int op_idx, uin
         return;
     }
     write_gpr(cpu, reg_index(di, op), val, bits, di.rex);
+}
+
+static bool has_operand(const DecodedInstr& di, int k) {
+    if (!di.desc || k < 0 || k >= (int)di.desc->num_operands) return false;
+    return di.desc->operands[k].addr != AddrMode::None;
 }
 
 static uint64_t operand_ea(const CpuState& cpu, const DecodedInstr& di, int op_idx) {
@@ -769,7 +778,7 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     }
     case Mnemonic::SHL: case Mnemonic::SAL: {
         uint64_t a = read_operand(cpu, di, 0, bits);
-        uint64_t count = (di.desc->num_operands > 1) ? read_operand(cpu, di, 1, 8) : 1;
+        uint64_t count = has_operand(di, 1) ? read_operand(cpu, di, 1, 8) : 1;
         count &= (bits == 64) ? 63 : 31;
         if (count == 0) break;
         uint64_t res = (a << count) & mask(bits);
@@ -787,7 +796,7 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     }
     case Mnemonic::SHR: {
         uint64_t a = read_operand(cpu, di, 0, bits) & mask(bits);
-        uint64_t count = (di.desc->num_operands > 1) ? read_operand(cpu, di, 1, 8) : 1;
+        uint64_t count = has_operand(di, 1) ? read_operand(cpu, di, 1, 8) : 1;
         count &= (bits == 64) ? 63 : 31;
         if (count == 0) break;
         uint64_t res = a >> count;
@@ -803,7 +812,7 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     case Mnemonic::SAR: {
         int64_t a = (int64_t)(read_operand(cpu, di, 0, bits) & mask(bits));
         if (bits < 64 && (a & sign_bit(bits))) a |= ~(int64_t)mask(bits);
-        uint64_t count = (di.desc->num_operands > 1) ? read_operand(cpu, di, 1, 8) : 1;
+        uint64_t count = has_operand(di, 1) ? read_operand(cpu, di, 1, 8) : 1;
         count &= (bits == 64) ? 63 : 31;
         if (count == 0) break;
         int64_t res = a >> count;
@@ -817,7 +826,7 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     }
     case Mnemonic::ROL: {
         uint64_t a = read_operand(cpu, di, 0, bits) & mask(bits);
-        uint64_t count = (di.desc->num_operands > 1) ? read_operand(cpu, di, 1, 8) : 1;
+        uint64_t count = has_operand(di, 1) ? read_operand(cpu, di, 1, 8) : 1;
         count &= (bits == 64) ? 63 : 31;
         if (count == 0) break;
         count %= bits;
@@ -829,7 +838,7 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     }
     case Mnemonic::ROR: {
         uint64_t a = read_operand(cpu, di, 0, bits) & mask(bits);
-        uint64_t count = (di.desc->num_operands > 1) ? read_operand(cpu, di, 1, 8) : 1;
+        uint64_t count = has_operand(di, 1) ? read_operand(cpu, di, 1, 8) : 1;
         count &= (bits == 64) ? 63 : 31;
         if (count == 0) break;
         count %= bits;
@@ -1457,7 +1466,7 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     }
     case Mnemonic::RCL: {
         uint64_t a = read_operand(cpu, di, 0, bits) & mask(bits);
-        uint64_t count = (di.desc->num_operands > 1) ? read_operand(cpu, di, 1, 8) : 1;
+        uint64_t count = has_operand(di, 1) ? read_operand(cpu, di, 1, 8) : 1;
         count &= (bits == 64) ? 63 : 31;
         count %= (bits + 1);
         if (count == 0) break;
@@ -1473,7 +1482,7 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     }
     case Mnemonic::RCR: {
         uint64_t a = read_operand(cpu, di, 0, bits) & mask(bits);
-        uint64_t count = (di.desc->num_operands > 1) ? read_operand(cpu, di, 1, 8) : 1;
+        uint64_t count = has_operand(di, 1) ? read_operand(cpu, di, 1, 8) : 1;
         count &= (bits == 64) ? 63 : 31;
         count %= (bits + 1);
         if (count == 0) break;
@@ -1490,7 +1499,7 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     case Mnemonic::SHLD: {
         uint64_t dst = read_operand(cpu, di, 0, bits) & mask(bits);
         uint64_t src = read_operand(cpu, di, 1, bits) & mask(bits);
-        uint64_t count = (di.desc->num_operands > 2) ? read_operand(cpu, di, 2, 8) : cpu.gpr[1] & 0xFF;
+        uint64_t count = has_operand(di, 2) ? read_operand(cpu, di, 2, 8) : cpu.gpr[1] & 0xFF;
         count &= (bits == 64) ? 63 : 31;
         if (count == 0) break;
         uint64_t res;
@@ -1507,7 +1516,7 @@ static StepResult emu_exec_switch(CpuState& cpu, const DecodedInstr& di, int bit
     case Mnemonic::SHRD: {
         uint64_t dst = read_operand(cpu, di, 0, bits) & mask(bits);
         uint64_t src = read_operand(cpu, di, 1, bits) & mask(bits);
-        uint64_t count = (di.desc->num_operands > 2) ? read_operand(cpu, di, 2, 8) : cpu.gpr[1] & 0xFF;
+        uint64_t count = has_operand(di, 2) ? read_operand(cpu, di, 2, 8) : cpu.gpr[1] & 0xFF;
         count &= (bits == 64) ? 63 : 31;
         if (count == 0) break;
         uint64_t res;

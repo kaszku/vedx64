@@ -56,12 +56,15 @@ enum class AddrMode : uint8_t {
     Stack,
     VexReg,
     XmmVvvv,
+    Const,
 };
 
 struct OperandDesc {
     AddrMode addr;
     OpSize size;
-    uint8_t fixed_reg; // register number for Fixed addressing
+    // Fixed: register number. Const: the literal operand value
+    // (e.g. 1 for the D0/D1 shift-by-1 forms, 3 for INT3).
+    uint8_t fixed_reg;
 };
 
 struct InstrDesc {

@@ -763,6 +763,9 @@ NB_MODULE(vedx64_py, m) {
         .value("MmxRegOnly", AddrMode::MmxRegOnly)
         .value("XmmRegOnly", AddrMode::XmmRegOnly)
         .value("Stack", AddrMode::Stack)
+        .value("VexReg", AddrMode::VexReg)
+        .value("XmmVvvv", AddrMode::XmmVvvv)
+        .value("Const", AddrMode::Const)
         .export_values();
 
     nb::class_<DecodedInstr>(m, "DecodedInstr")

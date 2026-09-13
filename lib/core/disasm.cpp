@@ -811,6 +811,9 @@ size_t disassemble(const uint8_t* code, size_t len, char* buf, size_t buf_len_, 
         case AddrMode::Moffset:
             off += snprintf(buf + off, buf_len - off, "%s[0x%llx]", size_prefix(op.size, rex_w, opsz, def64, di.vex_L), (unsigned long long)di.displacement);
             break;
+        case AddrMode::Const:
+            off += snprintf(buf + off, buf_len - off, "%u", (unsigned)op.fixed_reg);
+            break;
         default: break;
         }
         if (di.has_vex && !vex_vvvv_emitted && !has_vex_operand(*di.desc)) {
@@ -834,10 +837,6 @@ size_t disassemble(const uint8_t* code, size_t len, char* buf, size_t buf_len_, 
                 }
             } else { vex_vvvv_emitted = true; }
         }
-    }
-
-    if (di.desc->opcode == 0xD0 || di.desc->opcode == 0xD1) {
-        off += snprintf(buf+off, buf_len-off, ", 1");
     }
 
     if (di.desc->mnemonic == Mnemonic::PBLENDVB || di.desc->mnemonic == Mnemonic::BLENDVPS || di.desc->mnemonic == Mnemonic::BLENDVPD) {

@@ -28,6 +28,11 @@ void test_table_integrity() {
         const auto& d = g_instr_table[i];
         TEST_ASSERT(d.mnemonic != Mnemonic::INVALID, "entry has valid mnemonic");
         TEST_ASSERT(d.num_operands <= 4, "entry has <= 4 operands");
+        if (d.opcode == 0x00D0 || d.opcode == 0x00D1) {
+            TEST_ASSERT(d.num_operands == 2, "D0/D1 shift form has 2 operands");
+            TEST_ASSERT(d.operands[1].addr == AddrMode::Const, "D0/D1 count operand is Const");
+            TEST_ASSERT(d.operands[1].fixed_reg == 1, "D0/D1 count operand value is 1");
+        }
     }
 }
 

@@ -209,6 +209,77 @@ static void test_shl_shr() {
     CHECK(cpu.gpr[0] == 4, "shr 16 >> 2 = 4");
 }
 
+static void test_shift_by_one() {
+    const uint32_t X = 0x826A21E9u;
+    uint8_t mem[4096] = {};
+    CpuState cpu;
+
+    auto run_d1 = [&](uint8_t modrm, uint64_t poison_al, uint64_t poison_cl) {
+        emu_init(cpu, mem, sizeof(mem));
+        cpu.rip = 0x100;
+        mem[0x100] = 0x41; mem[0x101] = 0xD1; mem[0x102] = modrm;
+        cpu.gpr[8] = X;
+        cpu.gpr[0] = poison_al;   // AL — must not be used as the count
+        cpu.gpr[1] = poison_cl;   // CL — must not be used as the count
+        cpu.rflags &= ~RFLAG_CF;  // deterministic RCL/RCR input
+        StepResult r = emu_step(cpu);
+        CHECK(r == StepResult::OK, "D1 form steps ok");
+        CHECK(cpu.rip == 0x103, "D1 form is 3 bytes");
+        return (uint32_t)cpu.gpr[8];
+    };
+
+    CHECK(run_d1(0xC0, 0, 0) == 0x04D443D3u, "rol r8d, 1 (AL=0, CL=0)");
+    CHECK(run_d1(0xC0, 7, 9) == 0x04D443D3u, "rol r8d, 1 (AL=7, CL=9)");
+    CHECK(run_d1(0xC8, 0, 0) == 0xC13510F4u, "ror r8d, 1 (AL=0, CL=0)");
+    CHECK(run_d1(0xC8, 7, 9) == 0xC13510F4u, "ror r8d, 1 (AL=7, CL=9)");
+    CHECK(run_d1(0xD0, 0, 0) == 0x04D443D2u, "rcl r8d, 1 (CF=0) (AL=0, CL=0)");
+    CHECK(run_d1(0xD0, 7, 9) == 0x04D443D2u, "rcl r8d, 1 (CF=0) (AL=7, CL=9)");
+    CHECK(run_d1(0xD8, 0, 0) == 0x413510F4u, "rcr r8d, 1 (CF=0) (AL=0, CL=0)");
+    CHECK(run_d1(0xD8, 7, 9) == 0x413510F4u, "rcr r8d, 1 (CF=0) (AL=7, CL=9)");
+    CHECK(run_d1(0xE0, 0, 0) == 0x04D443D2u, "shl r8d, 1 (AL=0, CL=0)");
+    CHECK(run_d1(0xE0, 7, 9) == 0x04D443D2u, "shl r8d, 1 (AL=7, CL=9)");
+    CHECK(run_d1(0xE8, 0, 0) == 0x413510F4u, "shr r8d, 1 (AL=0, CL=0)");
+    CHECK(run_d1(0xE8, 7, 9) == 0x413510F4u, "shr r8d, 1 (AL=7, CL=9)");
+    CHECK(run_d1(0xF8, 0, 0) == 0xC13510F4u, "sar r8d, 1 (AL=0, CL=0)");
+    CHECK(run_d1(0xF8, 7, 9) == 0xC13510F4u, "sar r8d, 1 (AL=7, CL=9)");
+
+    auto run_d0 = [&](uint8_t modrm, uint8_t start) {
+        emu_init(cpu, mem, sizeof(mem));
+        cpu.rip = 0x100;
+        mem[0x100] = 0xD0; mem[0x101] = modrm;
+        cpu.gpr[0] = start;       // AL is both operand and (bogus) count source
+        cpu.rflags &= ~RFLAG_CF;
+        emu_step(cpu);
+        return (uint8_t)cpu.gpr[0];
+    };
+    CHECK(run_d0(0xC0, 0x81) == 0x03, "rol al, 1");
+    CHECK(run_d0(0xC8, 0x81) == 0xC0, "ror al, 1");
+    CHECK(run_d0(0xE0, 0x81) == 0x02, "shl al, 1");
+    CHECK(run_d0(0xE8, 0x81) == 0x40, "shr al, 1");
+    CHECK(run_d0(0xF8, 0x81) == 0xC0, "sar al, 1");
+
+    emu_init(cpu, mem, sizeof(mem));
+    cpu.rip = 0x100;
+    mem[0x100] = 0x48; mem[0x101] = 0xD1; mem[0x102] = 0xE0;
+    cpu.gpr[0] = 0x0123456789ABCDEFULL;
+    emu_step(cpu);
+    CHECK(cpu.gpr[0] == 0x02468ACF13579BDEULL, "shl rax, 1 (REX.W)");
+
+    emu_init(cpu, mem, sizeof(mem));
+    cpu.rip = 0x100;
+    mem[0x100] = 0x41; mem[0x101] = 0xC1; mem[0x102] = 0xC8; mem[0x103] = 0x0B;
+    cpu.gpr[8] = X;
+    emu_step(cpu);
+    CHECK((uint32_t)cpu.gpr[8] == 0x3D304D44u, "ror r8d, 0xb (C1 form)");
+
+    emu_init(cpu, mem, sizeof(mem));
+    cpu.rip = 0x100;
+    mem[0x100] = 0x41; mem[0x101] = 0xD3; mem[0x102] = 0xC8;
+    cpu.gpr[8] = X; cpu.gpr[1] = 0x0B;
+    emu_step(cpu);
+    CHECK((uint32_t)cpu.gpr[8] == 0x3D304D44u, "ror r8d, cl (D3 form, cl=0xb)");
+}
+
 static void test_rep_stosb() {
     uint8_t mem[4096] = {};
     CpuState cpu;
@@ -761,6 +832,7 @@ int main() {
     test_neg();
     test_and_or();
     test_shl_shr();
+    test_shift_by_one();
     test_rep_stosb();
     test_rep_movsb();
     test_repnz_scasb();

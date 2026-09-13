@@ -22,6 +22,15 @@ int main() {
       CHECK(i.mnemonic==Mnemonic::SUB,"SUB"); bool has_imm=false;
       for(auto&op:i.operands) if(op.is_immediate()){has_imm=true; CHECK(op.imm.value==0x20,"imm=0x20");}
       CHECK(has_imm,"has imm"); }
+    { uint8_t c[]={0x41,0xD1,0xC8}; Instruction i; size_t n=Instruction::decode_instruction(c,sizeof(c),i);
+      CHECK(n==3,"ror r8d,1: 3 bytes"); CHECK(i.mnemonic==Mnemonic::ROR,"ROR");
+      CHECK(i.operands.size()==2,"ror r8d,1 has 2 materialised operands");
+      CHECK(i.descriptor() && i.operands.size()==i.descriptor()->num_operands,"operands.size()==num_operands");
+      CHECK(i.operands[0].is_register(),"ror dst is reg"); CHECK(i.operands[0].reg.reg_id==8,"dst R8D");
+      CHECK(i.operands[1].is_immediate(),"ror count is immediate"); CHECK(i.operands[1].imm.value==1,"count==1"); }
+    { uint8_t c[]={0xD0,0xE0}; Instruction i; Instruction::decode_instruction(c,sizeof(c),i);
+      CHECK(i.mnemonic==Mnemonic::SHL,"SHL"); CHECK(i.operands.size()==2,"shl al,1 has 2 operands");
+      CHECK(i.operands[1].is_immediate() && i.operands[1].imm.value==1,"shl al,1 count==1"); }
     { uint8_t c[]={0x8B,0x45,0xFC}; Instruction i; Instruction::decode_instruction(c,sizeof(c),i);
       CHECK(i.operands[1].is_memory(),"src is mem"); CHECK(i.operands[1].mem.base_reg==5,"base=RBP");
       CHECK(i.operands[1].mem.disp==-4,"disp=-4"); }

@@ -538,14 +538,22 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         m == Mnemonic::SAR || m == Mnemonic::ROL || m == Mnemonic::ROR) && di.desc->has_modrm) {
         VarNode count;
         bool has_imm = false;
-        for (uint8_t i = 0; i < di.desc->num_operands; ++i)
+        bool has_const = false;
+        uint64_t const_count = 0;
+        for (uint8_t i = 0; i < di.desc->num_operands; ++i) {
             if (di.desc->operands[i].addr == AddrMode::Immediate) has_imm = true;
+            if (di.desc->operands[i].addr == AddrMode::Const) {
+                has_const = true;
+                const_count = di.desc->operands[i].fixed_reg;
+            }
+        }
         // Per Intel SDM: shift/rotate count is masked to 5 bits for byte/word/dword
         // operands and 6 bits for qword. Apply that mask before passing it to
         // the IR shift op so semantic-execution and symbolic clients see a count
         // in [0, opsize_bits-1] regardless of how the source was encoded.
         uint8_t cmask = (sz == 8) ? 0x3F : 0x1F;
-        if (has_imm) count = VarNode::constant((uint64_t)di.immediate & cmask, 1);
+        if (has_const) count = VarNode::constant(const_count & cmask, 1);
+        else if (has_imm) count = VarNode::constant((uint64_t)di.immediate & cmask, 1);
         else if (di.desc->opcode == 0xD0 || di.desc->opcode == 0xD1) count = VarNode::constant(1, 1);
         else {
             VarNode raw_cl = VarNode::gpr(1, 1); // CL
@@ -1535,11 +1543,19 @@ static bool lift_exec_switch(Lifted& l, const DecodedInstr& di, uint8_t sz, bool
         // 6 bits (qword) before any further reduction; apply that mask so
         // symbolic clients can't accidentally observe an oversized rotate.
         bool has_imm = false;
-        for (uint8_t i = 0; i < di.desc->num_operands; ++i)
+        bool has_const = false;
+        uint64_t const_count = 0;
+        for (uint8_t i = 0; i < di.desc->num_operands; ++i) {
             if (di.desc->operands[i].addr == AddrMode::Immediate) has_imm = true;
+            if (di.desc->operands[i].addr == AddrMode::Const) {
+                has_const = true;
+                const_count = di.desc->operands[i].fixed_reg;
+            }
+        }
         uint8_t cmask = (sz == 8) ? 0x3F : 0x1F;
         VarNode count;
-        if (has_imm) count = VarNode::constant((uint64_t)di.immediate & cmask, 1);
+        if (has_const) count = VarNode::constant(const_count & cmask, 1);
+        else if (has_imm) count = VarNode::constant((uint64_t)di.immediate & cmask, 1);
         else if (di.desc->opcode == 0xD0 || di.desc->opcode == 0xD1) count = VarNode::constant(1, 1);
         else {
             VarNode raw_cl = VarNode::gpr(1, 1);

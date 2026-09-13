@@ -125,6 +125,10 @@ Instruction Instruction::from_decoded(const DecodedInstr& di, const uint8_t* cod
             instr.operands.push_back(Operand::make_reg(gpr_class(sz_bits), id, sz_bits));
             break;
         }
+        case AddrMode::Const:
+            instr.operands.push_back(Operand::make_imm((int64_t)od.fixed_reg, 1));
+            break;
+
         case AddrMode::Fixed: {
             uint8_t id = od.fixed_reg;
             if (id == 0xFF) id = 0;

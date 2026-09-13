@@ -970,17 +970,22 @@ inline uint8_t reg_op_id(const DecodedInstr& di, size_t k) {
     }
 }
 
-/// True if operand `k` is an immediate.
+/// True if operand `k` is an immediate — either one encoded in the instruction
+/// stream (AddrMode::Immediate) or one implied by the opcode (AddrMode::Const,
+/// e.g. the `1` of `shl eax, 1`).
 inline bool is_imm_op(const DecodedInstr& di, size_t k) {
     if (!di.desc || k >= di.desc->num_operands) return false;
-    return di.desc->operands[k].addr == AddrMode::Immediate;
+    AddrMode a = di.desc->operands[k].addr;
+    return a == AddrMode::Immediate || a == AddrMode::Const;
 }
 
-/// Read the immediate value (di.immediate). Returns 0 if no operand is an immediate.
+/// Read the immediate value. Returns `di.immediate` for an encoded immediate and
+/// the literal for an opcode-implied constant. Returns 0 if there is no immediate.
 inline int64_t imm_value(const DecodedInstr& di) {
     if (!di.desc) return 0;
     for (uint8_t k = 0; k < di.desc->num_operands; ++k) {
         if (di.desc->operands[k].addr == AddrMode::Immediate) return di.immediate;
+        if (di.desc->operands[k].addr == AddrMode::Const) return di.desc->operands[k].fixed_reg;
     }
     return 0;
 }

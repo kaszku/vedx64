@@ -78,6 +78,32 @@ int main() {
     }
 
     {
+        uint8_t c[] = {0x48, 0x87, 0xE9}; // xchg rcx, rbp
+        DecodedInstr di; decode(c, sizeof(c), di);
+        const Semantics* s = get_semantics(di);
+        CHECK(s && is_operand_read(*s, 0) && is_operand_written(*s, 0), "XCHG r/m op0 is ReadWrite");
+        CHECK(s && is_operand_read(*s, 1) && is_operand_written(*s, 1), "XCHG r/m op1 is ReadWrite");
+    }
+    {
+        uint8_t c[] = {0x48, 0x87, 0x03}; // xchg rax, [rbx]
+        DecodedInstr di; decode(c, sizeof(c), di);
+        const Semantics* s = get_semantics(di);
+        CHECK(s && s->operand_access[0] == Access::ReadWrite && s->operand_access[1] == Access::ReadWrite, "XCHG mem both ReadWrite");
+    }
+    {
+        uint8_t c[] = {0x91}; // xchg ecx, eax (opcode-reg form)
+        DecodedInstr di; decode(c, sizeof(c), di);
+        const Semantics* s = get_semantics(di);
+        CHECK(s && s->operand_access[0] == Access::ReadWrite && s->operand_access[1] == Access::ReadWrite, "XCHG opcode-reg both ReadWrite");
+    }
+    {
+        uint8_t c[] = {0x0F, 0xC9}; // bswap ecx
+        DecodedInstr di; decode(c, sizeof(c), di);
+        const Semantics* s = get_semantics(di);
+        CHECK(s && s->operand_access[0] == Access::ReadWrite, "BSWAP operand is ReadWrite");
+    }
+
+    {
         uint8_t c[] = {0x0F, 0x30}; // wrmsr
         DecodedInstr di; decode(c, sizeof(c), di);
         const Semantics* s = get_semantics(di);
